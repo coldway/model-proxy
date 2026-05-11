@@ -1,0 +1,342 @@
+providers:
+  google:
+    name: Google AI Studio
+    enabled: true
+    priority: 1
+    url: https://aistudio.google.com/
+    description: Google 提供的免费 Gemini 系列模型
+    api_key_guide: https://aistudio.google.com/apikey
+    models:
+    - id: gemini-2.5-pro
+      name: Gemini 2.5 Pro
+      description: 最强推理能力
+      default_rpd: 25
+      default_rpm: 5
+      category: 推理
+      enabled: true
+      priority: 1
+    - id: gemini-2.5-flash
+      name: Gemini 2.5 Flash
+      description: 平衡之选，速度与质量兼顾
+      default_rpd: 500
+      default_rpm: 10
+      category: 通用
+      enabled: true
+      priority: 2
+    - id: gemini-2.0-flash
+      name: Gemini 2.0 Flash
+      description: 速度最快的 Gemini 模型
+      default_rpd: 1500
+      default_rpm: 15
+      category: 快速
+      enabled: true
+      priority: 3
+    - id: gemma-4-27b
+      name: Gemma 4 27B
+      description: 开源 Gemma 系列大模型
+      default_rpd: 1500
+      default_rpm: 15
+      category: 开源
+      enabled: true
+      priority: 4
+    - id: gemini-2.0-flash-lite
+      name: Gemini 2.0 Flash Lite
+      description: 轻量版 Flash，适合高频调用
+      default_rpd: 1500
+      default_rpm: 30
+      category: 快速
+    - id: gemini-1.5-flash
+      name: Gemini 1.5 Flash
+      description: 上一代 Flash 模型，仍可免费使用
+      default_rpd: 1500
+      default_rpm: 15
+      category: 通用
+  groq:
+    name: Groq
+    enabled: false
+    priority: 2
+    url: https://console.groq.com/
+    description: Groq 提供的高速推理服务
+    api_key_guide: https://console.groq.com/keys
+    models:
+    - id: llama-3.3-70b-versatile
+      name: Llama 3.3 70B Versatile
+      description: Meta 最新 Llama 3.3 70B 通用模型
+      default_rpd: 14400
+      default_rpm: 30
+      category: 通用
+    - id: llama-3.1-8b-instant
+      name: Llama 3.1 8B Instant
+      description: 轻量快速的 8B 模型
+      default_rpd: 14400
+      default_rpm: 30
+      category: 快速
+    - id: llama-3.1-70b-versatile
+      name: Llama 3.1 70B Versatile
+      description: Llama 3.1 70B 通用版本
+      default_rpd: 14400
+      default_rpm: 30
+      category: 通用
+    - id: mixtral-8x7b-32768
+      name: Mixtral 8x7B
+      description: Mistral MoE 模型，32K 上下文
+      default_rpd: 14400
+      default_rpm: 30
+      category: 通用
+    - id: gemma2-9b-it
+      name: Gemma 2 9B IT
+      description: Google Gemma 2 指令调优版
+      default_rpd: 14400
+      default_rpm: 30
+      category: 通用
+  cerebras:
+    name: Cerebras
+    enabled: false
+    priority: 4
+    url: https://cloud.cerebras.ai/
+    description: Cerebras 提供极速推理（~2000 tokens/s），免费层非常慷慨
+    api_key_guide: https://cloud.cerebras.ai/ 注册后在 Dashboard 获取 API Key，兼容 OpenAI
+      SDK
+    models:
+    - id: llama-3.3-70b
+      name: Llama 3.3 70B
+      description: Meta Llama 3.3 70B，Cerebras 加速
+      default_rpd: 1000
+      default_rpm: 30
+      category: 通用
+    - id: llama-3.1-8b
+      name: Llama 3.1 8B
+      description: 轻量快速的 8B 模型
+      default_rpd: 1000
+      default_rpm: 30
+      category: 快速
+    - id: llama-3.1-70b
+      name: Llama 3.1 70B
+      description: Llama 3.1 70B 通用版
+      default_rpd: 1000
+      default_rpm: 30
+      category: 通用
+  sambanova:
+    name: SambaNova
+    enabled: false
+    priority: 5
+    url: https://cloud.sambanova.ai/
+    description: SambaNova Cloud 免费推理，速度极快，支持 Llama/DeepSeek 等大模型
+    api_key_guide: https://cloud.sambanova.ai/ 注册后在 API 页面获取 Key，兼容 OpenAI 格式
+    models:
+    - id: Meta-Llama-3.3-70B-Instruct
+      name: Llama 3.3 70B Instruct
+      description: Meta 最新 70B 指令模型
+      default_rpd: 1000
+      default_rpm: 10
+      category: 通用
+    - id: Meta-Llama-3.1-405B-Instruct
+      name: Llama 3.1 405B Instruct
+      description: Meta 最大开源模型 405B
+      default_rpd: 100
+      default_rpm: 5
+      category: 推理
+    - id: Meta-Llama-3.1-8B-Instruct
+      name: Llama 3.1 8B Instruct
+      description: 轻量 8B 模型，速度极快
+      default_rpd: 1000
+      default_rpm: 20
+      category: 快速
+    - id: DeepSeek-R1
+      name: DeepSeek R1
+      description: DeepSeek 推理模型
+      default_rpd: 100
+      default_rpm: 5
+      category: 推理
+    - id: DeepSeek-V3-0324
+      name: DeepSeek V3
+      description: DeepSeek V3 通用模型
+      default_rpd: 500
+      default_rpm: 10
+      category: 通用
+  github:
+    name: GitHub Models
+    enabled: false
+    priority: 3
+    url: https://github.com/marketplace/models
+    description: GitHub 模型市场，使用 GitHub Token 调用
+    api_key_guide: Settings > Developer settings > Personal access tokens
+    models:
+    - id: gpt-4o-mini
+      name: GPT-4o Mini
+      description: OpenAI 轻量模型（通过 GitHub）
+      default_rpd: 50
+      default_rpm: 10
+      category: 通用
+    - id: meta-llama-3.1-405b-instruct
+      name: Meta Llama 3.1 405B
+      description: Meta 最大开源模型
+      default_rpd: 50
+      default_rpm: 10
+      category: 推理
+    - id: meta-llama-3.1-70b-instruct
+      name: Meta Llama 3.1 70B
+      description: Meta 70B 指令调优
+      default_rpd: 50
+      default_rpm: 10
+      category: 通用
+    - id: mistral-large
+      name: Mistral Large
+      description: Mistral AI 旗舰模型
+      default_rpd: 50
+      default_rpm: 10
+      category: 推理
+    - id: cohere-command-r-plus
+      name: Cohere Command R+
+      description: Cohere 增强版 RAG 模型
+      default_rpd: 50
+      default_rpm: 10
+      category: 通用
+    - id: phi-3.5-mini-instruct
+      name: Phi 3.5 Mini
+      description: Microsoft Phi 系列小模型
+      default_rpd: 50
+      default_rpm: 10
+      category: 快速
+  openrouter:
+    name: OpenRouter
+    enabled: false
+    priority: 6
+    url: https://openrouter.ai/
+    description: OpenRouter 聚合平台，部分模型完全免费（标注 :free 后缀）
+    api_key_guide: https://openrouter.ai/keys 注册获取 Key，接口完全兼容 OpenAI
+    models:
+    - id: meta-llama/llama-3.1-8b-instruct:free
+      name: Llama 3.1 8B (Free)
+      description: OpenRouter 免费 Llama 3.1 8B
+      default_rpd: 200
+      default_rpm: 20
+      category: 快速
+    - id: mistralai/mistral-7b-instruct:free
+      name: Mistral 7B (Free)
+      description: OpenRouter 免费 Mistral 7B
+      default_rpd: 200
+      default_rpm: 20
+      category: 快速
+    - id: google/gemma-2-9b-it:free
+      name: Gemma 2 9B (Free)
+      description: OpenRouter 免费 Gemma 2 9B
+      default_rpd: 200
+      default_rpm: 20
+      category: 通用
+    - id: qwen/qwen-2.5-72b-instruct:free
+      name: Qwen 2.5 72B (Free)
+      description: OpenRouter 免费 Qwen 2.5 72B
+      default_rpd: 200
+      default_rpm: 20
+      category: 通用
+  mistral:
+    name: Mistral AI (La Plateforme)
+    enabled: false
+    priority: 7
+    url: https://console.mistral.ai/
+    description: Mistral AI 官方平台，实验接口免费层，支持最新 Mistral 模型
+    api_key_guide: https://console.mistral.ai/api-keys/ 注册后生成 API Key
+    models:
+    - id: mistral-small-latest
+      name: Mistral Small
+      description: 轻量高效模型
+      default_rpd: 500
+      default_rpm: 10
+      category: 快速
+    - id: mistral-medium-latest
+      name: Mistral Medium
+      description: 中等能力模型
+      default_rpd: 200
+      default_rpm: 5
+      category: 通用
+    - id: open-mistral-nemo
+      name: Mistral Nemo (12B)
+      description: 开源 12B 模型，免费可用
+      default_rpd: 500
+      default_rpm: 10
+      category: 通用
+    - id: codestral-latest
+      name: Codestral
+      description: 代码专用模型，免费可用于非商业用途
+      default_rpd: 200
+      default_rpm: 5
+      category: 代码
+  cloudflare:
+    name: Cloudflare Workers AI
+    enabled: false
+    priority: 8
+    url: https://ai.cloudflare.com/
+    description: Cloudflare 提供免费 AI 推理（每日 10,000 neurons），无需信用卡
+    api_key_guide: 在 Cloudflare Dashboard > AI > Workers AI 中获取 Account ID 和 API Token
+    models:
+    - id: '@cf/meta/llama-3.1-8b-instruct'
+      name: Llama 3.1 8B (CF)
+      description: Cloudflare 上的 Llama 3.1 8B
+      default_rpd: 10000
+      default_rpm: 60
+      category: 快速
+    - id: '@cf/mistral/mistral-7b-instruct-v0.2-lora'
+      name: Mistral 7B (CF)
+      description: Cloudflare 上的 Mistral 7B
+      default_rpd: 10000
+      default_rpm: 60
+      category: 快速
+    - id: '@cf/google/gemma-7b-it-lora'
+      name: Gemma 7B (CF)
+      description: Cloudflare 上的 Gemma 7B
+      default_rpd: 10000
+      default_rpm: 60
+      category: 通用
+    - id: '@cf/qwen/qwen1.5-14b-chat-awq'
+      name: Qwen 1.5 14B (CF)
+      description: Cloudflare 上的 Qwen 1.5 14B
+      default_rpd: 10000
+      default_rpm: 60
+      category: 通用
+  huggingface:
+    name: HuggingFace Inference API
+    enabled: false
+    priority: 9
+    url: https://huggingface.co/inference-api
+    description: HuggingFace 免费推理 API，支持数千个开源模型，有速率限制但无需付费
+    api_key_guide: https://huggingface.co/settings/tokens 创建 Access Token
+    models:
+    - id: meta-llama/Llama-3.1-8B-Instruct
+      name: Llama 3.1 8B Instruct (HF)
+      description: HuggingFace 托管的 Llama 3.1 8B
+      default_rpd: 1000
+      default_rpm: 10
+      category: 通用
+    - id: mistralai/Mistral-7B-Instruct-v0.3
+      name: Mistral 7B v0.3 (HF)
+      description: HuggingFace 托管的 Mistral 7B
+      default_rpd: 1000
+      default_rpm: 10
+      category: 通用
+    - id: Qwen/Qwen2.5-72B-Instruct
+      name: Qwen 2.5 72B (HF)
+      description: 通过 HuggingFace 调用 Qwen 2.5 72B
+      default_rpd: 500
+      default_rpm: 5
+      category: 推理
+    - id: google/gemma-2-27b-it
+      name: Gemma 2 27B (HF)
+      description: HuggingFace 托管的 Gemma 2 27B
+      default_rpd: 1000
+      default_rpm: 10
+      category: 通用
+  cursor:
+    name: Cursor Agent CLI
+    enabled: false
+    priority: 10
+    url: https://www.cursor.com/
+    description: 通过 Cursor CLI 调用模型能力
+    api_key_guide: 安装 Cursor 并登录即可使用
+    models:
+    - id: cursor-agent
+      name: Cursor Agent
+      description: Cursor IDE 内置 Agent 能力
+      default_rpd: 0
+      default_rpm: 0
+      category: Agent

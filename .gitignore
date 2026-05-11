@@ -1,0 +1,47 @@
+# 虚拟环境
+.venv/
+venv/
+env/
+
+# 本地配置（含 API Key，严禁提交）
+conf/config.yaml
+conf/config.yml
+config.yaml
+config.yml
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 日志
+logs/
+*.log
+
+# UI 构建产物
+ui/node_modules/
+ui/dist/
+ui/.next/
+
+# 数据库（本地存储）
+*.db
+*.sqlite3
+data/

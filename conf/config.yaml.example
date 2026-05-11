@@ -1,0 +1,35 @@
+# Model Proxy 运行配置
+# 复制此文件为 conf/config.yaml 并填入你的 API Key
+# 注意：conf/config.yaml 已被 .gitignore 排除，不会提交到仓库
+#
+# 此文件仅保存 API Key 和服务设置
+# 厂商启用状态、优先级、模型列表等均在 conf/providers_catalog.yaml 中管理
+
+providers:
+  google:
+    api_key: "YOUR_GOOGLE_API_KEY"
+  groq:
+    api_key: ""
+  cerebras:
+    api_key: ""
+  sambanova:
+    api_key: ""
+  github:
+    api_key: ""
+  openrouter:
+    api_key: ""
+  mistral:
+    api_key: ""
+  cloudflare:
+    api_key: ""  # 格式: "account_id:api_token"
+  huggingface:
+    api_key: ""
+  cursor:
+    api_key: ""  # Cursor 无需 API Key，留空即可
+
+settings:
+  host: "127.0.0.1"
+  port: 8000
+  default_provider: "google"
+  auto_switch: true
+  log_level: "info"

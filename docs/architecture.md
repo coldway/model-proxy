@@ -1,0 +1,107 @@
+# 项目架构
+
+## 整体设计
+
+Model Proxy 采用分层架构，将推理请求的接收、调度、执行三个职责分离。
+
+```
+┌─────────────────────────────────┐
+│          FastAPI 应用层          │
+│  routes.py  │  ui.py  │ streaming│
+├──────────┬──────────────────────┤
+│ 配置层   │      调度层           │
+│ manager  │  dispatcher          │
+│ catalog  │  rate_limiter         │
+│          │  history              │
+├──────────┴──────────────────────┤
+│         厂商适配层               │
+│  google │ groq │ github │ ...   │
+│  openai_compat │ cloudflare     │
+└─────────────────────────────────┘
+```
+
+## 核心模块
+
+| 模块 | 路径 | 职责 |
+|------|------|------|
+| **API 层** | `src/api/` | 接收 HTTP 请求，返回推理结果和管理操作 |
+| **配置层** | `src/config/` | 管理 API Key（config.yaml）和厂商目录（providers_catalog.yaml） |
+| **调度层** | `src/scheduler/` | 模型选择、速率限制、失败切换、请求历史 |
+| **厂商层** | `src/providers/` | 各厂商 API 的具体适配实现 |
+| **数据模型** | `src/models/` | Pydantic 数据结构定义 |
+
+## 请求流程
+
+```
+客户端请求 POST /v1/chat/completions
+    │
+    ▼
+routes.py: 接收请求，校验参数
+    │
+    ▼
+dispatcher.py: 选择模型
+    ├─ model="auto" → 按厂商优先级+模型优先级遍历
+    └─ model="具体名称" → 直接路由
+    │
+    ▼
+rate_limiter.py: 检查 RPD/RPM 限制
+    ├─ 通过 → 继续
+    └─ 受限 → 跳过，尝试下一模型
+    │
+    ▼
+providers/*.py: 调用厂商 API
+    ├─ 成功 → 返回结果，记录历史
+    └─ 失败 → 判断是否额度用尽，自动切换
+    │
+    ▼
+history.py: 记录请求元数据（不含消息内容）
+```
+
+## 双配置文件架构
+
+项目将敏感信息与公开配置分离为两个文件：
+
+| 文件 | 内容 | Git 策略 |
+|------|------|---------|
+| `conf/config.yaml` | API Key + 服务设置 | `.gitignore` 排除 |
+| `conf/providers_catalog.yaml` | 厂商目录、模型列表、启用状态、优先级 | 安全提交 |
+
+`ConfigManager` 负责读取 API Key，`CatalogManager` 管理厂商/模型的运行时状态。两者通过引用关联，对外提供统一的配置视图。
+
+## 动态配置热加载
+
+所有配置变更通过 API / UI 操作后即时生效，无需重启服务：
+
+```
+用户在 UI 保存 API Key
+    │
+    ▼
+routes.py: POST /api/config/apikey
+    ├─ ConfigManager: 保存 Key 到 config.yaml
+    └─ Dispatcher: 用 provider_factories 创建 Provider 实例并注册
+    │
+    ▼
+下一次推理请求即可使用新注册的厂商
+```
+
+支持动态加载的配置项：
+
+| 操作 | 动态生效机制 |
+|------|-------------|
+| API Key | routes 层持有 provider_factories，保存后即时创建并注册 Provider |
+| 厂商启用/禁用 | toggle 时调用 Dispatcher.register/unregister_provider |
+| 模型启用/禁用/优先级 | CatalogManager 即时更新，调度时实时读取 |
+| log_level | 直接调用 logging.getLogger().setLevel() |
+| default_provider / auto_switch | 直接更新 AppSettings 内存对象 |
+| host / port | 需重启服务（网络监听地址无法热切换） |
+
+## 技术栈
+
+| 组件 | 技术 | 用途 |
+|------|------|------|
+| Web 框架 | FastAPI | 异步 API 服务 |
+| 服务器 | Uvicorn | ASGI 服务器，支持热重载 |
+| HTTP 客户端 | HTTPX | 异步调用厂商 API |
+| 数据验证 | Pydantic v2 | 请求/响应/配置数据模型 |
+| 配置序列化 | PyYAML | YAML 文件读写 |
+| UI | 内嵌 HTML/JS | 无需前端构建，单文件嵌入 |

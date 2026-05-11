@@ -446,7 +446,7 @@ UI_HTML = """<!DOCTYPE html>
                     <h3>模型厂商</h3>
                     <span style="font-size:0.8rem;color:var(--text-secondary)">点击卡片管理厂商模型</span>
                 </div>
-                <div id="providers-grid" class="stats-grid" style="grid-template-columns: repeat(auto-fill, minmax(270px, 1fr))"
+                <div id="providers-grid" class="stats-grid" style="grid-template-columns: repeat(auto-fill, minmax(270px, 1fr))">
                 </div>
             </div>
         </div>

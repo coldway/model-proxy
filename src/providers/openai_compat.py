@@ -3,9 +3,11 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 import uuid
+from typing import AsyncIterator
 
 import httpx
 
@@ -38,25 +40,30 @@ class OpenAICompatibleProvider(BaseProvider):
         self._provider_name = provider_name
         self._client = httpx.AsyncClient(timeout=120.0)
 
-    async def chat_completion(
-        self, model: str, request: ChatCompletionRequest
-    ) -> ChatCompletionResponse:
-        url = f"{self._base_url}/chat/completions"
-        headers = {
+    def _build_headers(self) -> dict:
+        return {
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
         }
 
+    def _build_payload(self, model: str, request: ChatCompletionRequest, stream: bool = False) -> dict:
         payload: dict = {
             "model": model,
             "messages": [{"role": m.role, "content": m.content} for m in request.messages],
             "temperature": request.temperature,
-            "stream": False,
+            "stream": stream,
         }
         if request.max_tokens:
             payload["max_tokens"] = request.max_tokens
+        return payload
 
-        resp = await self._client.post(url, headers=headers, json=payload)
+    async def chat_completion(
+        self, model: str, request: ChatCompletionRequest
+    ) -> ChatCompletionResponse:
+        url = f"{self._base_url}/chat/completions"
+        resp = await self._client.post(
+            url, headers=self._build_headers(), json=self._build_payload(model, request),
+        )
         resp.raise_for_status()
         data = resp.json()
 
@@ -83,6 +90,33 @@ class OpenAICompatibleProvider(BaseProvider):
                 total_tokens=usage.get("total_tokens", 0),
             ),
         )
+
+    async def stream_chat_completion(
+        self, model: str, request: ChatCompletionRequest
+    ) -> AsyncIterator[str]:
+        url = f"{self._base_url}/chat/completions"
+        async with self._client.stream(
+            "POST", url,
+            headers=self._build_headers(),
+            json=self._build_payload(model, request, stream=True),
+        ) as resp:
+            resp.raise_for_status()
+            async for line in resp.aiter_lines():
+                if not line.startswith("data: "):
+                    continue
+                payload = line[6:]
+                if payload.strip() == "[DONE]":
+                    break
+                try:
+                    chunk = json.loads(payload)
+                    choices = chunk.get("choices", [])
+                    if not choices:
+                        continue
+                    text = choices[0].get("delta", {}).get("content", "")
+                    if text:
+                        yield text
+                except (json.JSONDecodeError, IndexError, KeyError):
+                    continue
 
     async def list_models(self) -> list[str]:
         url = f"{self._base_url}/models"

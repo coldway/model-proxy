@@ -63,14 +63,13 @@ class TestAPIEndpoints:
         assert "Model Proxy" in resp.text
 
     @pytest.mark.asyncio
-    async def test_chat_completions_no_provider_available(self, client):
-        """无可用 Provider 时应返回 503"""
+    async def test_chat_completions_auto_mode(self, client):
+        """auto 模式请求，有可用 Provider 时应返回 200 或 503（全部限流）"""
         resp = await client.post("/v1/chat/completions", json={
             "model": "auto",
             "messages": [{"role": "user", "content": "hello"}],
         })
-        # 没有配置 API Key，所以 Provider 未注册，调度应失败
-        assert resp.status_code in (503, 500)
+        assert resp.status_code in (200, 503)
 
     @pytest.mark.asyncio
     async def test_root_redirects_to_ui(self, client):

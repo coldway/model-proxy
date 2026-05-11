@@ -7,9 +7,9 @@
 - **统一推理接口**：兼容 OpenAI `/v1/chat/completions` 格式，支持自主选择模型或由系统自动调度
 - **10 家免费厂商**：Google AI Studio、Groq、GitHub Models、Cursor CLI、Cerebras、SambaNova、OpenRouter、Cloudflare、HuggingFace、Mistral AI
 - **智能调度**：基于厂商优先级 + 模型优先级 + 滑动窗口限速的多级调度，超限/失败自动切换
+- **流式输出**：所有厂商均支持 SSE 流式响应，兼容 OpenAI SDK `stream=True`
 - **Web 管理面板**：内嵌单页 UI，无需额外前端构建，提供使用量监控、模型管理、API Key 配置、问答聊天等功能
 - **模型目录**：`conf/providers_catalog.yaml` 记录各厂商可用模型和默认限速，可安全提交 Git
-- **流式输出**：支持 SSE 流式响应，兼容 OpenAI SDK `stream=True`
 - **请求历史**：记录每次推理的元数据（延迟、Token 数、成功/失败），持久化到 JSONL 文件
 - **动态配置**：API Key、厂商启用/禁用、优先级、运行时设置等所有配置变更即时生效，无需重启服务
 
@@ -37,7 +37,7 @@
 | Gemini 2.5 Pro | 25 | 5 | 最强推理 |
 | Gemini 2.5 Flash | 500 | 10 | 平衡之选 |
 | Gemini 2.0 Flash | 1,500 | 15 | 速度快 |
-| Gemma 4 27B | 1,500 | 15 | 开源大模型 |
+| Gemma 4 26B | 1,500 | 15 | 开源大模型 |
 
 ## 跨平台支持
 
@@ -60,7 +60,7 @@
 
 ```bash
 # 克隆项目
-git clone <repo-url>
+git clone https://github.com/coldway/model-proxy.git
 cd model-proxy
 
 # 创建虚拟环境
@@ -195,13 +195,37 @@ Content-Type: application/json
 POST /v1/chat/completions
 
 {
-  "model": "auto",
+  "model": "gemini-2.5-flash",
   "messages": [{"role": "user", "content": "Hello"}],
   "stream": true
 }
 ```
 
 响应为 SSE（Server-Sent Events）格式，兼容 `openai.ChatCompletion.create(stream=True)`。
+
+```python
+# Python OpenAI SDK 示例
+from openai import OpenAI
+
+client = OpenAI(base_url="http://127.0.0.1:8000/v1", api_key="unused")
+
+# 非流式
+response = client.chat.completions.create(
+    model="auto",
+    messages=[{"role": "user", "content": "你好"}],
+)
+print(response.choices[0].message.content)
+
+# 流式
+stream = client.chat.completions.create(
+    model="gemini-2.5-flash",
+    messages=[{"role": "user", "content": "你好"}],
+    stream=True,
+)
+for chunk in stream:
+    if chunk.choices[0].delta.content:
+        print(chunk.choices[0].delta.content, end="")
+```
 
 ### 其他接口
 
@@ -210,12 +234,12 @@ POST /v1/chat/completions
 | `/v1/models` | GET | 列出所有已配置模型 |
 | `/v1/usage` | GET | 各模型实时使用量和剩余额度 |
 | `/api/config` | GET | 获取当前配置（隐藏 API Key） |
-| `/api/config/apikey` | POST | 更新厂商 API Key |
+| `/api/config/apikey` | POST | 更新厂商 API Key（保存后自动注册 Provider） |
 | `/api/config/model/toggle` | POST | 启用/禁用模型 |
 | `/api/config/model/priority` | POST | 更新模型优先级 |
 | `/api/config/model/add` | POST | 添加新模型到运行配置 |
 | `/api/config/model/delete` | POST | 从运行配置删除模型 |
-| `/api/provider/toggle` | POST | 启用/禁用厂商 |
+| `/api/provider/toggle` | POST | 启用/禁用厂商（动态注册/注销） |
 | `/api/provider/priority` | POST | 更新厂商优先级 |
 | `/api/provider/reorder` | POST | 批量重排厂商优先级（拖拽排序） |
 | `/api/settings` | POST | 动态更新运行时设置（log_level/default_provider/auto_switch） |
@@ -237,7 +261,7 @@ POST /v1/chat/completions
 | **模型管理** | 厂商卡片式布局，点击厂商进入模型管理弹窗 |
 | **拖拽排序** | 拖拽厂商卡片直接调整优先级顺序，自动保存 |
 | **厂商模型弹窗** | 查看/启用/停用模型，调整优先级，搜索目录模型，拉取厂商远程模型，手动添加自定义模型 |
-| **接入指南** | 每个厂商卡片右上角 `?` 图标，点击查看接入说明 |
+| **接入指南** | 每个厂商卡片 `?` 图标，点击查看接入说明 |
 | **问答聊天** | 内置聊天界面，支持选择模型或使用 auto 模式直接对话 |
 
 ## 运行测试
@@ -281,16 +305,16 @@ model-proxy/
 │   │   ├── streaming.py          # SSE 流式输出
 │   │   └── ui.py                 # 内嵌 Web 管理面板
 │   ├── providers/
-│   │   ├── base.py               # 厂商抽象基类
-│   │   ├── google.py             # Google AI Studio
-│   │   ├── groq.py               # Groq
-│   │   ├── github.py             # GitHub Models
+│   │   ├── base.py               # 厂商抽象基类（含流式接口）
+│   │   ├── google.py             # Google AI Studio（支持流式）
+│   │   ├── groq.py               # Groq（支持流式）
+│   │   ├── github.py             # GitHub Models（支持流式）
 │   │   ├── cursor.py             # Cursor Agent CLI
-│   │   ├── openai_compat.py      # OpenAI 兼容通用适配器（Cerebras/SambaNova/OpenRouter/Mistral）
+│   │   ├── openai_compat.py      # OpenAI 兼容通用适配器（支持流式）
 │   │   ├── cloudflare.py         # Cloudflare Workers AI
 │   │   └── huggingface.py        # HuggingFace Inference API
 │   ├── scheduler/
-│   │   ├── dispatcher.py         # 模型调度器（优先级 + 自动切换）
+│   │   ├── dispatcher.py         # 模型调度器（优先级 + 自动切换 + 流式调度）
 │   │   ├── rate_limiter.py       # 滑动窗口限速器
 │   │   └── history.py            # 请求历史记录与持久化
 │   ├── config/
@@ -326,7 +350,7 @@ model-proxy/
 | 文档 | 说明 |
 |------|------|
 | [架构概览](docs/architecture.md) | 分层架构、请求流程、技术栈 |
-| [API 接口参考](docs/api-reference.md) | 全部 17+ 接口的请求/响应详细说明 |
+| [API 接口参考](docs/api-reference.md) | 全部 19 个接口的请求/响应详细说明 |
 | [厂商适配器](docs/providers.md) | BaseProvider 接口、各厂商实现、扩展方法 |
 | [配置系统](docs/config.md) | 双配置文件架构、ConfigManager / CatalogManager |
 | [调度器与限速器](docs/scheduler.md) | 调度逻辑、滑动窗口限速、请求历史 |

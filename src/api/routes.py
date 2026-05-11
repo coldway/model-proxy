@@ -55,6 +55,9 @@ async def chat_completions(request: ChatCompletionRequest):
     if not enabled_models:
         raise HTTPException(status_code=503, detail="没有可用模型，请检查配置")
 
+    if request.stream:
+        return await _handle_stream(request, enabled_models)
+
     start_time = time.time()
     try:
         result = await _dispatcher.dispatch(request, enabled_models)
@@ -82,6 +85,31 @@ async def chat_completions(request: ChatCompletionRequest):
         _record_failure(start_time, str(e))
         logger.error(f"推理请求异常: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"内部错误: {e}")
+
+
+async def _handle_stream(request: ChatCompletionRequest, enabled_models):
+    """处理流式请求，返回 SSE StreamingResponse"""
+    from src.api.streaming import create_stream_response
+    from src.scheduler.dispatcher import AllModelsUnavailable, ModelNotFound, RateLimitExceeded
+
+    try:
+        provider_name, model_name, content_iter = await _dispatcher.dispatch_stream(request, enabled_models)
+    except RateLimitExceeded as e:
+        raise HTTPException(status_code=429, detail=str(e))
+    except ModelNotFound as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except AllModelsUnavailable as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except Exception as e:
+        logger.error(f"流式请求异常: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"内部错误: {e}")
+
+    if _history:
+        _history.record(
+            provider=provider_name, model=model_name,
+            success=True, latency_ms=0,
+        )
+    return create_stream_response(model_name, content_iter)
 
 
 def _record_failure(start_time: float, error: str) -> None:

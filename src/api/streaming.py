@@ -28,24 +28,33 @@ def create_stream_response(model: str, content_iterator: AsyncIterator[str]) -> 
 
 async def _stream_generator(model: str, content_iterator: AsyncIterator[str]) -> AsyncIterator[str]:
     """生成 SSE 格式的流式数据"""
+    import logging
+    logger = logging.getLogger(__name__)
     chat_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
     created = int(time.time())
 
-    async for chunk in content_iterator:
-        data = {
-            "id": chat_id,
-            "object": "chat.completion.chunk",
-            "created": created,
-            "model": model,
-            "choices": [{
-                "index": 0,
-                "delta": {"content": chunk},
-                "finish_reason": None,
-            }],
+    try:
+        async for chunk in content_iterator:
+            data = {
+                "id": chat_id,
+                "object": "chat.completion.chunk",
+                "created": created,
+                "model": model,
+                "choices": [{
+                    "index": 0,
+                    "delta": {"content": chunk},
+                    "finish_reason": None,
+                }],
+            }
+            yield f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+    except Exception as e:
+        logger.error(f"流式生成异常: {e}")
+        error_data = {
+            "id": chat_id, "object": "chat.completion.chunk", "created": created,
+            "model": model, "error": {"message": str(e)},
         }
-        yield f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+        yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
 
-    # 发送结束标记
     end_data = {
         "id": chat_id,
         "object": "chat.completion.chunk",

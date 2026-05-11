@@ -31,29 +31,29 @@ providers:
       category: 快速
       enabled: true
       priority: 3
-    - id: gemma-4-27b
-      name: Gemma 4 27B
-      description: 开源 Gemma 系列大模型
+    - id: gemma-4-26b-a4b-it
+      name: Gemma 4 26B
+      description: 开源 Gemma 4 系列大模型
       default_rpd: 1500
       default_rpm: 15
       category: 开源
       enabled: true
       priority: 4
+    - id: gemma-4-31b-it
+      name: Gemma 4 31B
+      description: Gemma 4 系列 31B 模型
+      default_rpd: 1500
+      default_rpm: 15
+      category: 开源
     - id: gemini-2.0-flash-lite
       name: Gemini 2.0 Flash Lite
       description: 轻量版 Flash，适合高频调用
       default_rpd: 1500
       default_rpm: 30
       category: 快速
-    - id: gemini-1.5-flash
-      name: Gemini 1.5 Flash
-      description: 上一代 Flash 模型，仍可免费使用
-      default_rpd: 1500
-      default_rpm: 15
-      category: 通用
   groq:
     name: Groq
-    enabled: false
+    enabled: true
     priority: 2
     url: https://console.groq.com/
     description: Groq 提供的高速推理服务
@@ -65,12 +65,16 @@ providers:
       default_rpd: 14400
       default_rpm: 30
       category: 通用
+      enabled: true
+      priority: 5
     - id: llama-3.1-8b-instant
       name: Llama 3.1 8B Instant
       description: 轻量快速的 8B 模型
       default_rpd: 14400
       default_rpm: 30
       category: 快速
+      enabled: true
+      priority: 5
     - id: llama-3.1-70b-versatile
       name: Llama 3.1 70B Versatile
       description: Llama 3.1 70B 通用版本
@@ -156,7 +160,7 @@ providers:
       category: 通用
   github:
     name: GitHub Models
-    enabled: false
+    enabled: true
     priority: 3
     url: https://github.com/marketplace/models
     description: GitHub 模型市场，使用 GitHub Token 调用
@@ -168,6 +172,8 @@ providers:
       default_rpd: 50
       default_rpm: 10
       category: 通用
+      enabled: true
+      priority: 6
     - id: meta-llama-3.1-405b-instruct
       name: Meta Llama 3.1 405B
       description: Meta 最大开源模型
@@ -180,6 +186,8 @@ providers:
       default_rpd: 50
       default_rpm: 10
       category: 通用
+      enabled: true
+      priority: 6
     - id: mistral-large
       name: Mistral Large
       description: Mistral AI 旗舰模型

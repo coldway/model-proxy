@@ -3,9 +3,11 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 import uuid
+from typing import AsyncIterator
 
 import httpx
 
@@ -30,14 +32,9 @@ class GoogleProvider(BaseProvider):
         super().__init__(api_key)
         self._client = httpx.AsyncClient(timeout=120.0)
 
-    async def chat_completion(
-        self, model: str, request: ChatCompletionRequest
-    ) -> ChatCompletionResponse:
-        url = f"{GOOGLE_API_BASE}/models/{model}:generateContent"
-        params = {"key": self._api_key}
-
+    def _build_payload(self, request: ChatCompletionRequest) -> dict:
         contents = self._convert_messages(request.messages)
-        payload = {
+        payload: dict = {
             "contents": contents,
             "generationConfig": {
                 "temperature": request.temperature,
@@ -45,8 +42,15 @@ class GoogleProvider(BaseProvider):
         }
         if request.max_tokens:
             payload["generationConfig"]["maxOutputTokens"] = request.max_tokens
+        return payload
 
-        resp = await self._client.post(url, params=params, json=payload)
+    async def chat_completion(
+        self, model: str, request: ChatCompletionRequest
+    ) -> ChatCompletionResponse:
+        url = f"{GOOGLE_API_BASE}/models/{model}:generateContent"
+        params = {"key": self._api_key}
+
+        resp = await self._client.post(url, params=params, json=self._build_payload(request))
         resp.raise_for_status()
         data = resp.json()
 
@@ -68,6 +72,34 @@ class GoogleProvider(BaseProvider):
                 total_tokens=data.get("usageMetadata", {}).get("totalTokenCount", 0),
             ),
         )
+
+    async def stream_chat_completion(
+        self, model: str, request: ChatCompletionRequest
+    ) -> AsyncIterator[str]:
+        url = f"{GOOGLE_API_BASE}/models/{model}:streamGenerateContent"
+        params = {"key": self._api_key, "alt": "sse"}
+
+        async with self._client.stream(
+            "POST", url, params=params, json=self._build_payload(request),
+        ) as resp:
+            if resp.status_code != 200:
+                await resp.aread()
+                logger.error(f"Google 流式请求失败 ({resp.status_code}): {resp.text[:200]}")
+                raise Exception(f"Google API {resp.status_code}")
+            async for line in resp.aiter_lines():
+                if not line.startswith("data: "):
+                    continue
+                try:
+                    chunk = json.loads(line[6:])
+                    candidates = chunk.get("candidates", [])
+                    if not candidates:
+                        continue
+                    parts = candidates[0].get("content", {}).get("parts", [])
+                    text = "".join(p.get("text", "") for p in parts)
+                    if text:
+                        yield text
+                except (json.JSONDecodeError, IndexError, KeyError):
+                    continue
 
     async def list_models(self) -> list[str]:
         url = f"{GOOGLE_API_BASE}/models"

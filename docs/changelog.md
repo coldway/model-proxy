@@ -4,6 +4,26 @@
 
 ---
 
+## [0.3.0] - 2026-05-11
+
+### 新增
+
+- **SSE 流式输出**：所有主要厂商（Google/Groq/GitHub/OpenAI 兼容）实现原生流式输出
+  - `BaseProvider` 新增 `stream_chat_completion` 异步生成器接口
+  - `Dispatcher` 新增 `dispatch_stream` 流式调度方法
+  - `POST /v1/chat/completions` 端点集成 `stream=true` 支持
+  - 流式解析器增加空 choices 列表容错处理
+- **429 限流识别**：厂商返回 HTTP 429 时返回明确的 429 错误（而非通用 500），提示建议使用 auto 模式
+  - auto 模式下对 RateLimitExceeded 单独处理，静默跳过并切换下一模型
+
+### 修复
+
+- 修复 `providers-grid` HTML 开始标签缺少闭合 `>` 导致 UI 面板渲染异常
+- 修正 Gemma 4 模型 ID：`gemma-4-27b` → `gemma-4-26b-a4b-it`（匹配 Google API 实际命名）
+- 新增 `gemma-4-31b-it` 到 Google 模型目录
+
+---
+
 ## [0.2.0] - 2026-05-11
 
 ### 新增

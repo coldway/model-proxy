@@ -103,6 +103,33 @@ cursor:
 
 ---
 
+## 厂商与模型
+
+### Q: 指定某个 Google 模型时返回 429 错误
+
+Google 免费额度有严格的每日/每分钟限制：
+
+| 模型 | RPD（次/天） | RPM（次/分钟） |
+|------|:---:|:---:|
+| Gemini 2.5 Pro | 25 | 5 |
+| Gemini 2.5 Flash | 500 | 10 |
+| Gemini 2.0 Flash | 1,500 | 15 |
+| Gemma 4 26B | 1,500 | 15 |
+
+当额度用尽时 Google API 返回 429 Too Many Requests。系统会返回明确提示并建议使用 auto 模式。auto 模式下会自动跳过限流模型，切换到 Groq（14400 次/天）等更宽松的厂商。额度每日 UTC 00:00 重置。
+
+### Q: 模型返回 404 Not Found
+
+模型 ID 必须与厂商 API 中的实际名称完全匹配。例如 Google 的 Gemma 4 模型 ID 是 `gemma-4-26b-a4b-it` 而非 `gemma-4-27b`。可通过 UI 中的"拉取厂商全部"功能获取最新的准确模型列表。
+
+### Q: 建议如何选择模型？
+
+- **日常使用**：推荐 auto 模式，系统按优先级自动调度，限流时自动切换
+- **高频调用**：选择 Groq 的 `llama-3.3-70b-versatile`（14400 RPD，最稳定）
+- **推理质量优先**：Gemini 2.5 Pro（25 RPD，最强但额度最少）
+
+---
+
 ## 调度与限速
 
 ### Q: `model="auto"` 时模型选择的逻辑是什么？
@@ -161,6 +188,13 @@ UI 使用 `location.hash` 记忆当前 Tab。确认浏览器 URL 中包含 `#mod
 - 确认请求中设置了 `"stream": true`
 - 如果使用了反向代理（Nginx），需要关闭缓冲：`proxy_buffering off;`
 - 检查客户端是否正确处理 SSE 格式（`data: {...}\n\n`）
+- Google/Groq/GitHub/OpenAI 兼容厂商支持原生流式输出；Cloudflare/HuggingFace/Cursor 使用默认回退（一次性返回完整内容）
+
+### Q: 流式输出中途断开
+
+- 使用 Uvicorn reload 模式时，文件变更会触发进程重启导致流式连接中断
+- 生产环境建议关闭 reload：`uvicorn.run(app, reload=False)`
+- 如果厂商 API 返回非 200 状态码（如 503），流式生成器会捕获异常并在 SSE 事件中返回错误信息
 
 ### Q: 使用 OpenAI Python SDK 如何接入？
 

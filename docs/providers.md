@@ -9,6 +9,7 @@ class BaseProvider(ABC):
     def __init__(self, api_key: str): ...
 
     async def chat_completion(self, model: str, request: ChatCompletionRequest) -> ChatCompletionResponse: ...
+    async def stream_chat_completion(self, model: str, request: ChatCompletionRequest) -> AsyncIterator[str]: ...
     async def list_models(self) -> list[str]: ...
     async def health_check(self) -> bool: ...
 ```
@@ -16,8 +17,21 @@ class BaseProvider(ABC):
 | 方法 | 说明 |
 |------|------|
 | `chat_completion` | 发送聊天补全请求，返回标准化响应 |
+| `stream_chat_completion` | 流式聊天补全，逐块 yield 文本。默认回退到非流式调用 |
 | `list_models` | 列出该厂商支持的远程模型 ID |
 | `health_check` | 健康检查，验证 API Key 有效性 |
+
+### 流式输出实现
+
+所有主要厂商均实现了原生 SSE 流式输出：
+
+| 厂商 | 流式方式 | 说明 |
+|------|----------|------|
+| Google | `streamGenerateContent?alt=sse` | 使用 Gemini 专用流式端点 |
+| Groq / GitHub / OpenAI 兼容 | `stream: true` | 标准 OpenAI SSE 格式 |
+| Cloudflare / HuggingFace / Cursor | 默认回退 | 调用非流式后一次性返回 |
+
+流式解析中对空 `choices` 列表做了容错处理，避免上游返回不完整 chunk 时崩溃。
 
 ## 已实现的适配器
 
@@ -28,7 +42,7 @@ class BaseProvider(ABC):
 | API 格式 | Google Generative AI REST API |
 | Base URL | `https://generativelanguage.googleapis.com/v1beta` |
 | 认证方式 | URL 参数 `?key=API_KEY` |
-| 默认模型 | gemini-2.5-pro, gemini-2.5-flash, gemini-2.0-flash, gemma-4-27b |
+| 默认模型 | gemini-2.5-pro, gemini-2.5-flash, gemini-2.0-flash, gemma-4-26b-a4b-it |
 
 ### 2. Groq (`groq.py`)
 

@@ -38,6 +38,7 @@
 | Gemini 2.5 Flash | 500 | 10 | 平衡之选 |
 | Gemini 2.0 Flash | 1,500 | 15 | 速度快 |
 | Gemma 4 26B | 1,500 | 15 | 开源大模型 |
+| Gemma 4 31B | 1,500 | 15 | 开源大模型（更大参数） |
 
 ## 跨平台支持
 
@@ -350,7 +351,7 @@ model-proxy/
 | 文档 | 说明 |
 |------|------|
 | [架构概览](docs/architecture.md) | 分层架构、请求流程、技术栈 |
-| [API 接口参考](docs/api-reference.md) | 全部 19 个接口的请求/响应详细说明 |
+| [API 接口参考](docs/api-reference.md) | 全部 25 个接口的请求/响应详细说明 |
 | [厂商适配器](docs/providers.md) | BaseProvider 接口、各厂商实现、扩展方法 |
 | [配置系统](docs/config.md) | 双配置文件架构、ConfigManager / CatalogManager |
 | [调度器与限速器](docs/scheduler.md) | 调度逻辑、滑动窗口限速、请求历史 |

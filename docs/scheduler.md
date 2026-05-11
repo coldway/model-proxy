@@ -35,6 +35,27 @@
 | `AllModelsUnavailable` | 自动模式下所有模型不可用 | 503 |
 | `ProviderCallError` | 厂商 API 调用失败 | 500 |
 
+### 流式调度（dispatch_stream）
+
+当请求设置 `stream: true` 时，由 `dispatch_stream` 处理。选择逻辑与 `dispatch` 一致（限速检查 → 优先级遍历），但返回 `(provider_name, model_name, async_iterator)` 三元组而非完整响应：
+
+1. 遍历候选模型，检查限速
+2. 找到可用模型后记录请求，返回其 `stream_chat_completion` 异步迭代器
+3. 由 `StreamingResponse` 逐块消费迭代器，输出 SSE 格式
+
+```
+dispatch_stream(request, enabled_models)
+    │
+    ├─ 检查限速 → 跳过受限模型
+    ├─ 找到可用 Provider
+    ├─ record_request()
+    └─ 返回 (provider_name, model_name, stream_iterator)
+```
+
+### 429 限流识别
+
+`_call_provider` 检测到厂商返回 HTTP 429 时，抛出 `RateLimitExceeded` 而非通用 `ProviderCallError`。`_dispatch_auto` 中对 `RateLimitExceeded` 单独 catch，直接跳过该模型并尝试下一个，避免在 auto 模式下因单一模型限流导致全部失败。
+
 ### Provider 注册
 
 启动时通过 `register_provider(name, provider)` 注册各厂商实例：

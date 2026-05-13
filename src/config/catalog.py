@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +13,7 @@ import yaml
 logger = logging.getLogger(__name__)
 
 CATALOG_FILE = Path("conf/providers_catalog.yaml")
+CATALOG_SAVE_DEBOUNCE = 2
 
 
 class CatalogManager:
@@ -22,6 +24,8 @@ class CatalogManager:
     def __init__(self, catalog_path: Path | None = None):
         self._path = catalog_path or CATALOG_FILE
         self._data: dict[str, Any] = self._load()
+        self._save_timer: threading.Timer | None = None
+        self._dirty = False
 
     def _load(self) -> dict[str, Any]:
         if self._path.exists():
@@ -33,9 +37,30 @@ class CatalogManager:
         return {"providers": {}}
 
     def save(self) -> None:
-        with open(self._path, "w", encoding="utf-8") as f:
-            yaml.dump(self._data, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
-        logger.info(f"模型目录已保存至 {self._path}")
+        """延迟写入：合并短时间内的多次变更为一次磁盘操作"""
+        self._dirty = True
+        if self._save_timer is None or not self._save_timer.is_alive():
+            self._save_timer = threading.Timer(CATALOG_SAVE_DEBOUNCE, self._flush)
+            self._save_timer.daemon = True
+            self._save_timer.start()
+
+    def _flush(self) -> None:
+        if not self._dirty:
+            return
+        try:
+            with open(self._path, "w", encoding="utf-8") as f:
+                yaml.dump(self._data, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+            self._dirty = False
+            logger.info("模型目录已保存至 %s", self._path)
+        except Exception as e:
+            logger.warning("保存模型目录失败（将在下次重试）: %s", e)
+
+    def flush(self) -> None:
+        """立即写入磁盘（用于优雅关闭）"""
+        if self._save_timer:
+            self._save_timer.cancel()
+            self._save_timer = None
+        self._flush()
 
     # --- 厂商信息查询 ---
 

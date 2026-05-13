@@ -17,6 +17,7 @@ from src.models.schemas import (
     UsageInfo,
 )
 from src.providers.base import BaseProvider
+from src.providers.utils import msg_to_dict
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,9 @@ class CloudflareProvider(BaseProvider):
             self._token = api_key
         self._client = httpx.AsyncClient(timeout=60.0)
 
+    async def close(self) -> None:
+        await self._client.aclose()
+
     def _base_url(self) -> str:
         return f"https://api.cloudflare.com/client/v4/accounts/{self._account_id}/ai"
 
@@ -49,7 +53,7 @@ class CloudflareProvider(BaseProvider):
         headers = {"Authorization": f"Bearer {self._token}"}
 
         payload = {
-            "messages": [{"role": m.role, "content": m.content} for m in request.messages],
+            "messages": [msg_to_dict(m) for m in request.messages],
         }
 
         resp = await self._client.post(url, headers=headers, json=payload)

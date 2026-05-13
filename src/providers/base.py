@@ -15,6 +15,10 @@ class BaseProvider(ABC):
     def __init__(self, api_key: str):
         self._api_key = api_key
 
+    async def close(self) -> None:
+        """释放底层连接资源（子类有 httpx client 时应覆盖）"""
+        pass
+
     @abstractmethod
     async def chat_completion(
         self, model: str, request: ChatCompletionRequest

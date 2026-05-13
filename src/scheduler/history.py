@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 import time
 from collections import deque
 from dataclasses import asdict, dataclass, field
@@ -15,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 HISTORY_FILE = Path("data/request_history.jsonl")
 MAX_MEMORY_RECORDS = 500
+FLUSH_INTERVAL_SECONDS = 5
 
 
 @dataclass
@@ -40,6 +42,8 @@ class RequestHistory:
     def __init__(self, persist: bool = True):
         self._records: deque[RequestRecord] = deque(maxlen=MAX_MEMORY_RECORDS)
         self._persist = persist
+        self._pending: list[RequestRecord] = []
+        self._flush_timer: threading.Timer | None = None
         if persist:
             HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
 
@@ -69,7 +73,8 @@ class RequestHistory:
         self._records.append(rec)
 
         if self._persist:
-            self._append_to_file(rec)
+            self._pending.append(rec)
+            self._schedule_flush()
 
     def get_recent(self, limit: int = 50) -> list[dict[str, Any]]:
         """获取最近 N 条记录"""
@@ -171,9 +176,27 @@ class RequestHistory:
             }
         return result
 
-    def _append_to_file(self, record: RequestRecord) -> None:
+    def _schedule_flush(self) -> None:
+        if self._flush_timer is None or not self._flush_timer.is_alive():
+            self._flush_timer = threading.Timer(FLUSH_INTERVAL_SECONDS, self._flush)
+            self._flush_timer.daemon = True
+            self._flush_timer.start()
+
+    def _flush(self) -> None:
+        if not self._pending:
+            return
+        batch = self._pending[:]
         try:
             with open(HISTORY_FILE, "a", encoding="utf-8") as f:
-                f.write(json.dumps(record.to_dict(), ensure_ascii=False) + "\n")
+                for rec in batch:
+                    f.write(json.dumps(rec.to_dict(), ensure_ascii=False) + "\n")
+            self._pending = self._pending[len(batch):]
         except Exception as e:
-            logger.warning(f"写入历史记录失败: {e}")
+            logger.warning("批量写入历史记录失败（%d 条将在下次重试）: %s", len(batch), e)
+
+    def flush(self) -> None:
+        """立即刷盘（用于优雅关闭）"""
+        if self._flush_timer:
+            self._flush_timer.cancel()
+            self._flush_timer = None
+        self._flush()

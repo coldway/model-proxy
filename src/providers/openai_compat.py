@@ -16,43 +16,12 @@ from src.models.schemas import (
     ChatCompletionResponse,
     ChatMessage,
     Choice,
-    FunctionCall,
-    ToolCall,
     UsageInfo,
 )
 from src.providers.base import BaseProvider
+from src.providers.utils import msg_to_dict, parse_tool_calls
 
 logger = logging.getLogger(__name__)
-
-
-def _msg_to_dict(m: ChatMessage) -> dict:
-    """将 ChatMessage 转为 OpenAI API 格式的 dict"""
-    d: dict = {"role": m.role}
-    if m.content is not None:
-        d["content"] = m.content
-    if m.tool_calls:
-        d["tool_calls"] = [tc.model_dump() for tc in m.tool_calls]
-    if m.tool_call_id:
-        d["tool_call_id"] = m.tool_call_id
-    if m.name:
-        d["name"] = m.name
-    return d
-
-
-def _parse_tool_calls(raw_tcs: list[dict] | None) -> list[ToolCall] | None:
-    if not raw_tcs:
-        return None
-    return [
-        ToolCall(
-            id=tc["id"],
-            type=tc.get("type", "function"),
-            function=FunctionCall(
-                name=tc["function"]["name"],
-                arguments=tc["function"]["arguments"],
-            ),
-        )
-        for tc in raw_tcs
-    ]
 
 
 class OpenAICompatibleProvider(BaseProvider):
@@ -67,6 +36,9 @@ class OpenAICompatibleProvider(BaseProvider):
         self._provider_name = provider_name
         self._client = httpx.AsyncClient(timeout=120.0)
 
+    async def close(self) -> None:
+        await self._client.aclose()
+
     def _build_headers(self) -> dict:
         return {
             "Authorization": f"Bearer {self._api_key}",
@@ -76,7 +48,7 @@ class OpenAICompatibleProvider(BaseProvider):
     def _build_payload(self, model: str, request: ChatCompletionRequest, stream: bool = False) -> dict:
         payload: dict = {
             "model": model,
-            "messages": [_msg_to_dict(m) for m in request.messages],
+            "messages": [msg_to_dict(m) for m in request.messages],
             "temperature": request.temperature,
             "stream": stream,
         }
@@ -112,7 +84,7 @@ class OpenAICompatibleProvider(BaseProvider):
                     message=ChatMessage(
                         role=msg["role"],
                         content=msg.get("content"),
-                        tool_calls=_parse_tool_calls(msg.get("tool_calls")),
+                        tool_calls=parse_tool_calls(msg.get("tool_calls")),
                     ),
                     finish_reason=choice.get("finish_reason", "stop"),
                 )

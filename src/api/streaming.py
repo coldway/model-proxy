@@ -33,6 +33,7 @@ async def _stream_generator(model: str, content_iterator: AsyncIterator[str]) ->
     chat_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
     created = int(time.time())
 
+    has_error = False
     try:
         async for chunk in content_iterator:
             data = {
@@ -48,23 +49,31 @@ async def _stream_generator(model: str, content_iterator: AsyncIterator[str]) ->
             }
             yield f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
     except Exception as e:
+        has_error = True
         logger.error(f"流式生成异常: {e}")
         error_data = {
             "id": chat_id, "object": "chat.completion.chunk", "created": created,
-            "model": model, "error": {"message": str(e)},
+            "model": model,
+            "choices": [{
+                "index": 0,
+                "delta": {},
+                "finish_reason": "error",
+            }],
+            "error": {"message": "流式响应中断"},
         }
         yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
 
-    end_data = {
-        "id": chat_id,
-        "object": "chat.completion.chunk",
-        "created": created,
-        "model": model,
-        "choices": [{
-            "index": 0,
-            "delta": {},
-            "finish_reason": "stop",
-        }],
-    }
-    yield f"data: {json.dumps(end_data, ensure_ascii=False)}\n\n"
+    if not has_error:
+        end_data = {
+            "id": chat_id,
+            "object": "chat.completion.chunk",
+            "created": created,
+            "model": model,
+            "choices": [{
+                "index": 0,
+                "delta": {},
+                "finish_reason": "stop",
+            }],
+        }
+        yield f"data: {json.dumps(end_data, ensure_ascii=False)}\n\n"
     yield "data: [DONE]\n\n"

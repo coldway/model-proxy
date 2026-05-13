@@ -30,8 +30,15 @@ class CursorProvider(BaseProvider):
     async def chat_completion(
         self, model: str, request: ChatCompletionRequest
     ) -> ChatCompletionResponse:
+        def _extract_text(msg: ChatMessage) -> str:
+            if isinstance(msg.content, str):
+                return msg.content
+            if isinstance(msg.content, list):
+                return " ".join(p.get("text", "") for p in msg.content if isinstance(p, dict) and p.get("type") == "text")
+            return ""
+
         prompt = "\n".join(
-            f"[{m.role}]: {m.content}" for m in request.messages
+            f"[{m.role}]: {_extract_text(m)}" for m in request.messages
         )
 
         try:

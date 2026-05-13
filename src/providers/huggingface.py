@@ -17,6 +17,7 @@ from src.models.schemas import (
     UsageInfo,
 )
 from src.providers.base import BaseProvider
+from src.providers.utils import msg_to_dict
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,9 @@ class HuggingFaceProvider(BaseProvider):
         super().__init__(api_key)
         self._client = httpx.AsyncClient(timeout=120.0)
 
+    async def close(self) -> None:
+        await self._client.aclose()
+
     async def chat_completion(
         self, model: str, request: ChatCompletionRequest
     ) -> ChatCompletionResponse:
@@ -47,7 +51,7 @@ class HuggingFaceProvider(BaseProvider):
         }
         payload = {
             "model": model,
-            "messages": [{"role": m.role, "content": m.content} for m in request.messages],
+            "messages": [msg_to_dict(m) for m in request.messages],
             "temperature": request.temperature,
             "stream": False,
         }

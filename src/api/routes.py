@@ -3,10 +3,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import re
 import time
+import uuid
 
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 
 from src.models.schemas import (
     ChatCompletionRequest,
@@ -33,27 +37,72 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# 这些全局变量由 app 启动时注入
-_config_manager = None
-_dispatcher = None
-_rate_limiter = None
-_history: RequestHistory | None = None
-_catalog: CatalogManager | None = None
-_provider_factories: dict = {}
-_capability_tester = None
-_session_mgr: SessionManager | None = None
+_THINK_TAG_RE = re.compile(r"<think(?:ing)?>(.*?)</think(?:ing)?>", re.DOTALL)
+_BULLET_REASONING_RE = re.compile(r"^[\s*•\-]+", re.MULTILINE)
+
+
+def _strip_thinking(text: str) -> tuple[str, str]:
+    """从模型回复中分离思考过程和最终回复。
+
+    返回 (clean_reply, thinking_content)。
+    支持三种模式：
+    1. <think>...</think> / <thinking>...</thinking> 标签
+    2. Gemma 式 bullet-point 推理（以 * 开头的分析行 + 最后的实际回复）
+    """
+    thinking_parts = _THINK_TAG_RE.findall(text)
+    if thinking_parts:
+        clean = _THINK_TAG_RE.sub("", text).strip()
+        thinking = "\n---\n".join(p.strip() for p in thinking_parts if p.strip())
+        return clean, thinking
+
+    lines = text.strip().split("\n")
+    if len(lines) < 3:
+        return text, ""
+
+    last_clean_start = -1
+    for i in range(len(lines) - 1, -1, -1):
+        stripped = lines[i].strip()
+        if not stripped:
+            continue
+        if stripped.startswith(("*", "•", "-   ", "    *", "    -")):
+            break
+        last_clean_start = i
+
+    if last_clean_start > 0:
+        reasoning_lines = lines[:last_clean_start]
+        bullet_count = sum(1 for l in reasoning_lines if l.strip().startswith(("*", "•")))
+        if bullet_count >= 2:
+            clean = "\n".join(lines[last_clean_start:]).strip()
+            thinking = "\n".join(reasoning_lines).strip()
+            return clean, thinking
+
+    return text, ""
+
+
+class _RouteDeps:
+    """路由依赖容器（单进程模式，由 init_routes 一次性注入）"""
+    config_manager = None
+    dispatcher = None
+    rate_limiter = None
+    history: RequestHistory | None = None
+    catalog: CatalogManager | None = None
+    provider_factories: dict = {}
+    capability_tester = None
+    session_mgr: SessionManager | None = None
+
+
+_deps = _RouteDeps()
 
 
 def init_routes(config_manager, dispatcher, rate_limiter, history=None, catalog=None, provider_factories=None, capability_tester=None):
-    global _config_manager, _dispatcher, _rate_limiter, _history, _catalog, _provider_factories, _capability_tester, _session_mgr
-    _config_manager = config_manager
-    _dispatcher = dispatcher
-    _rate_limiter = rate_limiter
-    _history = history
-    _catalog = catalog
-    _provider_factories = provider_factories or {}
-    _capability_tester = capability_tester
-    _session_mgr = SessionManager()
+    _deps.config_manager = config_manager
+    _deps.dispatcher = dispatcher
+    _deps.rate_limiter = rate_limiter
+    _deps.history = history
+    _deps.catalog = catalog
+    _deps.provider_factories = provider_factories or {}
+    _deps.capability_tester = capability_tester
+    _deps.session_mgr = SessionManager()
 
 
 @router.post("/v1/chat/completions")
@@ -61,85 +110,99 @@ async def chat_completions(request: ChatCompletionRequest):
     """聊天补全接口（支持流式和非流式）"""
     from src.scheduler.dispatcher import AllModelsUnavailable, ModelNotFound, RateLimitExceeded
 
-    enabled_models = _config_manager.get_enabled_models()
+    trace_id = uuid.uuid4().hex[:12]
+    logger.info(
+        "[API] trace=%s /v1/chat/completions | model=%s stream=%s 消息数=%d",
+        trace_id, request.model, request.stream, len(request.messages),
+    )
+
+    enabled_models = _deps.config_manager.get_enabled_models()
     if not enabled_models:
         raise HTTPException(status_code=503, detail="没有可用模型，请检查配置")
 
     if request.stream:
-        return await _handle_stream(request, enabled_models)
+        return await _handle_stream(request, enabled_models, trace_id)
 
     start_time = time.time()
     try:
-        provider_name, model_name, result = await _dispatcher.dispatch(request, enabled_models)
+        provider_name, model_name, result = await _deps.dispatcher.dispatch(request, enabled_models, trace_id=trace_id)
         latency = (time.time() - start_time) * 1000
-        if _history:
-            _history.record(
+        if _deps.history:
+            _deps.history.record(
                 provider=provider_name,
                 model=model_name,
                 success=True,
                 latency_ms=latency,
                 prompt_tokens=result.usage.prompt_tokens,
                 completion_tokens=result.usage.completion_tokens,
-                route_strategy=_dispatcher.last_route_strategy,
+                route_strategy=_deps.dispatcher.last_route_strategy,
             )
+        logger.info("[API] trace=%s 完成 | provider=%s model=%s 耗时=%.0fms", trace_id, provider_name, model_name, latency)
         return result
     except RateLimitExceeded as e:
         _record_failure(start_time, str(e))
+        logger.warning("[API] trace=%s 限流: %s", trace_id, e)
         raise HTTPException(status_code=429, detail=str(e))
     except ModelNotFound as e:
         _record_failure(start_time, str(e))
+        logger.warning("[API] trace=%s 模型未找到: %s", trace_id, e)
         raise HTTPException(status_code=404, detail=str(e))
     except AllModelsUnavailable as e:
         _record_failure(start_time, str(e))
+        logger.error("[API] trace=%s 所有模型不可用: %s", trace_id, e)
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
         _record_failure(start_time, str(e))
-        logger.error(f"推理请求异常: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"内部错误: {e}")
+        logger.error("[API] trace=%s 推理请求异常: %s", trace_id, e, exc_info=True)
+        raise HTTPException(status_code=500, detail="推理服务内部错误，请稍后重试")
 
 
-async def _handle_stream(request: ChatCompletionRequest, enabled_models):
+async def _handle_stream(request: ChatCompletionRequest, enabled_models, trace_id: str = ""):
     """处理流式请求，返回 SSE StreamingResponse"""
     from src.api.streaming import create_stream_response
     from src.scheduler.dispatcher import AllModelsUnavailable, ModelNotFound, RateLimitExceeded
 
     start_time = time.time()
     try:
-        provider_name, model_name, content_iter = await _dispatcher.dispatch_stream(request, enabled_models)
+        provider_name, model_name, content_iter = await _deps.dispatcher.dispatch_stream(request, enabled_models, trace_id=trace_id)
     except RateLimitExceeded as e:
         _record_failure(start_time, str(e))
+        logger.warning("[API] trace=%s 流式限流: %s", trace_id, e)
         raise HTTPException(status_code=429, detail=str(e))
     except ModelNotFound as e:
         _record_failure(start_time, str(e))
+        logger.warning("[API] trace=%s 流式模型未找到: %s", trace_id, e)
         raise HTTPException(status_code=404, detail=str(e))
     except AllModelsUnavailable as e:
         _record_failure(start_time, str(e))
+        logger.error("[API] trace=%s 流式所有模型不可用: %s", trace_id, e)
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
         _record_failure(start_time, str(e))
-        logger.error(f"流式请求异常: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"内部错误: {e}")
+        logger.error("[API] trace=%s 流式请求异常: %s", trace_id, e, exc_info=True)
+        raise HTTPException(status_code=500, detail="推理服务内部错误，请稍后重试")
 
     latency = (time.time() - start_time) * 1000
-    if _history:
-        _history.record(
+    if _deps.history:
+        _deps.history.record(
             provider=provider_name, model=model_name,
             success=True, latency_ms=latency,
         )
+    logger.info("[API] trace=%s 流式连接建立 | provider=%s model=%s 耗时=%.0fms", trace_id, provider_name, model_name, latency)
     return create_stream_response(model_name, content_iter)
 
 
 def _record_failure(start_time: float, error: str, provider: str = "unknown", model: str = "unknown") -> None:
-    if _history:
+    if _deps.history:
         latency = (time.time() - start_time) * 1000
-        _history.record(provider=provider, model=model, success=False, latency_ms=latency, error=error)
+        _deps.history.record(provider=provider, model=model, success=False, latency_ms=latency, error=error)
 
 
 @router.get("/v1/models", response_model=ModelListResponse)
 async def list_models():
     """列出所有已配置模型"""
     models = []
-    for prov_name, prov in _config_manager.config.providers.items():
+    for prov_name, prov in _deps.config_manager.config.providers.items():
         for m in prov.models:
             models.append(ModelInfo(
                 id=m.name,
@@ -156,11 +219,11 @@ async def list_models():
 async def list_providers():
     """查询支持的厂商列表"""
     providers = []
-    for prov_name, prov in _config_manager.config.providers.items():
+    for prov_name, prov in _deps.config_manager.config.providers.items():
         enabled_count = sum(1 for m in prov.models if m.enabled)
         catalog_total = 0
-        if _catalog:
-            catalog_models = _catalog.get_models(prov_name)
+        if _deps.catalog:
+            catalog_models = _deps.catalog.get_models(prov_name)
             catalog_total = len(catalog_models)
         providers.append(ProviderSummary(
             id=prov_name,
@@ -177,13 +240,13 @@ async def list_providers():
 @router.get("/v1/providers/{provider_id}/models", response_model=ProviderModelsResponse)
 async def list_provider_models(provider_id: str):
     """查询指定厂商支持的模型列表（含能力信息）"""
-    prov = _config_manager.config.providers.get(provider_id)
+    prov = _deps.config_manager.config.providers.get(provider_id)
     if not prov:
         raise HTTPException(status_code=404, detail=f"厂商 {provider_id} 不存在")
 
     cap_cache = {}
-    if _capability_tester:
-        all_caps = _capability_tester.cache.get_all()
+    if _deps.capability_tester:
+        all_caps = _deps.capability_tester.cache.get_all()
         for key, val in all_caps.items():
             parts = key.split("/", 1)
             if parts[0] == provider_id and len(parts) > 1:
@@ -209,7 +272,7 @@ async def list_provider_models(provider_id: str):
 async def get_usage():
     """获取使用统计"""
     stats = []
-    for prov_name, prov in _config_manager.config.providers.items():
+    for prov_name, prov in _deps.config_manager.config.providers.items():
         if not prov.enabled:
             continue
         for m in prov.models:
@@ -217,7 +280,7 @@ async def get_usage():
                 continue
             rpd = m.rate_limit.rpd if m.rate_limit else 0
             rpm = m.rate_limit.rpm if m.rate_limit else 0
-            daily, minute = _rate_limiter.get_usage(prov_name, m.name)
+            daily, minute = _deps.rate_limiter.get_usage(prov_name, m.name)
             stats.append(UsageStats(
                 provider=prov_name,
                 model=m.name,
@@ -225,7 +288,7 @@ async def get_usage():
                 minute_requests=minute,
                 rpd_limit=rpd,
                 rpm_limit=rpm,
-                available=_rate_limiter.can_request(prov_name, m.name, rpd, rpm),
+                available=_deps.rate_limiter.can_request(prov_name, m.name, rpd, rpm),
             ))
     return UsageResponse(stats=stats)
 
@@ -236,32 +299,39 @@ async def get_usage():
 async def get_config():
     """获取当前配置（隐藏 API Key）"""
     result = {}
-    for name, prov in _config_manager.get_providers_sorted():
+    for name, prov in _deps.config_manager.get_providers_sorted():
         result[name] = {
             "enabled": prov.enabled,
-            "has_api_key": _config_manager.has_api_key(name),
+            "has_api_key": _deps.config_manager.has_api_key(name),
             "priority": prov.priority,
             "models": [m.model_dump() for m in prov.models],
         }
-    return {"providers": result, "settings": _config_manager.settings.model_dump()}
+    return {"providers": result, "settings": _deps.config_manager.settings.model_dump()}
+
+
+class ApiKeyUpdateRequest(BaseModel):
+    provider: str
+    api_key: str
 
 
 @router.post("/api/config/apikey")
-async def update_api_key(provider: str, api_key: str):
+async def update_api_key(body: ApiKeyUpdateRequest):
     """更新厂商 API Key，同时动态注册/注销厂商 Provider"""
-    _config_manager.update_api_key(provider, api_key)
+    provider = body.provider
+    api_key = body.api_key
+    _deps.config_manager.update_api_key(provider, api_key)
 
-    if api_key.strip() and provider in _provider_factories:
+    if api_key.strip() and provider in _deps.provider_factories:
         try:
-            new_provider = _provider_factories[provider](api_key.strip())
-            _dispatcher.register_provider(provider, new_provider)
+            new_provider = _deps.provider_factories[provider](api_key.strip())
+            _deps.dispatcher.register_provider(provider, new_provider)
             logger.info(f"动态注册厂商 {provider}")
             return {"status": "ok", "message": f"{provider} API Key 已更新，厂商已自动加载"}
         except Exception as e:
             logger.error(f"动态注册厂商 {provider} 失败: {e}")
             return {"status": "ok", "message": f"{provider} API Key 已保存，但厂商加载失败: {e}"}
     elif not api_key.strip():
-        _dispatcher.unregister_provider(provider)
+        _deps.dispatcher.unregister_provider(provider)
         logger.info(f"已注销厂商 {provider}（API Key 已清空）")
         return {"status": "ok", "message": f"{provider} API Key 已清空，厂商已卸载"}
 
@@ -271,14 +341,14 @@ async def update_api_key(provider: str, api_key: str):
 @router.post("/api/config/model/toggle")
 async def toggle_model(provider: str, model_name: str, enabled: bool):
     """启用/禁用模型"""
-    _config_manager.toggle_model(provider, model_name, enabled)
+    _deps.config_manager.toggle_model(provider, model_name, enabled)
     return {"status": "ok", "message": f"{model_name} 已{'启用' if enabled else '禁用'}"}
 
 
 @router.post("/api/config/model/priority")
 async def update_priority(provider: str, model_name: str, priority: int):
     """更新模型优先级"""
-    _config_manager.update_model_priority(provider, model_name, priority)
+    _deps.config_manager.update_model_priority(provider, model_name, priority)
     return {"status": "ok"}
 
 
@@ -291,37 +361,37 @@ async def add_model(
     rpm: int = 0,
 ):
     """添加新模型（先加入目录，再激活）"""
-    if _catalog:
-        existing = _catalog.get_models(provider)
+    if _deps.catalog:
+        existing = _deps.catalog.get_models(provider)
         if not any(m["id"] == name for m in existing):
-            _catalog.add_model(provider, {
+            _deps.catalog.add_model(provider, {
                 "id": name,
                 "name": name,
                 "default_rpd": rpd,
                 "default_rpm": rpm,
                 "category": "通用",
             })
-        _catalog.activate_model(provider, name, priority)
+        _deps.catalog.activate_model(provider, name, priority)
     return {"status": "ok", "message": f"模型 {name} 已添加到 {provider}"}
 
 
 @router.post("/api/provider/toggle")
 async def toggle_provider(provider: str, enabled: bool):
     """启用/禁用厂商，同时动态注册/注销 Provider"""
-    if _catalog:
-        _catalog.set_provider_enabled(provider, enabled)
+    if _deps.catalog:
+        _deps.catalog.set_provider_enabled(provider, enabled)
 
-    if enabled and not _dispatcher.has_provider(provider):
+    if enabled and not _deps.dispatcher.has_provider(provider):
         if provider == "cursor":
             from src.providers.cursor import CursorProvider
-            _dispatcher.register_provider("cursor", CursorProvider())
+            _deps.dispatcher.register_provider("cursor", CursorProvider())
             logger.info(f"动态注册 Cursor 厂商")
             return {"status": "ok", "message": f"{provider} 已启用并加载"}
-        elif provider in _provider_factories:
-            api_key = _config_manager.get_api_key(provider) if _config_manager else ""
+        elif provider in _deps.provider_factories:
+            api_key = _deps.config_manager.get_api_key(provider) if _deps.config_manager else ""
             if api_key.strip():
                 try:
-                    _dispatcher.register_provider(provider, _provider_factories[provider](api_key))
+                    _deps.dispatcher.register_provider(provider, _deps.provider_factories[provider](api_key))
                     logger.info(f"动态注册厂商 {provider}")
                     return {"status": "ok", "message": f"{provider} 已启用并加载"}
                 except Exception as e:
@@ -329,8 +399,8 @@ async def toggle_provider(provider: str, enabled: bool):
                     return {"status": "ok", "message": f"{provider} 已启用，但加载失败: {e}"}
             else:
                 return {"status": "ok", "message": f"{provider} 已启用，但 API Key 未配置，请先填写 API Key"}
-    elif not enabled and _dispatcher.has_provider(provider):
-        _dispatcher.unregister_provider(provider)
+    elif not enabled and _deps.dispatcher.has_provider(provider):
+        _deps.dispatcher.unregister_provider(provider)
         logger.info(f"已注销厂商 {provider}")
         return {"status": "ok", "message": f"{provider} 已禁用并卸载"}
 
@@ -340,16 +410,16 @@ async def toggle_provider(provider: str, enabled: bool):
 @router.post("/api/provider/priority")
 async def update_provider_priority(provider: str, priority: int):
     """更新厂商优先级"""
-    _config_manager.update_provider_priority(provider, priority)
+    _deps.config_manager.update_provider_priority(provider, priority)
     return {"status": "ok", "message": f"{provider} 优先级已更新为 {priority}"}
 
 
 @router.post("/api/provider/reorder")
 async def reorder_providers(ordered_ids: list[str]):
     """批量重新排序厂商优先级（用于拖拽排序）"""
-    if not _catalog:
+    if not _deps.catalog:
         raise HTTPException(status_code=500, detail="目录未初始化")
-    _catalog.reorder_providers(ordered_ids)
+    _deps.catalog.reorder_providers(ordered_ids)
     return {"status": "ok", "message": "厂商优先级已更新"}
 
 
@@ -361,7 +431,7 @@ async def update_settings(
 ):
     """动态更新运行时设置（host/port 需重启服务）"""
     messages = []
-    settings = _config_manager.settings
+    settings = _deps.config_manager.settings
 
     if log_level is not None:
         settings.log_level = log_level
@@ -378,7 +448,7 @@ async def update_settings(
         messages.append(f"自动切换已{'开启' if auto_switch else '关闭'}")
 
     if messages:
-        _config_manager.save()
+        _deps.config_manager.save()
 
     return {"status": "ok", "message": "；".join(messages) if messages else "无变更"}
 
@@ -475,8 +545,8 @@ async def fetch_provider_models(provider_name: str, force: bool = False):
     Args:
         force: 强制重新测试所有模型（忽略缓存）
     """
-    if provider_name not in _dispatcher._providers:
-        has_key = _config_manager.has_api_key(provider_name) if _config_manager else False
+    if not _deps.dispatcher.has_provider(provider_name):
+        has_key = _deps.config_manager.has_api_key(provider_name) if _deps.config_manager else False
         if not has_key:
             raise HTTPException(
                 status_code=404,
@@ -487,7 +557,7 @@ async def fetch_provider_models(provider_name: str, force: bool = False):
             detail=f"厂商 {provider_name} 未注册：API Key 已配置但加载失败，请检查 Key 格式或重启服务",
         )
 
-    provider = _dispatcher._providers[provider_name]
+    provider = _deps.dispatcher.get_provider(provider_name)
     try:
         models = await provider.list_models()
     except Exception as e:
@@ -496,12 +566,12 @@ async def fetch_provider_models(provider_name: str, force: bool = False):
 
     result = {"provider": provider_name, "available_models": models}
 
-    if _capability_tester:
+    if _deps.capability_tester:
         to_test = []
         skipped = []
         for mid in models:
-            if not force and _capability_tester.cache.has(provider_name, mid):
-                cached = _capability_tester.cache.get(provider_name, mid)
+            if not force and _deps.capability_tester.cache.has(provider_name, mid):
+                cached = _deps.capability_tester.cache.get(provider_name, mid)
                 err = (cached or {}).get("error", "")
                 if err and ("429" in err or "rate_limit" in err):
                     to_test.append(mid)
@@ -512,13 +582,13 @@ async def fetch_provider_models(provider_name: str, force: bool = False):
 
         test_results = []
         if to_test:
-            test_results = await _capability_tester.test_provider_models(
+            test_results = await _deps.capability_tester.test_provider_models(
                 provider, provider_name, to_test, force=force,
             )
             _apply_capabilities_to_catalog(provider_name, test_results)
 
         cached_results = [
-            {**_capability_tester.cache.get(provider_name, mid), "cached": True}
+            {**_deps.capability_tester.cache.get(provider_name, mid), "cached": True}
             for mid in skipped
         ]
 
@@ -538,15 +608,15 @@ async def fetch_provider_models(provider_name: str, force: bool = False):
 
 def _apply_capabilities_to_catalog(provider_name: str, test_results: list[dict]) -> None:
     """将测试结果回写到 catalog（更新 tool_calling 标记）"""
-    if not _catalog:
+    if not _deps.catalog:
         return
     for r in test_results:
         mid = r.get("model", "")
-        for model in _catalog.get_models(provider_name):
+        for model in _deps.catalog.get_models(provider_name):
             if model["id"] == mid:
                 model["tool_calling"] = r.get("tool_calling", False)
                 break
-    _catalog.save()
+    _deps.catalog.save()
 
 
 # --- 模型能力测试 ---
@@ -559,34 +629,35 @@ async def test_capabilities(provider: str = "", force: bool = False):
     - 不指定 provider: 测试所有已注册厂商
     - force=true: 强制重新测试已缓存的模型
     """
-    if not _capability_tester:
+    if not _deps.capability_tester:
         raise HTTPException(status_code=500, detail="能力测试器未初始化")
 
     if provider:
-        if provider not in _dispatcher._providers:
+        if not _deps.dispatcher.has_provider(provider):
             raise HTTPException(status_code=404, detail=f"厂商 {provider} 未注册")
-        prov_inst = _dispatcher._providers[provider]
+        prov_inst = _deps.dispatcher.get_provider(provider)
         try:
             models = await prov_inst.list_models()
         except Exception as e:
             raise HTTPException(status_code=502, detail=f"拉取模型列表失败: {e}")
 
-        results = await _capability_tester.test_provider_models(
+        results = await _deps.capability_tester.test_provider_models(
             prov_inst, provider, models, force=force,
         )
         _apply_capabilities_to_catalog(provider, results)
         return {"provider": provider, "results": results}
 
+    all_providers = _deps.dispatcher.get_all_providers()
     model_map = {}
-    for prov_name, prov_inst in _dispatcher._providers.items():
+    for prov_name, prov_inst in all_providers.items():
         try:
             models = await prov_inst.list_models()
             model_map[prov_name] = models
         except Exception as e:
             logger.error("拉取 %s 模型列表失败: %s", prov_name, e)
 
-    all_results = await _capability_tester.test_all_providers(
-        _dispatcher._providers, model_map, force=force,
+    all_results = await _deps.capability_tester.test_all_providers(
+        all_providers, model_map, force=force,
     )
 
     for prov_name, results in all_results.items():
@@ -612,9 +683,9 @@ async def test_capabilities(provider: str = "", force: bool = False):
 @router.get("/api/capabilities")
 async def get_capabilities():
     """查看已缓存的模型能力"""
-    if not _capability_tester:
+    if not _deps.capability_tester:
         raise HTTPException(status_code=500, detail="能力测试器未初始化")
-    cached = _capability_tester.cache.get_all()
+    cached = _deps.capability_tester.cache.get_all()
     summary = {
         "total": len(cached),
         "tool_calling": sum(1 for v in cached.values() if v.get("tool_calling")),
@@ -626,10 +697,10 @@ async def get_capabilities():
 @router.delete("/api/capabilities/clear")
 async def clear_capabilities():
     """清除能力缓存（下次拉取时重新测试所有模型）"""
-    if not _capability_tester:
+    if not _deps.capability_tester:
         raise HTTPException(status_code=500, detail="能力测试器未初始化")
-    _capability_tester.cache.clear()
-    _capability_tester.cache.save()
+    _deps.capability_tester.cache.clear()
+    _deps.capability_tester.cache.save()
     return {"status": "ok", "message": "能力缓存已清除"}
 
 
@@ -638,38 +709,40 @@ async def clear_capabilities():
 @router.get("/api/history")
 async def get_history(limit: int = 50):
     """获取最近请求历史"""
-    if not _history:
+    limit = min(max(limit, 1), 500)
+    if not _deps.history:
         return {"records": [], "stats": {}}
-    return {"records": _history.get_recent(limit), "stats": _history.get_stats()}
+    return {"records": _deps.history.get_recent(limit), "stats": _deps.history.get_stats()}
 
 
 @router.get("/api/history/stats")
 async def get_history_stats():
     """获取请求统计汇总"""
-    if not _history:
+    if not _deps.history:
         return {"total": 0, "success_rate": 0, "avg_latency_ms": 0, "by_provider": {}}
-    return _history.get_stats()
+    return _deps.history.get_stats()
 
 
 @router.get("/api/routing/log")
 async def get_routing_log():
     """获取最近的路由决策日志"""
-    return {"decisions": _dispatcher.get_route_log() if _dispatcher else []}
+    return {"decisions": _deps.dispatcher.get_route_log() if _deps.dispatcher else []}
 
 
 @router.get("/api/routing/breaker")
 async def get_breaker_status():
     """获取厂商熔断状态"""
-    return {"breakers": _dispatcher.get_breaker_status() if _dispatcher else {}}
+    return {"breakers": _deps.dispatcher.get_breaker_status() if _deps.dispatcher else {}}
 
 
 @router.get("/api/blacklist")
 async def get_blacklist():
     """获取 429 黑名单"""
-    bl = _rate_limiter.get_blacklist()
+    bl = _deps.rate_limiter.get_blacklist()
     return {
         "blacklist": [
-            {"model": k, "blocked_date": v} for k, v in bl.items()
+            {"model": k, "expire_time": v["expire_time"], "remaining_seconds": v["remaining_seconds"]}
+            for k, v in bl.items()
         ],
         "count": len(bl),
     }
@@ -678,7 +751,7 @@ async def get_blacklist():
 @router.delete("/api/blacklist/clear")
 async def clear_blacklist(provider: str = "", model: str = ""):
     """清除 429 黑名单（可指定模型或清除全部）"""
-    count = _rate_limiter.clear_blacklist(provider, model)
+    count = _deps.rate_limiter.clear_blacklist(provider, model)
     return {"status": "ok", "cleared": count}
 
 
@@ -687,33 +760,33 @@ async def clear_blacklist(provider: str = "", model: str = ""):
 @router.get("/api/catalog/providers")
 async def catalog_providers():
     """获取目录中所有厂商及其模型"""
-    if not _catalog:
+    if not _deps.catalog:
         return {"providers": {}}
-    return {"providers": _catalog.get_all_providers()}
+    return {"providers": _deps.catalog.get_all_providers()}
 
 
 @router.get("/api/catalog/provider/{provider_id}/models")
 async def catalog_provider_models(provider_id: str):
     """获取指定厂商的模型列表"""
-    if not _catalog:
+    if not _deps.catalog:
         raise HTTPException(status_code=500, detail="目录未初始化")
-    models = _catalog.get_models(provider_id)
+    models = _deps.catalog.get_models(provider_id)
     return {"provider": provider_id, "models": models}
 
 
 @router.get("/api/catalog/search")
 async def catalog_search(q: str = ""):
     """搜索模型目录（模糊匹配名称、描述、分类）"""
-    if not _catalog:
+    if not _deps.catalog:
         return {"results": []}
     if not q.strip():
         # 返回全部
         all_models = []
-        for prov_id, prov in _catalog.get_all_providers().items():
+        for prov_id, prov in _deps.catalog.get_all_providers().items():
             for model in prov.get("models", []):
                 all_models.append({**model, "provider_id": prov_id, "provider_name": prov.get("name", prov_id)})
         return {"results": all_models}
-    return {"results": _catalog.search_models(q)}
+    return {"results": _deps.catalog.search_models(q)}
 
 
 @router.post("/api/catalog/model/add")
@@ -726,8 +799,8 @@ async def catalog_add_model(
     default_rpm: int = 0,
     category: str = "通用",
 ):
-    """向目录添加模型（更新 providers_catalog.yaml，可提交 GitHub）"""
-    if not _catalog:
+    """向目录添加模型（更新 providers_deps.catalog.yaml，可提交 GitHub）"""
+    if not _deps.catalog:
         raise HTTPException(status_code=500, detail="目录未初始化")
     model_data = {
         "id": model_id,
@@ -737,7 +810,7 @@ async def catalog_add_model(
         "default_rpm": default_rpm,
         "category": category,
     }
-    success = _catalog.add_model(provider_id, model_data)
+    success = _deps.catalog.add_model(provider_id, model_data)
     if not success:
         raise HTTPException(status_code=400, detail="模型已存在或厂商不存在")
     return {"status": "ok", "message": f"模型 {model_id} 已添加到 {provider_id} 目录"}
@@ -746,9 +819,9 @@ async def catalog_add_model(
 @router.delete("/api/catalog/model/delete")
 async def catalog_delete_model(provider_id: str, model_id: str):
     """从目录删除模型"""
-    if not _catalog:
+    if not _deps.catalog:
         raise HTTPException(status_code=500, detail="目录未初始化")
-    success = _catalog.remove_model(provider_id, model_id)
+    success = _deps.catalog.remove_model(provider_id, model_id)
     if not success:
         raise HTTPException(status_code=404, detail="模型不存在")
     return {"status": "ok", "message": f"模型 {model_id} 已从 {provider_id} 目录删除"}
@@ -757,10 +830,10 @@ async def catalog_delete_model(provider_id: str, model_id: str):
 @router.post("/api/catalog/model/activate")
 async def catalog_activate_model(provider_id: str, model_id: str, priority: int = 99):
     """从目录中激活模型（设置 enabled=true）"""
-    if not _catalog:
+    if not _deps.catalog:
         raise HTTPException(status_code=500, detail="目录未初始化")
 
-    if _catalog.activate_model(provider_id, model_id, priority):
+    if _deps.catalog.activate_model(provider_id, model_id, priority):
         return {"status": "ok", "message": f"模型 {model_id} 已激活"}
     raise HTTPException(status_code=404, detail="模型在目录中不存在")
 
@@ -768,9 +841,9 @@ async def catalog_activate_model(provider_id: str, model_id: str, priority: int 
 @router.post("/api/config/model/delete")
 async def config_delete_model(provider: str, model_name: str):
     """停用模型（从目录中移除 enabled 标记）"""
-    if not _catalog:
+    if not _deps.catalog:
         raise HTTPException(status_code=500, detail="目录未初始化")
-    if _catalog.deactivate_model(provider, model_name):
+    if _deps.catalog.deactivate_model(provider, model_name):
         return {"status": "ok", "message": f"模型 {model_name} 已停用"}
     raise HTTPException(status_code=404, detail=f"模型 {model_name} 不存在")
 
@@ -780,20 +853,20 @@ async def config_delete_model(provider: str, model_name: str):
 @router.get("/api/chat/sessions")
 async def list_chat_sessions():
     """获取所有聊天会话列表"""
-    return {"sessions": _session_mgr.list_sessions()}
+    return {"sessions": _deps.session_mgr.list_sessions()}
 
 
 @router.post("/api/chat/sessions")
 async def create_chat_session(model: str = "auto", title: str = "新对话"):
     """创建新聊天会话"""
-    session = _session_mgr.create(model=model, title=title)
+    session = _deps.session_mgr.create(model=model, title=title)
     return {"session": {"id": session.id, "title": session.title, "model": session.model}}
 
 
 @router.get("/api/chat/sessions/{session_id}")
 async def get_chat_session(session_id: str):
     """获取指定会话的完整消息历史"""
-    session = _session_mgr.get(session_id)
+    session = _deps.session_mgr.get(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="会话不存在")
     return {
@@ -812,7 +885,7 @@ async def get_chat_session(session_id: str):
 @router.delete("/api/chat/sessions/{session_id}")
 async def delete_chat_session(session_id: str):
     """删除聊天会话"""
-    if _session_mgr.delete(session_id):
+    if _deps.session_mgr.delete(session_id):
         return {"status": "ok"}
     raise HTTPException(status_code=404, detail="会话不存在")
 
@@ -820,7 +893,7 @@ async def delete_chat_session(session_id: str):
 @router.put("/api/chat/sessions/{session_id}/title")
 async def rename_chat_session(session_id: str, title: str):
     """重命名聊天会话"""
-    if _session_mgr.rename(session_id, title):
+    if _deps.session_mgr.rename(session_id, title):
         return {"status": "ok"}
     raise HTTPException(status_code=404, detail="会话不存在")
 
@@ -830,13 +903,20 @@ async def send_chat_message(session_id: str, request: ChatCompletionRequest):
     """向指定会话发送消息并获取回复（自动管理上下文）"""
     from src.scheduler.dispatcher import AllModelsUnavailable, ModelNotFound, RateLimitExceeded
 
-    session = _session_mgr.get(session_id)
+    trace_id = uuid.uuid4().hex[:12]
+
+    session = _deps.session_mgr.get(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="会话不存在")
 
     user_msg = ""
     if request.messages:
         user_msg = request.messages[-1].content or ""
+
+    logger.info(
+        "[会话] trace=%s session=%s 用户消息: %s",
+        trace_id, session_id, user_msg[:200],
+    )
 
     session.add_message("user", user_msg)
 
@@ -852,34 +932,47 @@ async def send_chat_message(session_id: str, request: ChatCompletionRequest):
         stream=False,
     )
 
-    enabled_models = _config_manager.get_enabled_models()
+    enabled_models = _deps.config_manager.get_enabled_models()
     if not enabled_models:
         session.add_message("assistant", "❌ 没有可用模型，请检查配置")
-        _session_mgr.save()
+        await asyncio.to_thread(_deps.session_mgr.save)
         raise HTTPException(status_code=503, detail="没有可用模型")
 
     start_time = time.time()
     try:
-        provider_name, model_name, result = await _dispatcher.dispatch(ctx_request, enabled_models)
+        provider_name, model_name, result = await _deps.dispatcher.dispatch(ctx_request, enabled_models, trace_id=trace_id)
         latency = (time.time() - start_time) * 1000
-        if _history:
-            _history.record(
+        if _deps.history:
+            _deps.history.record(
                 provider=provider_name,
                 model=model_name,
                 success=True,
                 latency_ms=latency,
                 prompt_tokens=result.usage.prompt_tokens,
                 completion_tokens=result.usage.completion_tokens,
-                route_strategy=_dispatcher.last_route_strategy,
+                route_strategy=_deps.dispatcher.last_route_strategy,
             )
 
-        reply = result.choices[0].message.content or ""
+        raw_reply = result.choices[0].message.content or ""
+        reply, thinking = _strip_thinking(raw_reply)
+        if thinking:
+            logger.info(
+                "[会话] trace=%s 模型 %s 思考过程:\n%s",
+                trace_id, result.model,
+                thinking[:500] + ("…" if len(thinking) > 500 else ""),
+            )
         session.add_message("assistant", reply, model=result.model)
-        _session_mgr.save()
+        await asyncio.to_thread(_deps.session_mgr.save)
+
+        logger.info(
+            "[会话] trace=%s 完成 | session=%s provider=%s model=%s 耗时=%.0fms 回复长度=%d",
+            trace_id, session_id, provider_name, model_name, latency, len(reply),
+        )
 
         return {
             "reply": reply,
             "model": result.model,
+            "provider": provider_name,
             "usage": result.usage.model_dump(),
             "tokens_est": session.total_tokens_est,
             "context_messages": len(context_messages),
@@ -888,12 +981,15 @@ async def send_chat_message(session_id: str, request: ChatCompletionRequest):
         }
     except (RateLimitExceeded, ModelNotFound, AllModelsUnavailable) as e:
         _record_failure(start_time, str(e))
+        await asyncio.to_thread(_deps.session_mgr.save)
+        logger.warning("[会话] trace=%s session=%s 失败: %s", trace_id, session_id, e)
         status = 429 if isinstance(e, RateLimitExceeded) else (404 if isinstance(e, ModelNotFound) else 503)
         raise HTTPException(status_code=status, detail=str(e))
     except Exception as e:
         _record_failure(start_time, str(e))
-        logger.error("会话推理异常: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail=f"内部错误: {e}")
+        logger.error("[会话] trace=%s session=%s 异常: %s", trace_id, session_id, e, exc_info=True)
+        await asyncio.to_thread(_deps.session_mgr.save)
+        raise HTTPException(status_code=500, detail="推理服务内部错误，请稍后重试")
 
 
 @router.post("/api/chat/sessions/{session_id}/stream")
@@ -902,13 +998,21 @@ async def stream_chat_message(session_id: str, request: ChatCompletionRequest):
     from src.api.streaming import create_stream_response
     from src.scheduler.dispatcher import AllModelsUnavailable, ModelNotFound, RateLimitExceeded
 
-    session = _session_mgr.get(session_id)
+    trace_id = uuid.uuid4().hex[:12]
+
+    session = _deps.session_mgr.get(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="会话不存在")
 
     user_msg = ""
     if request.messages:
         user_msg = request.messages[-1].content or ""
+
+    logger.info(
+        "[流式会话] trace=%s session=%s 用户消息: %s",
+        trace_id, session_id, user_msg[:200],
+    )
+
     session.add_message("user", user_msg)
     if len(session.messages) == 1:
         session.auto_title()
@@ -922,36 +1026,38 @@ async def stream_chat_message(session_id: str, request: ChatCompletionRequest):
         stream=True,
     )
 
-    enabled_models = _config_manager.get_enabled_models()
+    enabled_models = _deps.config_manager.get_enabled_models()
     if not enabled_models:
         raise HTTPException(status_code=503, detail="没有可用模型")
 
     start_time = time.time()
     try:
-        provider_name, model_name, content_iter = await _dispatcher.dispatch_stream(ctx_request, enabled_models)
+        provider_name, model_name, content_iter = await _deps.dispatcher.dispatch_stream(ctx_request, enabled_models, trace_id=trace_id)
     except (RateLimitExceeded, ModelNotFound, AllModelsUnavailable) as e:
         _record_failure(start_time, str(e))
+        logger.warning("[流式会话] trace=%s session=%s 失败: %s", trace_id, session_id, e)
         status = 429 if isinstance(e, RateLimitExceeded) else (404 if isinstance(e, ModelNotFound) else 503)
         raise HTTPException(status_code=status, detail=str(e))
     except Exception as e:
         _record_failure(start_time, str(e))
-        raise HTTPException(status_code=500, detail=f"内部错误: {e}")
+        logger.error("[流式会话] trace=%s session=%s 异常: %s", trace_id, session_id, e, exc_info=True)
+        raise HTTPException(status_code=500, detail="推理服务内部错误，请稍后重试")
 
     latency = (time.time() - start_time) * 1000
-    if _history:
-        _history.record(provider=provider_name, model=model_name, success=True, latency_ms=latency)
+    if _deps.history:
+        _deps.history.record(provider=provider_name, model=model_name, success=True, latency_ms=latency)
+
+    logger.info("[流式会话] trace=%s 流式连接建立 | provider=%s model=%s", trace_id, provider_name, model_name)
 
     async def _collect_and_stream():
         """流式输出的同时收集完整回复写入会话"""
         import json as _json
-        import uuid as _uuid
 
-        chat_id = f"chatcmpl-{_uuid.uuid4().hex[:12]}"
+        chat_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
         created = int(time.time())
         full_reply = []
 
-        # 先发一个 meta 事件，告知前端 model 和 title
-        meta = {"model": model_name, "title": session.title, "session_id": session.id}
+        meta = {"model": model_name, "provider": provider_name, "title": session.title, "session_id": session.id}
         yield f"data: {_json.dumps({'meta': meta}, ensure_ascii=False)}\n\n"
 
         try:
@@ -964,11 +1070,19 @@ async def stream_chat_message(session_id: str, request: ChatCompletionRequest):
                 }
                 yield f"data: {_json.dumps(data, ensure_ascii=False)}\n\n"
         except Exception as ex:
-            logger.error("流式会话异常: %s", ex)
+            logger.error("[流式会话] trace=%s 流式传输异常: %s", trace_id, ex)
 
-        reply_text = "".join(full_reply)
+        raw_text = "".join(full_reply)
+        reply_text, thinking = _strip_thinking(raw_text)
+        if thinking:
+            logger.info("[流式会话] trace=%s 模型 %s 思考过程:\n%s", trace_id, model_name, thinking[:500])
         session.add_message("assistant", reply_text, model=model_name)
-        _session_mgr.save()
+        await asyncio.to_thread(_deps.session_mgr.save)
+
+        logger.info(
+            "[流式会话] trace=%s 流式完成 | session=%s model=%s 回复长度=%d",
+            trace_id, session_id, model_name, len(reply_text),
+        )
 
         end_data = {
             "id": chat_id, "object": "chat.completion.chunk", "created": created,
@@ -988,3 +1102,50 @@ async def stream_chat_message(session_id: str, request: ChatCompletionRequest):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
     )
+
+
+# --- 实时日志 ---
+
+@router.get("/api/logs")
+async def get_logs(after: int = 0, limit: int = 200):
+    """获取最近的日志条目（支持增量拉取）。
+
+    - after: 上次返回的 latest_seq，仅获取此后的新日志
+    - limit: 最多返回条数
+    """
+    from src.api.log_buffer import get_instance
+    handler = get_instance()
+    if not handler:
+        return {"entries": [], "latest_seq": 0}
+    limit = min(max(limit, 1), 500)
+    entries, latest_seq = handler.get_logs(after_seq=after, limit=limit)
+    return {"entries": entries, "latest_seq": latest_seq}
+
+
+@router.delete("/api/logs/clear")
+async def clear_logs():
+    """清空日志缓冲"""
+    from src.api.log_buffer import get_instance
+    handler = get_instance()
+    if handler:
+        handler.clear()
+    return {"status": "ok"}
+
+
+@router.get("/api/logs/level")
+async def get_log_level():
+    """获取当前日志级别"""
+    level = logging.getLogger().level
+    return {"level": logging.getLevelName(level)}
+
+
+@router.post("/api/logs/level")
+async def set_log_level(level: str):
+    """动态切换日志级别（INFO/DEBUG/WARNING/ERROR）"""
+    level_upper = level.upper()
+    numeric = getattr(logging, level_upper, None)
+    if numeric is None:
+        raise HTTPException(status_code=400, detail=f"无效的日志级别: {level}")
+    logging.getLogger().setLevel(numeric)
+    logger.info("日志级别已切换为 %s", level_upper)
+    return {"status": "ok", "level": level_upper}

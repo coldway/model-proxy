@@ -34,6 +34,9 @@ class GoogleProvider(BaseProvider):
         super().__init__(api_key)
         self._client = httpx.AsyncClient(timeout=120.0)
 
+    async def close(self) -> None:
+        await self._client.aclose()
+
     def _build_payload(self, request: ChatCompletionRequest) -> dict:
         contents = self._convert_messages(request.messages)
         payload: dict = {
@@ -178,10 +181,18 @@ class GoogleProvider(BaseProvider):
                 if msg.content:
                     parts.append({"text": msg.content})
                 for tc in msg.tool_calls:
+                    raw_args = tc.function.arguments
+                    if isinstance(raw_args, str):
+                        try:
+                            args = json.loads(raw_args)
+                        except (json.JSONDecodeError, TypeError):
+                            args = {"raw": raw_args}
+                    else:
+                        args = raw_args or {}
                     parts.append({
                         "functionCall": {
                             "name": tc.function.name,
-                            "args": json.loads(tc.function.arguments) if isinstance(tc.function.arguments, str) else tc.function.arguments,
+                            "args": args,
                         }
                     })
                 contents.append({"role": "model", "parts": parts})

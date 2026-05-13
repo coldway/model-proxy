@@ -16,46 +16,14 @@ from src.models.schemas import (
     ChatCompletionResponse,
     ChatMessage,
     Choice,
-    FunctionCall,
-    ToolCall,
     UsageInfo,
 )
 from src.providers.base import BaseProvider
+from src.providers.utils import msg_to_dict, parse_tool_calls
 
 logger = logging.getLogger(__name__)
 
 GROQ_API_BASE = "https://api.groq.com/openai/v1"
-
-
-def _msg_to_dict(m: ChatMessage) -> dict:
-    """将 ChatMessage 转为 OpenAI API 格式的 dict（含 tool_calls/tool_call_id）"""
-    d: dict = {"role": m.role}
-    if m.content is not None:
-        d["content"] = m.content
-    if m.tool_calls:
-        d["tool_calls"] = [tc.model_dump() for tc in m.tool_calls]
-    if m.tool_call_id:
-        d["tool_call_id"] = m.tool_call_id
-    if m.name:
-        d["name"] = m.name
-    return d
-
-
-def _parse_tool_calls(raw_tcs: list[dict] | None) -> list[ToolCall] | None:
-    """从 API 响应解析 tool_calls"""
-    if not raw_tcs:
-        return None
-    return [
-        ToolCall(
-            id=tc["id"],
-            type=tc.get("type", "function"),
-            function=FunctionCall(
-                name=tc["function"]["name"],
-                arguments=tc["function"]["arguments"],
-            ),
-        )
-        for tc in raw_tcs
-    ]
 
 
 class GroqProvider(BaseProvider):
@@ -64,6 +32,9 @@ class GroqProvider(BaseProvider):
     def __init__(self, api_key: str):
         super().__init__(api_key)
         self._client = httpx.AsyncClient(timeout=60.0)
+
+    async def close(self) -> None:
+        await self._client.aclose()
 
     def _build_headers(self) -> dict:
         return {
@@ -74,7 +45,7 @@ class GroqProvider(BaseProvider):
     def _build_payload(self, model: str, request: ChatCompletionRequest, stream: bool = False) -> dict:
         payload: dict = {
             "model": model,
-            "messages": [_msg_to_dict(m) for m in request.messages],
+            "messages": [msg_to_dict(m) for m in request.messages],
             "temperature": request.temperature,
             "stream": stream,
         }
@@ -110,7 +81,7 @@ class GroqProvider(BaseProvider):
                     message=ChatMessage(
                         role=msg["role"],
                         content=msg.get("content"),
-                        tool_calls=_parse_tool_calls(msg.get("tool_calls")),
+                        tool_calls=parse_tool_calls(msg.get("tool_calls")),
                     ),
                     finish_reason=choice.get("finish_reason", "stop"),
                 )

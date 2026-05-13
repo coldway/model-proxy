@@ -5,10 +5,11 @@ from __future__ import annotations
 
 import logging
 import sys
+from contextlib import asynccontextmanager
 
 import uvicorn
-from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from src.api.routes import init_routes, router
 from src.api.ui import UI_HTML
@@ -26,12 +27,16 @@ from src.scheduler.dispatcher import Dispatcher
 from src.scheduler.history import RequestHistory
 from src.scheduler.rate_limiter import RateLimiter
 
+from src.api.log_buffer import install as install_log_buffer
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     handlers=[logging.StreamHandler(sys.stdout)],
 )
 logger = logging.getLogger(__name__)
+
+install_log_buffer(max_records=2000)
 
 
 def create_app() -> FastAPI:
@@ -45,7 +50,12 @@ def create_app() -> FastAPI:
     rate_limiter = RateLimiter()
     history = RequestHistory(persist=True)
     capability_cache = CapabilityCache()
-    dispatcher = Dispatcher(rate_limiter, capability_cache=capability_cache, history=history)
+    dispatcher = Dispatcher(
+        rate_limiter, capability_cache=capability_cache, history=history,
+        route_cache_ttl=settings.route_cache_ttl,
+        breaker_threshold=settings.breaker_threshold,
+        breaker_cooldown=settings.breaker_cooldown,
+    )
 
     # 注册各厂商 Provider（根据 API Key 是否存在决定是否注册）
     provider_factories = {
@@ -77,11 +87,38 @@ def create_app() -> FastAPI:
         history, catalog, provider_factories, capability_tester,
     )
 
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        yield
+        logger.info("正在优雅关闭…")
+        rate_limiter.flush()
+        history.flush()
+        catalog.flush()
+        await dispatcher.close_providers()
+        logger.info("所有资源已释放")
+
+    admin_token = settings.admin_token.strip()
+    OPEN_PATHS = frozenset({"/", "/ui"})
+
     app = FastAPI(
         title="Model Proxy",
         description="免费大模型推理代理服务",
         version="0.1.0",
+        lifespan=lifespan,
     )
+
+    if admin_token:
+        @app.middleware("http")
+        async def admin_auth_middleware(request: Request, call_next):
+            path = request.url.path
+            if path in OPEN_PATHS or path.startswith("/v1/"):
+                return await call_next(request)
+            auth = request.headers.get("Authorization", "")
+            if auth != f"Bearer {admin_token}":
+                return JSONResponse(status_code=401, content={"detail": "未授权，请提供有效的管理令牌"})
+            return await call_next(request)
+        logger.info("管理面板认证已启用（/api/* 路由需要 Bearer Token）")
+
     app.include_router(router)
 
     @app.get("/ui", response_class=HTMLResponse)
@@ -98,6 +135,10 @@ def create_app() -> FastAPI:
     return app
 
 
+# 单 Worker 进程设计：
+# 所有状态（dispatcher、rate_limiter、history 等）以进程内单例持有，
+# 不支持 uvicorn --workers N 多进程模式（会导致状态不一致）。
+# 如需水平扩展，应改用外部存储（Redis 等）管理共享状态。
 app = create_app()
 
 if __name__ == "__main__":
@@ -108,4 +149,5 @@ if __name__ == "__main__":
         host=_config.settings.host,
         port=_config.settings.port,
         reload=True,
+        workers=1,
     )

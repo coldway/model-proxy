@@ -26,8 +26,9 @@ class TestConfigManager:
         manager = ConfigManager(config_path=tmp_path / "config.yaml", catalog=catalog)
         config = manager.config
         assert "google" in config.providers
-        assert len(config.providers["google"].models) == 4
-        assert config.providers["google"].models[0].name == "gemini-2.5-pro"
+        enabled_google = [m for m in catalog.get_models("google") if m.get("enabled")]
+        assert len(config.providers["google"].models) == len(enabled_google)
+        assert config.providers["google"].models[0].name == enabled_google[0]["id"]
 
     def test_load_from_file(self, tmp_path):
         config_data = {
@@ -57,8 +58,12 @@ class TestConfigManager:
         catalog = _make_catalog(tmp_path)
         manager = ConfigManager(config_path=tmp_path / "config.yaml", catalog=catalog)
         enabled = manager.get_enabled_models()
-        priorities = [m.priority for _, m in enabled]
-        assert priorities == sorted(priorities)
+        prov_priorities = {
+            pid: catalog.get_provider_priority(pid)
+            for pid, _ in enabled
+        }
+        sort_keys = [(prov_priorities[pid], m.priority) for pid, m in enabled]
+        assert sort_keys == sorted(sort_keys)
 
     def test_toggle_model(self, tmp_path):
         catalog = _make_catalog(tmp_path)

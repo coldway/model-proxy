@@ -28,6 +28,7 @@ SYSTEM_PROMPT = (
     "你是 Model Proxy 的内置 AI 助手。"
     "你可以回答关于各种话题的问题，帮助用户完成文本分析、编程、翻译、写作等任务。"
     "请用简洁、专业的中文回答，除非用户使用其他语言提问。"
+    "直接输出最终回复，不要输出思考过程或推理步骤。"
 )
 
 
@@ -123,8 +124,10 @@ class ChatSession:
 class SessionManager:
     """管理所有聊天会话"""
 
-    def __init__(self):
+    def __init__(self, *, max_sessions: int = MAX_SESSIONS, max_context_tokens: int = MAX_CONTEXT_TOKENS):
         self._sessions: dict[str, ChatSession] = {}
+        self._max_sessions = max_sessions
+        self._max_context_tokens = max_context_tokens
         self._load()
 
     def create(self, model: str = "auto", title: str = "新对话") -> ChatSession:
@@ -175,10 +178,10 @@ class SessionManager:
         self._save()
 
     def _enforce_limit(self) -> None:
-        if len(self._sessions) <= MAX_SESSIONS:
+        if len(self._sessions) <= self._max_sessions:
             return
         oldest = sorted(self._sessions.values(), key=lambda s: s.updated_at)
-        while len(self._sessions) > MAX_SESSIONS:
+        while len(self._sessions) > self._max_sessions:
             to_remove = oldest.pop(0)
             del self._sessions[to_remove.id]
 

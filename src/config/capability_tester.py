@@ -104,6 +104,10 @@ class CapabilityCache:
         self._data.clear()
 
 
+PROBE_INTERVAL_SECONDS = 1
+INTER_MODEL_INTERVAL_SECONDS = 2
+
+
 class CapabilityTester:
     """模型能力测试器
 
@@ -112,8 +116,17 @@ class CapabilityTester:
     - available: 模型是否可正常调用（非 429/503）
     """
 
-    def __init__(self, cache: CapabilityCache | None = None):
+    _TEST_IMAGE_B64: str | None = None
+
+    def __init__(
+        self,
+        cache: CapabilityCache | None = None,
+        probe_interval: float = PROBE_INTERVAL_SECONDS,
+        inter_model_interval: float = INTER_MODEL_INTERVAL_SECONDS,
+    ):
         self._cache = cache or CapabilityCache()
+        self._probe_interval = probe_interval
+        self._inter_model_interval = inter_model_interval
 
     @property
     def cache(self) -> CapabilityCache:
@@ -237,8 +250,12 @@ class CapabilityTester:
             "chinese_response": content[:60],
         }
 
-    def _make_test_image_b64(self) -> str:
-        """生成一个 20x20 的红色方块 PNG（base64），用于视觉探针测试"""
+    @classmethod
+    def _get_test_image_b64(cls) -> str:
+        """返回缓存的 20x20 红色方块 PNG（base64），首次调用时生成"""
+        if cls._TEST_IMAGE_B64 is not None:
+            return cls._TEST_IMAGE_B64
+
         import base64
         import struct
         import zlib
@@ -260,7 +277,8 @@ class CapabilityTester:
         png += _png_chunk(b"IDAT", zlib.compress(raw_data))
         png += _png_chunk(b"IEND", b"")
 
-        return base64.b64encode(png).decode("ascii")
+        cls._TEST_IMAGE_B64 = base64.b64encode(png).decode("ascii")
+        return cls._TEST_IMAGE_B64
 
     async def _test_vision(
         self, provider, model_id: str,
@@ -268,7 +286,7 @@ class CapabilityTester:
         """测试视觉/图像理解能力（使用内联 base64 小图片，避免网络依赖）"""
         from src.models.schemas import ChatCompletionRequest, ChatMessage
 
-        img_b64 = self._make_test_image_b64()
+        img_b64 = self._get_test_image_b64()
         data_url = f"data:image/png;base64,{img_b64}"
 
         messages = [
@@ -459,7 +477,7 @@ class CapabilityTester:
         # ── 阶段 2：多轮 tool calling（仅当单轮通过时） ──
         if result["tool_calling"]:
             try:
-                await asyncio.sleep(1)
+                await asyncio.sleep(self._probe_interval)
                 mt_result = await self._test_multi_turn_tc(provider, model_id, tools)
                 result.update(mt_result)
             except Exception as e:
@@ -468,7 +486,7 @@ class CapabilityTester:
 
         # ── 阶段 3：中文能力 ──
         try:
-            await asyncio.sleep(1)
+            await asyncio.sleep(self._probe_interval)
             cn_result = await self._test_chinese(provider, model_id)
             result.update(cn_result)
         except Exception as e:
@@ -476,7 +494,7 @@ class CapabilityTester:
 
         # ── 阶段 4：视觉/图像理解 ──
         try:
-            await asyncio.sleep(1)
+            await asyncio.sleep(self._probe_interval)
             vis_result = await self._test_vision(provider, model_id)
             result.update(vis_result)
         except Exception as e:
@@ -484,7 +502,7 @@ class CapabilityTester:
 
         # ── 阶段 5：结构化 JSON 输出 ──
         try:
-            await asyncio.sleep(1)
+            await asyncio.sleep(self._probe_interval)
             json_result = await self._test_json_mode(provider, model_id)
             result.update(json_result)
         except Exception as e:
@@ -492,7 +510,7 @@ class CapabilityTester:
 
         # ── 阶段 6：流式输出 ──
         try:
-            await asyncio.sleep(1)
+            await asyncio.sleep(self._probe_interval)
             stream_result = await self._test_streaming(provider, model_id)
             result.update(stream_result)
         except Exception as e:
@@ -500,7 +518,7 @@ class CapabilityTester:
 
         # ── 阶段 7：推理能力 ──
         try:
-            await asyncio.sleep(1)
+            await asyncio.sleep(self._probe_interval)
             reason_result = await self._test_reasoning(provider, model_id)
             result.update(reason_result)
         except Exception as e:
@@ -535,7 +553,7 @@ class CapabilityTester:
             )
             results.append(result)
             if not result.get("cached"):
-                await asyncio.sleep(2)
+                await asyncio.sleep(self._inter_model_interval)
 
         self._cache.save()
         return results

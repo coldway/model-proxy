@@ -6,7 +6,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class ProviderName(str, Enum):
@@ -43,6 +43,13 @@ class AppSettings(BaseModel):
     default_provider: str = "google"
     auto_switch: bool = True
     log_level: str = "info"
+    admin_token: str = Field(default="", description="管理面板认证令牌，为空则不启用认证")
+    route_cache_ttl: int = Field(default=600, description="路由缓存有效期（秒）")
+    breaker_threshold: int = Field(default=3, description="连续失败 N 次触发厂商熔断")
+    breaker_cooldown: int = Field(default=300, description="熔断冷却时间（秒）")
+    max_context_tokens: int = Field(default=8000, description="会话上下文最大 token 数")
+    max_sessions: int = Field(default=50, description="最大会话数")
+    probe_interval: int = Field(default=5, description="能力探测间隔（秒）")
 
 
 class AppConfig(BaseModel):
@@ -85,10 +92,23 @@ class ChatMessage(BaseModel):
     tool_call_id: str | None = None
     name: str | None = None
 
+    @field_validator("content")
+    @classmethod
+    def validate_content(cls, v):
+        if isinstance(v, list):
+            for part in v:
+                if not isinstance(part, dict):
+                    raise ValueError(f"content list 中的每个元素必须是 dict，实际为 {type(part).__name__}")
+                if "type" not in part:
+                    raise ValueError("content list 中的 dict 必须包含 'type' 字段")
+                if part["type"] not in ("text", "image_url"):
+                    raise ValueError(f"不支持的 content part 类型: {part['type']}")
+        return v
+
 
 class ChatCompletionRequest(BaseModel):
     model: str = "auto"
-    messages: list[ChatMessage]
+    messages: list[ChatMessage] = Field(..., min_length=1)
     temperature: float = 0.7
     max_tokens: int | None = None
     stream: bool = False

@@ -358,6 +358,10 @@ UI_HTML = """<!DOCTYPE html>
         /* 分割线 */
         .divider { border: none; border-top: 1px solid rgba(51,65,85,0.4); margin: 16px 0; }
 
+        /* 消息气泡代码块 */
+        .msg-bubble pre { margin: 8px 0; }
+        .msg-bubble code { font-family: "SF Mono", "Cascadia Code", "Fira Code", monospace; }
+
         /* 响应式 */
         @media (max-width: 768px) {
             .container { padding: 12px; }
@@ -365,6 +369,15 @@ UI_HTML = """<!DOCTYPE html>
             .stats-grid, .discovery-grid, .config-grid { grid-template-columns: 1fr; }
             header { flex-direction: column; gap: 10px; align-items: flex-start; }
             .modal { width: 96%; padding: 18px; }
+            .chat-sidebar { display: none !important; }
+            .chat-sidebar.show { display: flex !important; position: fixed; left: 0; top: 0; bottom: 0; z-index: 999; width: 260px; border-radius: 0; }
+            .chat-sidebar-toggle { display: inline-flex !important; }
+            .chat-sidebar-overlay { display: none; position: fixed; inset: 0; z-index: 998; background: rgba(0,0,0,0.5); }
+            .chat-sidebar-overlay.show { display: block; }
+        }
+        @media (min-width: 769px) {
+            .chat-sidebar-toggle { display: none !important; }
+            .chat-sidebar-overlay { display: none !important; }
         }
     </style>
 </head>
@@ -390,6 +403,9 @@ UI_HTML = """<!DOCTYPE html>
             <button class="tab" onclick="switchTab('models', this)">
                 <span>🤖</span> 模型管理
             </button>
+            <button class="tab" onclick="switchTab('routing', this)">
+                <span>🧭</span> 路由决策
+            </button>
             <button class="tab" onclick="switchTab('chat', this)">
                 <span>💬</span> 问答聊天
             </button>
@@ -414,27 +430,58 @@ UI_HTML = """<!DOCTYPE html>
             </div>
         </div>
 
+        <!-- 路由决策 -->
+        <div id="panel-routing" class="panel">
+            <div class="card">
+                <div class="card-header">
+                    <h3>路由决策日志</h3>
+                    <div style="display:flex;gap:8px">
+                        <button class="btn btn-ghost btn-sm" onclick="loadRoutingLog()">🔄 刷新</button>
+                    </div>
+                </div>
+                <div id="routing-log" style="max-height:calc(100vh - 280px);overflow-y:auto">
+                    <div class="empty-state"><h4>点击刷新查看路由决策</h4></div>
+                </div>
+            </div>
+        </div>
+
         <!-- 问答聊天 -->
         <div id="panel-chat" class="panel">
-            <div class="card" style="display:flex;flex-direction:column;height:calc(100vh - 220px);min-height:400px">
-                <div class="card-header" style="flex-shrink:0">
-                    <h3>问答聊天</h3>
-                    <div style="display:flex;gap:8px;align-items:center">
-                        <select id="chat-model" style="width:auto;min-width:180px">
-                            <option value="auto">🤖 自动选择模型</option>
-                        </select>
-                        <button class="btn btn-ghost btn-sm" onclick="clearChat()">清空</button>
+            <div class="chat-sidebar-overlay" id="chat-sidebar-overlay" onclick="toggleChatSidebar()"></div>
+            <div style="display:flex;gap:16px;height:calc(100vh - 220px);min-height:400px">
+                <!-- 会话列表侧栏 -->
+                <div class="chat-sidebar" id="chat-sidebar" style="width:220px;flex-shrink:0;display:flex;flex-direction:column;background:var(--bg-secondary);border-radius:var(--radius);border:1px solid var(--border);overflow:hidden">
+                    <div style="padding:12px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
+                        <span style="font-size:0.85rem;font-weight:600">会话列表</span>
+                        <button class="btn btn-primary btn-sm" onclick="createNewSession()" style="padding:3px 8px;font-size:0.75rem">+ 新建</button>
                     </div>
+                    <div id="session-list" style="flex:1;overflow-y:auto;padding:6px"></div>
                 </div>
-                <div id="chat-messages" style="flex:1;overflow-y:auto;padding:16px 0;display:flex;flex-direction:column;gap:12px">
-                    <div style="text-align:center;color:var(--text-muted);padding:40px 0">
-                        <p>选择模型或使用自动模式，开始对话</p>
-                        <p style="font-size:0.8rem;margin-top:8px">自动模式会按厂商优先级 → 模型优先级选择可用模型</p>
+                <!-- 聊天主区域 -->
+                <div class="card" style="flex:1;display:flex;flex-direction:column;min-width:0">
+                    <div class="card-header" style="flex-shrink:0">
+                        <div style="display:flex;align-items:center;gap:8px">
+                            <button class="btn btn-ghost btn-sm chat-sidebar-toggle" onclick="toggleChatSidebar()" style="padding:4px 8px">☰</button>
+                            <h3 id="chat-title" style="cursor:pointer" onclick="renameCurrentSession()" title="点击重命名">新对话</h3>
+                            <span id="chat-context-info" style="font-size:0.7rem;color:var(--text-muted);padding:2px 8px;background:var(--bg-tertiary);border-radius:10px"></span>
+                        </div>
+                        <div style="display:flex;gap:8px;align-items:center">
+                            <select id="chat-model" style="width:auto;min-width:180px">
+                                <option value="auto">🤖 自动选择模型</option>
+                            </select>
+                            <button class="btn btn-ghost btn-sm" onclick="deleteCurrentSession()" title="删除当前会话">🗑</button>
+                        </div>
                     </div>
-                </div>
-                <div style="flex-shrink:0;border-top:1px solid var(--border);padding-top:16px;display:flex;gap:8px">
-                    <input id="chat-input" placeholder="输入消息..." style="flex:1" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChat()}">
-                    <button class="btn btn-primary" onclick="sendChat()" id="chat-send-btn">发送</button>
+                    <div id="chat-messages" style="flex:1;overflow-y:auto;padding:16px 0;display:flex;flex-direction:column;gap:12px">
+                        <div style="text-align:center;color:var(--text-muted);padding:40px 0">
+                            <p>点击左侧「+ 新建」创建会话，开始对话</p>
+                            <p style="font-size:0.8rem;margin-top:8px">对话历史自动保存 · 流式输出 · Markdown 渲染</p>
+                        </div>
+                    </div>
+                    <div style="flex-shrink:0;border-top:1px solid var(--border);padding-top:16px;display:flex;gap:8px">
+                        <input id="chat-input" placeholder="输入消息...（Enter 发送）" style="flex:1" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChat()}">
+                        <button class="btn btn-primary" onclick="sendChat()" id="chat-send-btn">发送</button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -548,6 +595,7 @@ UI_HTML = """<!DOCTYPE html>
             el.classList.add('active');
             document.getElementById('panel-' + name).classList.add('active');
             location.hash = name;
+            if (name === 'routing') loadRoutingLog();
         }
 
         // --- Toast 通知 ---
@@ -571,6 +619,47 @@ UI_HTML = """<!DOCTYPE html>
             }
         });
 
+        // --- 路由决策日志 ---
+        async function loadRoutingLog() {
+            const container = document.getElementById('routing-log');
+            try {
+                const resp = await fetch(API + '/api/routing/log');
+                const data = await resp.json();
+                const decisions = data.decisions || [];
+                if (!decisions.length) {
+                    container.innerHTML = '<div class="empty-state"><h4>暂无路由记录</h4><p>发送 model=auto 的请求后，这里会显示路由决策过程</p></div>';
+                    return;
+                }
+                container.innerHTML = decisions.map(d => {
+                    const strategyColor = d.strategy.includes('快速') ? 'var(--accent-green)' :
+                                          d.strategy.includes('LLM') ? 'var(--accent-blue)' :
+                                          d.strategy.includes('缓存') ? 'var(--accent-purple)' : 'var(--accent-yellow)';
+                    const cachedTag = d.cached ? '<span style="font-size:0.65rem;padding:1px 6px;border-radius:8px;background:rgba(139,92,246,0.12);color:var(--accent-purple)">⚡ 缓存</span>' : '';
+                    const candidates = (d.candidates || []).map(c => {
+                        const isSelected = d.selected && d.selected.endsWith(c);
+                        return `<span style="font-size:0.7rem;padding:2px 6px;border-radius:6px;background:${isSelected ? 'rgba(16,185,129,0.15)' : 'rgba(100,116,139,0.1)'};color:${isSelected ? 'var(--accent-green)' : 'var(--text-muted)'};font-weight:${isSelected ? '600' : '400'}">${c}</span>`;
+                    }).join(' ');
+                    return `<div style="padding:12px;background:var(--bg-primary);border-radius:8px;margin-bottom:8px;border:1px solid var(--border)">
+                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+                            <div style="display:flex;align-items:center;gap:8px">
+                                <span style="font-size:0.75rem;font-weight:600;color:${strategyColor}">${d.strategy}</span>
+                                ${cachedTag}
+                            </div>
+                            <span style="font-size:0.7rem;color:var(--text-muted)">${d.timestamp || ''}</span>
+                        </div>
+                        <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
+                            <span style="font-size:0.7rem;color:var(--text-muted)">选择:</span>
+                            <span style="font-size:0.8rem;font-weight:600;color:var(--accent-green)">${d.selected || '-'}</span>
+                        </div>
+                        ${d.user_hint ? `<div style="font-size:0.7rem;color:var(--text-secondary);margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">📝 ${escapeHtml(d.user_hint)}</div>` : ''}
+                        <div style="display:flex;gap:4px;flex-wrap:wrap">${candidates}</div>
+                    </div>`;
+                }).join('');
+            } catch(e) {
+                container.innerHTML = `<div class="empty-state"><h4>加载失败</h4><p>${e.message}</p></div>`;
+            }
+        }
+
         // --- 使用量 ---
         async function loadUsage() {
             try {
@@ -583,17 +672,45 @@ UI_HTML = """<!DOCTYPE html>
                     return;
                 }
 
+                // 拉取模型能力信息
+                let capMap = {};
+                try {
+                    const capResp = await fetch(API + '/api/capabilities');
+                    const capData = await capResp.json();
+                    const caps = capData.capabilities || capData;
+                    for (const [key, val] of Object.entries(caps)) {
+                        const parts = key.split('/');
+                        const modelId = parts.slice(1).join('/');
+                        capMap[modelId] = val;
+                    }
+                } catch(e) {}
+
+                let blacklistSet = new Set();
+                try {
+                    const blResp = await fetch(API + '/api/blacklist');
+                    const blData = await blResp.json();
+                    (blData.blacklist || []).forEach(b => blacklistSet.add(b.model));
+                } catch(e) {}
+
                 grid.innerHTML = data.stats.map(s => {
                     const pct = s.rpd_limit > 0 ? (s.today_requests / s.rpd_limit * 100) : 0;
                     const color = pct > 80 ? 'red' : pct > 50 ? 'yellow' : 'green';
-                    const statusClass = s.available ? 'available' : 'unavailable';
-                    const statusText = s.available ? '● 可用' : '● 不可用';
-                    return `<div class="stat-card">
+                    const blKey = s.provider + ':' + s.model;
+                    const is429 = blacklistSet.has(blKey);
+                    const statusClass = is429 ? 'unavailable' : (s.available ? 'available' : 'unavailable');
+                    const statusText = is429 ? '🚫 429限流（次日恢复）' : (s.available ? '● 可用' : '● 不可用');
+                    const borderStyle = is429 ? 'border-left:3px solid var(--accent-red)' : '';
+                    const unblockBtn = is429 ? `<button class="btn btn-ghost btn-sm" style="font-size:0.65rem;margin-top:4px" onclick="unblock429('${s.provider}','${s.model}')">🔓 立即解除</button>` : '';
+                    const cap = capMap[s.model];
+                    const capHtml = cap ? buildCapBadges(cap) : '';
+                    return `<div class="stat-card" style="${borderStyle}">
                         <div class="model-header">
                             <span class="model-name">${s.model}</span>
                             <span class="provider-tag">${s.provider}</span>
                         </div>
                         <span class="availability ${statusClass}">${statusText}</span>
+                        ${unblockBtn}
+                        ${capHtml}
                         <div class="progress-container">
                             <div class="progress-label">
                                 <span>每日用量</span>
@@ -613,6 +730,17 @@ UI_HTML = """<!DOCTYPE html>
                 document.getElementById('last-refresh').textContent = '更新于 ' + new Date().toLocaleTimeString();
             } catch (e) {
                 toast('加载使用量失败: ' + e.message, 'error');
+            }
+        }
+
+        async function unblock429(provider, model) {
+            try {
+                const resp = await fetch(API + `/api/blacklist/clear?provider=${provider}&model=${encodeURIComponent(model)}`, {method: 'DELETE'});
+                const data = await resp.json();
+                toast(`已解除 ${model} 的 429 限流状态`, 'success');
+                loadUsage();
+            } catch(e) {
+                toast('解除失败: ' + e.message, 'error');
             }
         }
 
@@ -769,11 +897,60 @@ UI_HTML = """<!DOCTYPE html>
             await loadProviderModels(providerId);
         }
 
+        function buildCapBadges(cap) {
+            if (!cap) return '';
+            const items = [
+                [cap.tool_calling, '🔧 工具调用', 'rgba(59,130,246,0.12)', 'var(--accent-blue)'],
+                [cap.multi_turn_tc, '🔄 多轮对话', 'rgba(139,92,246,0.12)', 'var(--accent-purple)'],
+                [cap.chinese, '🇨🇳 中文', 'rgba(245,158,11,0.12)', 'var(--accent-yellow)'],
+                [cap.vision, '👁 视觉', 'rgba(6,182,212,0.12)', 'var(--accent-cyan)'],
+                [cap.json_mode, '📋 JSON', 'rgba(16,185,129,0.12)', 'var(--accent-green)'],
+                [cap.streaming, '⚡ 流式', 'rgba(139,92,246,0.12)', 'var(--accent-purple)'],
+                [cap.reasoning, '🧠 推理', 'rgba(59,130,246,0.12)', 'var(--accent-blue)'],
+            ];
+            const latTag = cap.latency_ms ? `<span style="font-size:0.6rem;padding:1px 5px;border-radius:6px;background:rgba(100,116,139,0.1);color:${cap.latency_ms < 3000 ? 'var(--accent-green)' : cap.latency_ms < 8000 ? 'var(--accent-yellow)' : 'var(--accent-red)'}">${(cap.latency_ms/1000).toFixed(1)}s</span>` : '';
+            const badges = items.filter(([v]) => v).map(([, text, bg, fg]) =>
+                `<span style="font-size:0.6rem;padding:1px 5px;border-radius:6px;background:${bg};color:${fg}">${text}</span>`
+            ).join('');
+            const errTag = cap.error ? `<span style="font-size:0.6rem;color:var(--accent-red)" title="${escapeHtml(cap.error)}">⚠ ${cap.error.includes('429') ? '限流' : '异常'}</span>` : '';
+            return `<div style="display:flex;gap:3px;flex-wrap:wrap;align-items:center;margin-top:4px">${latTag}${badges}${errTag}</div>`;
+        }
+
+        function buildCapSummary(cap) {
+            if (!cap || cap.error) return '';
+            const descs = [];
+            if (cap.tool_calling) descs.push('支持工具调用');
+            if (cap.multi_turn_tc) descs.push('多轮对话稳定');
+            else if (cap.tool_calling && cap.mt_issue === 'loop_call') descs.push('多轮会循环调用');
+            if (cap.chinese) descs.push('中文回答优秀');
+            if (cap.vision) descs.push('支持图像理解');
+            if (cap.json_mode) descs.push('结构化JSON输出');
+            if (cap.streaming) descs.push('支持流式输出');
+            if (cap.reasoning) descs.push('逻辑推理能力强');
+            if (!descs.length) return '';
+            return `<div style="font-size:0.7rem;color:var(--text-secondary);margin-top:3px">${descs.join(' · ')}</div>`;
+        }
+
         async function loadProviderModels(providerId) {
-            const resp = await fetch(API + `/api/catalog/provider/${providerId}/models`);
-            const data = await resp.json();
+            const [catalogResp, capResp] = await Promise.all([
+                fetch(API + `/api/catalog/provider/${providerId}/models`),
+                fetch(API + `/api/capabilities`).catch(() => null),
+            ]);
+            const data = await catalogResp.json();
             const allModels = data.models || [];
             const container = document.getElementById('provider-models-list');
+
+            let capMap = {};
+            if (capResp && capResp.ok) {
+                const capData = await capResp.json();
+                const caps = capData.capabilities || capData;
+                for (const [key, val] of Object.entries(caps)) {
+                    const parts = key.split('/');
+                    if (parts[0] === providerId) {
+                        capMap[parts.slice(1).join('/')] = val;
+                    }
+                }
+            }
 
             if (allModels.length === 0) {
                 container.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted)">该厂商目录中暂无模型，请从下方搜索或拉取添加</div>';
@@ -790,15 +967,24 @@ UI_HTML = """<!DOCTYPE html>
                 const isEnabled = m.enabled;
                 const opacity = isEnabled ? '1' : '0.6';
                 const borderColor = isEnabled ? 'var(--border)' : 'var(--bg-tertiary)';
+                const cap = capMap[m.id];
+                const capBadgesHtml = buildCapBadges(cap);
+                const capSummaryHtml = buildCapSummary(cap);
+                const noCap = !cap ? '<span style="font-size:0.65rem;color:var(--text-muted)">未测试</span>' : '';
                 return `<div class="model-item" draggable="${isEnabled}" data-model-id="${m.id}" style="display:flex;align-items:center;justify-content:space-between;padding:12px;background:var(--bg-primary);border-radius:8px;margin-bottom:8px;border:1px solid ${borderColor};opacity:${opacity};${isEnabled ? 'cursor:grab' : ''}">
-                    <div style="display:flex;align-items:center;gap:12px">
+                    <div style="display:flex;align-items:center;gap:12px;flex:1;min-width:0">
                         <span class="priority-badge">${isEnabled ? (m.priority || 99) : '-'}</span>
-                        <div>
-                            <div style="font-weight:600;font-size:0.9rem">${m.name || m.id}</div>
-                            <div style="font-size:0.75rem;color:var(--text-muted)">RPD: ${m.default_rpd || '∞'} | RPM: ${m.default_rpm || '∞'}</div>
+                        <div style="flex:1;min-width:0">
+                            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+                                <span style="font-weight:600;font-size:0.9rem">${m.name || m.id}</span>
+                                ${noCap}
+                            </div>
+                            ${capBadgesHtml}
+                            ${capSummaryHtml}
+                            <div style="font-size:0.7rem;color:var(--text-muted);margin-top:2px">RPD: ${m.default_rpd || '∞'} | RPM: ${m.default_rpm || '∞'}</div>
                         </div>
                     </div>
-                    <div style="display:flex;align-items:center;gap:8px">
+                    <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
                         <label class="toggle" onclick="event.stopPropagation()">
                             <input type="checkbox" ${isEnabled ? 'checked' : ''} onchange="toggleModelAndReload('${providerId}','${m.id}',this.checked)">
                             <span class="slider"></span>
@@ -971,7 +1157,7 @@ UI_HTML = """<!DOCTYPE html>
 
         async function fetchRemoteModels() {
             const container = document.getElementById('provider-search-results');
-            container.innerHTML = '<div style="padding:12px;text-align:center;color:var(--text-muted)">正在拉取厂商远程模型列表...</div>';
+            container.innerHTML = '<div style="padding:16px;text-align:center;color:var(--accent-cyan)"><div style="font-size:1.2rem;margin-bottom:8px">⏳</div>正在拉取模型列表并测试能力...<br><span style="font-size:0.75rem;color:var(--text-muted)">首次测试每个模型需要几秒，已测试的模型会从缓存读取</span></div>';
             try {
                 const resp = await fetch(API + `/api/provider/${currentProvider}/models`);
                 if (!resp.ok) {
@@ -981,7 +1167,6 @@ UI_HTML = """<!DOCTYPE html>
                     return;
                 }
                 const data = await resp.json();
-                const container = document.getElementById('provider-search-results');
 
                 const catalogResp = await fetch(API + `/api/catalog/provider/${currentProvider}/models`);
                 const catalogData = await catalogResp.json();
@@ -989,28 +1174,86 @@ UI_HTML = """<!DOCTYPE html>
                 (catalogData.models || []).forEach(m => { catalogMap[m.id] = m; });
 
                 const remoteModels = data.available_models || [];
+                const capabilities = data.capabilities || {};
+                const capSummary = capabilities.summary || {};
+                const allCapResults = [...(capabilities.tested || []), ...(capabilities.cached || [])];
+                const capMap = {};
+                allCapResults.forEach(r => { capMap[r.model] = r; });
+
                 if (remoteModels.length === 0) {
                     container.innerHTML = '<div style="padding:12px;text-align:center;color:var(--text-muted)">厂商未返回模型列表</div>';
                     return;
                 }
 
-                container.innerHTML = `<div style="margin-bottom:8px;font-size:0.8rem;color:var(--text-secondary)">厂商共 ${remoteModels.length} 个模型：</div>` +
+                const summaryHtml = capSummary.total ? `<div style="margin-bottom:12px;padding:10px 14px;background:var(--bg-primary);border-radius:8px;border:1px solid var(--border);display:flex;gap:16px;flex-wrap:wrap;align-items:center">
+                    <span style="font-size:0.85rem;font-weight:600;color:var(--accent-cyan)">能力检测</span>
+                    <span style="font-size:0.8rem;color:var(--text-secondary)">共 ${capSummary.total} 个模型</span>
+                    <span style="font-size:0.8rem;color:${capSummary.tested_now > 0 ? 'var(--accent-yellow)' : 'var(--accent-green)'}">🔬 本次测试: ${capSummary.tested_now}</span>
+                    <span style="font-size:0.8rem;color:var(--text-muted)">📦 缓存命中: ${capSummary.from_cache}</span>
+                    ${capSummary.all_cached ? '<span style="font-size:0.75rem;padding:2px 8px;background:rgba(16,185,129,0.15);color:var(--accent-green);border-radius:10px">✓ 全部已缓存</span>' : ''}
+                </div>` : '';
+
+                container.innerHTML = summaryHtml +
+                    `<div style="margin-bottom:8px;font-size:0.8rem;color:var(--text-secondary)">厂商共 ${remoteModels.length} 个模型：</div>` +
                     remoteModels.map(modelId => {
                         const inCatalog = catalogMap[modelId];
                         const isActive = inCatalog && inCatalog.enabled;
+                        const cap = capMap[modelId];
+
+                        let capBadges = '';
+                        if (cap) {
+                            const badge = (condition, trueText, falseText, trueBg, trueFg, falseBg, falseFg) => {
+                                const bg = condition ? trueBg : falseBg;
+                                const fg = condition ? trueFg : falseFg;
+                                const text = condition ? trueText : falseText;
+                                return `<span style="font-size:0.65rem;padding:1px 5px;border-radius:6px;background:${bg};color:${fg}">${text}</span>`;
+                            };
+                            const availBadge = badge(cap.available, '✓ 可用', '✗ 不可用', 'rgba(16,185,129,0.1)', 'var(--accent-green)', 'rgba(239,68,68,0.1)', 'var(--accent-red)');
+                            const tcBadge = badge(cap.tool_calling, '🔧 TC', '— TC', 'rgba(59,130,246,0.1)', 'var(--accent-blue)', 'rgba(100,116,139,0.1)', 'var(--text-muted)');
+                            const mtBg = cap.multi_turn_tc ? 'rgba(139,92,246,0.1)' : (cap.tool_calling ? 'rgba(239,68,68,0.1)' : 'rgba(100,116,139,0.05)');
+                            const mtColor = cap.multi_turn_tc ? 'var(--accent-purple)' : (cap.tool_calling ? 'var(--accent-red)' : 'var(--text-muted)');
+                            const mtText = cap.multi_turn_tc ? '🔄 多轮' : (cap.tool_calling ? (cap.mt_issue === 'loop_call' ? '🔁 循环' : '— 多轮') : '');
+                            const mtBadge = mtText ? `<span style="font-size:0.65rem;padding:1px 5px;border-radius:6px;background:${mtBg};color:${mtColor}">${mtText}</span>` : '';
+                            const cnBadge = badge(cap.chinese, '🇨🇳 中文', '— 中文', 'rgba(245,158,11,0.1)', 'var(--accent-yellow)', 'rgba(100,116,139,0.05)', 'var(--text-muted)');
+                            const visBadge = badge(cap.vision, '👁 视觉', '— 视觉', 'rgba(6,182,212,0.1)', 'var(--accent-cyan)', 'rgba(100,116,139,0.05)', 'var(--text-muted)');
+                            const jsonBadge = badge(cap.json_mode, '📋 JSON', '— JSON', 'rgba(16,185,129,0.1)', 'var(--accent-green)', 'rgba(100,116,139,0.05)', 'var(--text-muted)');
+                            const streamBadge = badge(cap.streaming, '⚡ 流式', '— 流式', 'rgba(139,92,246,0.1)', 'var(--accent-purple)', 'rgba(100,116,139,0.05)', 'var(--text-muted)');
+                            const reasonBadge = badge(cap.reasoning, '🧠 推理', '— 推理', 'rgba(59,130,246,0.1)', 'var(--accent-blue)', 'rgba(100,116,139,0.05)', 'var(--text-muted)');
+                            const latencyTag = cap.latency_ms ? `<span style="font-size:0.6rem;color:${cap.latency_ms < 3000 ? 'var(--accent-green)' : cap.latency_ms < 8000 ? 'var(--accent-yellow)' : 'var(--accent-red)'}">${(cap.latency_ms/1000).toFixed(1)}s</span>` : '';
+                            const cachedTag = cap.cached ? '<span style="font-size:0.6rem;color:var(--text-muted)">📦</span>' : '<span style="font-size:0.6rem;color:var(--accent-yellow)">🔬</span>';
+                            const errTag = cap.error ? `<span style="font-size:0.65rem;color:var(--accent-red)" title="${escapeHtml(cap.error)}">⚠</span>` : '';
+
+                            capBadges = `<div style="display:flex;gap:3px;align-items:center;flex-shrink:0;flex-wrap:wrap">
+                                ${cachedTag}${latencyTag}
+                                ${availBadge}${tcBadge}${mtBadge}${cnBadge}
+                                ${visBadge}${jsonBadge}${streamBadge}${reasonBadge}
+                                ${errTag}
+                            </div>`;
+                        }
+
                         let actionHtml;
                         if (isActive) {
-                            actionHtml = '<span style="font-size:0.75rem;color:var(--accent-green)">✓ 已启用</span>';
+                            actionHtml = '<span style="font-size:0.75rem;color:var(--accent-green);flex-shrink:0">✓ 已启用</span>';
                         } else if (inCatalog) {
                             actionHtml = `<button class="btn btn-primary btn-sm" onclick="activateFromCatalog('${currentProvider}','${modelId}')">启用</button>`;
                         } else {
                             actionHtml = `<button class="btn btn-sm btn-secondary" onclick="pullModelToCatalog('${currentProvider}','${modelId}')">拉取到目录</button>`;
                         }
-                        return `<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:var(--bg-primary);border-radius:6px;margin-bottom:4px;border:1px solid var(--border)">
-                            <span style="font-size:0.85rem">${modelId}</span>
-                            ${actionHtml}
+
+                        return `<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:var(--bg-primary);border-radius:6px;margin-bottom:4px;border:1px solid var(--border);gap:8px;flex-wrap:wrap">
+                            <span style="font-size:0.85rem;min-width:0;overflow:hidden;text-overflow:ellipsis">${modelId}</span>
+                            <div style="display:flex;gap:8px;align-items:center;flex-shrink:0">
+                                ${capBadges}
+                                ${actionHtml}
+                            </div>
                         </div>`;
                     }).join('');
+
+                if (capSummary.tested_now > 0) {
+                    toast(`已测试 ${capSummary.tested_now} 个新模型的能力`, 'success');
+                } else if (capSummary.all_cached) {
+                    toast('所有模型已从缓存加载', 'info');
+                }
             } catch (e) {
                 toast('拉取失败: ' + e.message, 'error');
             }
@@ -1152,33 +1395,148 @@ UI_HTML = """<!DOCTYPE html>
             }
         }
 
-        // --- 聊天功能 ---
-        let chatHistory = [];
+        // --- 聊天功能（会话管理 + 流式 + Markdown） ---
+        let currentSessionId = null;
 
         async function loadChatModelSelector() {
-            const resp = await fetch(API + '/v1/models');
+            try {
+                const resp = await fetch(API + '/v1/models');
+                const data = await resp.json();
+                const select = document.getElementById('chat-model');
+                const currentVal = select.value;
+                select.innerHTML = '<option value="auto">🤖 自动选择模型</option>';
+                data.models.filter(m => m.enabled).forEach(m => {
+                    select.innerHTML += `<option value="${m.id}">[${m.provider}] ${m.id}</option>`;
+                });
+                select.value = currentVal || 'auto';
+            } catch(e) {}
+        }
+
+        async function loadSessionList() {
+            try {
+                const resp = await fetch(API + '/api/chat/sessions');
+                const data = await resp.json();
+                const list = document.getElementById('session-list');
+                const sessions = data.sessions || [];
+                if (!sessions.length) {
+                    list.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:0.8rem">暂无会话</div>';
+                    return;
+                }
+                list.innerHTML = sessions.map(s => {
+                    const isActive = s.id === currentSessionId;
+                    const bg = isActive ? 'var(--accent-blue)' : 'transparent';
+                    const color = isActive ? '#fff' : 'var(--text-primary)';
+                    const t = new Date(s.updated_at * 1000).toLocaleString('zh-CN', {month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'});
+                    return '<div onclick="switchSession(\\''+s.id+'\\')" style="padding:8px 10px;border-radius:8px;margin-bottom:4px;cursor:pointer;background:'+bg+';color:'+color+';transition:all 0.15s">'
+                        + '<div style="font-size:0.82rem;font-weight:'+(isActive?'600':'400')+';overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+escapeHtml(s.title)+'</div>'
+                        + '<div style="font-size:0.65rem;color:'+(isActive?'rgba(255,255,255,0.7)':'var(--text-muted)')+';margin-top:2px;display:flex;justify-content:space-between">'
+                        + '<span>'+s.message_count+' 条</span><span>'+t+'</span></div></div>';
+                }).join('');
+            } catch(e) {
+                document.getElementById('session-list').innerHTML = '<div style="padding:12px;color:var(--accent-red);font-size:0.8rem">加载失败</div>';
+            }
+        }
+
+        async function createNewSession() {
+            const model = document.getElementById('chat-model').value;
+            const resp = await fetch(API + '/api/chat/sessions?model=' + encodeURIComponent(model), {method:'POST'});
             const data = await resp.json();
-            const select = document.getElementById('chat-model');
-            const currentVal = select.value;
-            select.innerHTML = '<option value="auto">🤖 自动选择模型</option>';
-            data.models.filter(m => m.enabled).forEach(m => {
-                select.innerHTML += `<option value="${m.id}">[${m.provider}] ${m.id}</option>`;
-            });
-            select.value = currentVal || 'auto';
+            currentSessionId = data.session.id;
+            localStorage.setItem('mp_current_session', currentSessionId);
+            await loadSessionList();
+            renderSessionMessages([]);
+            updateContextInfo(0, 0);
+            document.getElementById('chat-title').textContent = data.session.title;
         }
 
-        function clearChat() {
-            chatHistory = [];
-            document.getElementById('chat-messages').innerHTML = `
-                <div style="text-align:center;color:var(--text-muted);padding:40px 0">
-                    <p>选择模型或使用自动模式，开始对话</p>
-                    <p style="font-size:0.8rem;margin-top:8px">自动模式会按厂商优先级 → 模型优先级选择可用模型</p>
-                </div>`;
+        async function switchSession(sessionId) {
+            currentSessionId = sessionId;
+            localStorage.setItem('mp_current_session', sessionId);
+            await loadSessionList();
+            try {
+                const resp = await fetch(API + '/api/chat/sessions/' + sessionId);
+                if (!resp.ok) { currentSessionId = null; localStorage.removeItem('mp_current_session'); loadSessionList(); return; }
+                const data = await resp.json();
+                const s = data.session;
+                document.getElementById('chat-title').textContent = s.title;
+                renderSessionMessages(s.messages || []);
+                updateContextInfo(s.tokens_est, (s.messages||[]).length);
+            } catch(e) { toast('加载会话失败', 'error'); }
         }
 
-        function appendMessage(role, content, model) {
+        async function deleteCurrentSession() {
+            if (!currentSessionId) return;
+            if (!confirm('确认删除当前会话？')) return;
+            await fetch(API + '/api/chat/sessions/' + currentSessionId, {method:'DELETE'});
+            currentSessionId = null;
+            localStorage.removeItem('mp_current_session');
+            await loadSessionList();
+            renderSessionMessages([]);
+            document.getElementById('chat-title').textContent = '新对话';
+            updateContextInfo(0, 0);
+        }
+
+        async function renameCurrentSession() {
+            if (!currentSessionId) return;
+            const title = prompt('请输入新的会话标题:', document.getElementById('chat-title').textContent);
+            if (!title) return;
+            await fetch(API + '/api/chat/sessions/' + currentSessionId + '/title?title=' + encodeURIComponent(title), {method:'PUT'});
+            document.getElementById('chat-title').textContent = title;
+            loadSessionList();
+        }
+
+        function renderSessionMessages(messages) {
             const container = document.getElementById('chat-messages');
-            // 移除空状态提示
+            container.innerHTML = '';
+            if (!messages.length) {
+                const empty = document.createElement('div');
+                empty.style.cssText = 'text-align:center;color:var(--text-muted);padding:40px 0';
+                empty.innerHTML = '<p>开始输入消息，对话历史会自动保存</p><p style="font-size:0.8rem;margin-top:8px">刷新页面不丢失 · 支持多会话管理 · 流式输出</p>';
+                container.appendChild(empty);
+                return;
+            }
+            messages.forEach(m => appendMessage(m.role, m.content, m.model, false));
+        }
+
+        function updateContextInfo(tokensEst, msgCount) {
+            const el = document.getElementById('chat-context-info');
+            if (!tokensEst && !msgCount) { el.textContent = ''; return; }
+            const pct = Math.min(100, Math.round(tokensEst / 320));
+            const color = pct > 80 ? 'var(--accent-red)' : pct > 50 ? 'var(--accent-yellow)' : 'var(--accent-green)';
+            el.innerHTML = '<span style="color:'+color+'">~'+tokensEst+'</span> tokens · '+msgCount+' 条';
+        }
+
+        // --- Markdown 简易渲染 ---
+        function renderMarkdown(text) {
+            if (!text) return '';
+            let html = escapeHtml(text);
+            // 代码块 ```lang ... ```
+            html = html.replace(/```(\\w*)\\n([\\s\\S]*?)```/g, function(_, lang, code) {
+                return '<pre style="background:var(--bg-tertiary);padding:12px;border-radius:8px;overflow-x:auto;margin:8px 0;position:relative;font-size:0.82rem;line-height:1.5">'
+                    + (lang ? '<div style="position:absolute;top:4px;right:8px;font-size:0.65rem;color:var(--text-muted)">'+lang+'</div>' : '')
+                    + '<code>'+code+'</code></pre>';
+            });
+            // 行内代码 `code`
+            html = html.replace(/`([^`]+)`/g, '<code style="background:var(--bg-tertiary);padding:1px 5px;border-radius:4px;font-size:0.85em">$1</code>');
+            // 加粗 **text**
+            html = html.replace(/\\*\\*(.+?)\\*\\*/g, '<strong>$1</strong>');
+            // 斜体 *text*
+            html = html.replace(/\\*(.+?)\\*/g, '<em>$1</em>');
+            // 标题 ### text
+            html = html.replace(/^### (.+)$/gm, '<div style="font-size:1rem;font-weight:700;margin:8px 0 4px">$1</div>');
+            html = html.replace(/^## (.+)$/gm, '<div style="font-size:1.1rem;font-weight:700;margin:10px 0 4px">$1</div>');
+            // 无序列表
+            html = html.replace(/^- (.+)$/gm, '<div style="padding-left:16px">• $1</div>');
+            html = html.replace(/^\\* (.+)$/gm, '<div style="padding-left:16px">• $1</div>');
+            // 有序列表
+            html = html.replace(/^(\\d+)\\. (.+)$/gm, '<div style="padding-left:16px">$1. $2</div>');
+            // 普通换行
+            html = html.replace(/\\n/g, '<br>');
+            return html;
+        }
+
+        function appendMessage(role, content, model, withActions) {
+            const container = document.getElementById('chat-messages');
             const empty = container.querySelector('[style*="text-align:center"]');
             if (empty) empty.remove();
 
@@ -1186,22 +1544,66 @@ UI_HTML = """<!DOCTYPE html>
             const bgColor = isUser ? 'var(--accent-blue)' : 'var(--bg-primary)';
             const textColor = isUser ? '#fff' : 'var(--text-primary)';
             const align = isUser ? 'flex-end' : 'flex-start';
-            const modelTag = !isUser && model ? `<div style="font-size:0.7rem;color:var(--text-muted);margin-top:4px">${model}</div>` : '';
 
-            container.innerHTML += `
-                <div style="display:flex;justify-content:${align}">
-                    <div style="max-width:80%;padding:12px 16px;border-radius:12px;background:${bgColor};color:${textColor};border:1px solid var(--border);white-space:pre-wrap;word-break:break-word">
-                        ${escapeHtml(content)}${modelTag}
-                    </div>
-                </div>`;
+            const wrapper = document.createElement('div');
+            wrapper.style.cssText = 'display:flex;justify-content:'+align;
+
+            const outerDiv = document.createElement('div');
+            outerDiv.style.cssText = 'max-width:80%;display:flex;flex-direction:column;gap:4px;align-items:'+align;
+
+            const bubble = document.createElement('div');
+            bubble.style.cssText = 'padding:12px 16px;border-radius:12px;background:'+bgColor+';color:'+textColor+';border:1px solid var(--border);word-break:break-word;line-height:1.6';
+            bubble.className = 'msg-bubble';
+
+            if (isUser) {
+                bubble.innerHTML = escapeHtml(content || '').replace(/\\n/g, '<br>');
+            } else {
+                bubble.innerHTML = renderMarkdown(content || '');
+            }
+
+            outerDiv.appendChild(bubble);
+
+            // 操作栏
+            if (!isUser && withActions !== false) {
+                const actions = document.createElement('div');
+                actions.style.cssText = 'display:flex;gap:6px;opacity:0;transition:opacity 0.15s';
+                outerDiv.onmouseenter = () => actions.style.opacity = '1';
+                outerDiv.onmouseleave = () => actions.style.opacity = '0';
+
+                const copyBtn = document.createElement('button');
+                copyBtn.className = 'btn btn-ghost btn-sm';
+                copyBtn.style.cssText = 'font-size:0.65rem;padding:2px 6px';
+                copyBtn.textContent = '📋 复制';
+                copyBtn.onclick = () => {
+                    navigator.clipboard.writeText(content || '').then(() => toast('已复制到剪贴板', 'success'));
+                };
+                actions.appendChild(copyBtn);
+
+                if (model) {
+                    const modelSpan = document.createElement('span');
+                    modelSpan.style.cssText = 'font-size:0.65rem;color:var(--text-muted);align-self:center';
+                    modelSpan.textContent = model;
+                    actions.appendChild(modelSpan);
+                }
+                outerDiv.appendChild(actions);
+            }
+
+            wrapper.appendChild(outerDiv);
+            container.appendChild(wrapper);
             container.scrollTop = container.scrollHeight;
+            return bubble;
         }
 
         function escapeHtml(text) {
+            if (!text) return '';
             return text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
         }
 
+        // --- 流式发送 ---
         async function sendChat() {
+            if (!currentSessionId) {
+                await createNewSession();
+            }
             const input = document.getElementById('chat-input');
             const msg = input.value.trim();
             if (!msg) return;
@@ -1209,42 +1611,108 @@ UI_HTML = """<!DOCTYPE html>
             const model = document.getElementById('chat-model').value;
             input.value = '';
 
-            chatHistory.push({role: 'user', content: msg});
             appendMessage('user', msg);
 
-            // 显示加载中
             const btn = document.getElementById('chat-send-btn');
             btn.disabled = true;
             btn.textContent = '思考中...';
 
+            // 创建占位气泡
+            const bubble = appendMessage('assistant', '', null, false);
+            let fullText = '';
+            let usedModel = '';
+
             try {
-                const resp = await fetch(API + '/v1/chat/completions', {
+                const resp = await fetch(API + '/api/chat/sessions/' + currentSessionId + '/stream', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({
                         model: model,
-                        messages: chatHistory,
+                        messages: [{role: 'user', content: msg}],
                         temperature: 0.7,
                     }),
                 });
 
                 if (!resp.ok) {
-                    const err = await resp.json();
-                    appendMessage('assistant', `❌ 错误: ${err.detail || '请求失败'}`, null);
+                    const err = await resp.json().catch(() => ({}));
+                    bubble.innerHTML = '❌ ' + escapeHtml(err.detail || '请求失败');
                     return;
                 }
 
-                const data = await resp.json();
-                const reply = data.choices[0].message.content;
-                const usedModel = data.model;
-                chatHistory.push({role: 'assistant', content: reply});
-                appendMessage('assistant', reply, usedModel);
+                const reader = resp.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+
+                while (true) {
+                    const {value, done} = await reader.read();
+                    if (done) break;
+                    buffer += decoder.decode(value, {stream: true});
+
+                    const lines = buffer.split('\\n');
+                    buffer = lines.pop() || '';
+
+                    for (const line of lines) {
+                        if (!line.startsWith('data: ')) continue;
+                        const payload = line.slice(6).trim();
+                        if (payload === '[DONE]') continue;
+
+                        try {
+                            const chunk = JSON.parse(payload);
+                            if (chunk.meta) {
+                                usedModel = chunk.meta.model || '';
+                                if (chunk.meta.title) {
+                                    document.getElementById('chat-title').textContent = chunk.meta.title;
+                                    loadSessionList();
+                                }
+                                continue;
+                            }
+                            if (chunk.session_info) {
+                                updateContextInfo(chunk.session_info.tokens_est, chunk.session_info.total_messages);
+                            }
+                            const delta = chunk.choices && chunk.choices[0] && chunk.choices[0].delta;
+                            if (delta && delta.content) {
+                                fullText += delta.content;
+                                bubble.innerHTML = renderMarkdown(fullText);
+                                const container = document.getElementById('chat-messages');
+                                container.scrollTop = container.scrollHeight;
+                            }
+                        } catch(pe) {}
+                    }
+                }
+
+                // 渲染操作栏
+                const outerDiv = bubble.parentElement;
+                if (outerDiv) {
+                    const actions = document.createElement('div');
+                    actions.style.cssText = 'display:flex;gap:6px;opacity:0;transition:opacity 0.15s';
+                    outerDiv.onmouseenter = () => actions.style.opacity = '1';
+                    outerDiv.onmouseleave = () => actions.style.opacity = '0';
+                    const copyBtn = document.createElement('button');
+                    copyBtn.className = 'btn btn-ghost btn-sm';
+                    copyBtn.style.cssText = 'font-size:0.65rem;padding:2px 6px';
+                    copyBtn.textContent = '📋 复制';
+                    copyBtn.onclick = () => navigator.clipboard.writeText(fullText).then(() => toast('已复制', 'success'));
+                    actions.appendChild(copyBtn);
+                    if (usedModel) {
+                        const ms = document.createElement('span');
+                        ms.style.cssText = 'font-size:0.65rem;color:var(--text-muted);align-self:center';
+                        ms.textContent = usedModel;
+                        actions.appendChild(ms);
+                    }
+                    outerDiv.appendChild(actions);
+                }
             } catch (e) {
-                appendMessage('assistant', `❌ 网络错误: ${e.message}`, null);
+                bubble.innerHTML = '❌ ' + escapeHtml(e.message);
             } finally {
                 btn.disabled = false;
                 btn.textContent = '发送';
             }
+        }
+
+        // --- 移动端侧栏切换 ---
+        function toggleChatSidebar() {
+            document.getElementById('chat-sidebar').classList.toggle('show');
+            document.getElementById('chat-sidebar-overlay').classList.toggle('show');
         }
 
         // --- 初始化 ---
@@ -1252,6 +1720,10 @@ UI_HTML = """<!DOCTYPE html>
         loadProviderCards();
         loadConfig();
         loadChatModelSelector();
+        loadSessionList().then(() => {
+            const savedId = localStorage.getItem('mp_current_session');
+            if (savedId) switchSession(savedId).catch(() => {});
+        });
         setInterval(loadUsage, 30000);
 
         // 从 URL hash 恢复 tab 状态

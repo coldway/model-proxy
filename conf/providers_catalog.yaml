@@ -2,59 +2,121 @@ providers:
   google:
     name: Google AI Studio
     enabled: true
-    priority: 1
+    priority: 2
     url: https://aistudio.google.com/
     description: Google 提供的免费 Gemini 系列模型
     api_key_guide: https://aistudio.google.com/apikey
     models:
     - id: gemini-2.5-pro
       name: Gemini 2.5 Pro
-      description: 最强推理能力
+      description: 最强推理能力（当前免费层额度为0，暂时禁用）
       default_rpd: 25
       default_rpm: 5
       category: 推理
-      enabled: true
+      enabled: false
       priority: 1
+      tool_calling: false
     - id: gemini-2.5-flash
       name: Gemini 2.5 Flash
-      description: 平衡之选，速度与质量兼顾
+      description: 平衡之选（当前免费层额度为0，暂时禁用）
       default_rpd: 500
       default_rpm: 10
       category: 通用
-      enabled: true
+      enabled: false
       priority: 2
+      tool_calling: false
     - id: gemini-2.0-flash
       name: Gemini 2.0 Flash
-      description: 速度最快的 Gemini 模型
+      description: 速度最快（当前免费层额度为0，暂时禁用）
       default_rpd: 1500
       default_rpm: 15
       category: 快速
-      enabled: true
+      enabled: false
       priority: 3
+      tool_calling: false
     - id: gemma-4-26b-a4b-it
       name: Gemma 4 26B
-      description: 开源 Gemma 4 系列大模型
+      description: 开源 Gemma 4 系列大模型（支持 function calling，偶有 500）
       default_rpd: 1500
       default_rpm: 15
       category: 开源
       enabled: true
       priority: 4
+      tool_calling: true
     - id: gemma-4-31b-it
       name: Gemma 4 31B
-      description: Gemma 4 系列 31B 模型
+      description: Gemma 4 系列 31B 模型（支持 function calling）
       default_rpd: 1500
       default_rpm: 15
       category: 开源
+      enabled: true
+      priority: 4
+      tool_calling: true
     - id: gemini-2.0-flash-lite
       name: Gemini 2.0 Flash Lite
-      description: 轻量版 Flash，适合高频调用
+      description: 轻量版 Flash，适合高频调用（当前免费层额度为0）
       default_rpd: 1500
       default_rpm: 30
       category: 快速
+      tool_calling: false
+    - id: gemini-2.5-flash-lite
+      name: Gemini 2.5 Flash Lite
+      description: 2.5 系列轻量版，免费可用
+      default_rpd: 1500
+      default_rpm: 30
+      category: 快速
+      enabled: true
+      priority: 2
+      tool_calling: false
+    - id: gemini-3-flash-preview
+      name: Gemini 3 Flash Preview
+      description: Gemini 3 系列快速版（Preview），支持 tool calling
+      default_rpd: 500
+      default_rpm: 10
+      category: 通用
+      enabled: true
+      priority: 1
+      tool_calling: false
+    - id: gemini-3.1-flash-lite-preview
+      name: Gemini 3.1 Flash Lite Preview
+      description: Gemini 3.1 轻量版（Preview），免费可用
+      default_rpd: 1500
+      default_rpm: 30
+      category: 快速
+      enabled: true
+      priority: 2
+      tool_calling: true
+    - id: gemini-flash-latest
+      name: Gemini Flash Latest
+      description: 自动指向最新 Flash 版本，免费可用
+      default_rpd: 1500
+      default_rpm: 15
+      category: 通用
+      enabled: true
+      priority: 1
+      tool_calling: false
+    - id: gemini-flash-lite-latest
+      name: Gemini Flash Lite Latest
+      description: 自动指向最新 Flash Lite 版本，高额度
+      default_rpd: 1500
+      default_rpm: 30
+      category: 快速
+      enabled: true
+      priority: 2
+      tool_calling: false
+    - id: gemini-3.1-flash-lite
+      name: Gemini 3.1 Flash Lite
+      description: Gemini 3.1 轻量稳定版，支持 tool calling
+      default_rpd: 1500
+      default_rpm: 30
+      category: 快速
+      enabled: true
+      priority: 2
+      tool_calling: true
   groq:
     name: Groq
     enabled: true
-    priority: 2
+    priority: 1
     url: https://console.groq.com/
     description: Groq 提供的高速推理服务
     api_key_guide: https://console.groq.com/keys
@@ -67,32 +129,82 @@ providers:
       category: 通用
       enabled: true
       priority: 5
-    - id: llama-3.1-8b-instant
-      name: Llama 3.1 8B Instant
-      description: 轻量快速的 8B 模型
+      tool_calling: true
+    - id: meta-llama/llama-4-scout-17b-16e-instruct
+      name: Llama 4 Scout 17B
+      description: Meta Llama 4 Scout，最新一代，完美支持 tool calling
+      default_rpd: 14400
+      default_rpm: 30
+      category: 通用
+      enabled: true
+      priority: 3
+      tool_calling: true
+    - id: openai/gpt-oss-120b
+      name: GPT-OSS 120B
+      description: OpenAI 开源 120B 大模型，推理能力强
+      default_rpd: 14400
+      default_rpm: 30
+      category: 推理
+      enabled: true
+      priority: 4
+      tool_calling: true
+    - id: openai/gpt-oss-20b
+      name: GPT-OSS 20B
+      description: OpenAI 开源 20B 轻量模型，速度快
       default_rpd: 14400
       default_rpm: 30
       category: 快速
       enabled: true
       priority: 5
+      tool_calling: true
+    - id: qwen/qwen3-32b
+      name: Qwen 3 32B
+      description: 阿里 Qwen3 32B，中文能力强，支持 tool calling
+      default_rpd: 14400
+      default_rpm: 30
+      category: 通用
+      enabled: true
+      priority: 4
+      tool_calling: true
+    - id: openai/gpt-oss-safeguard-20b
+      name: GPT-OSS Safeguard 20B
+      description: OpenAI 开源安全增强 20B 模型，支持 tool calling
+      default_rpd: 14400
+      default_rpm: 30
+      category: 通用
+      enabled: true
+      priority: 5
+      tool_calling: true
+    - id: llama-3.1-8b-instant
+      name: Llama 3.1 8B Instant
+      description: 轻量快速但多轮 tool calling 不可靠（循环调用），已禁用
+      default_rpd: 14400
+      default_rpm: 30
+      category: 快速
+      enabled: false
+      priority: 5
+      tool_calling: true
     - id: llama-3.1-70b-versatile
       name: Llama 3.1 70B Versatile
       description: Llama 3.1 70B 通用版本
       default_rpd: 14400
       default_rpm: 30
       category: 通用
+      tool_calling: true
     - id: mixtral-8x7b-32768
       name: Mixtral 8x7B
       description: Mistral MoE 模型，32K 上下文
       default_rpd: 14400
       default_rpm: 30
       category: 通用
+      tool_calling: false
     - id: gemma2-9b-it
       name: Gemma 2 9B IT
       description: Google Gemma 2 指令调优版
       default_rpd: 14400
       default_rpm: 30
       category: 通用
+      tool_calling: false
   cerebras:
     name: Cerebras
     enabled: false
@@ -174,20 +286,23 @@ providers:
       category: 通用
       enabled: true
       priority: 6
+      tool_calling: true
     - id: meta-llama-3.1-405b-instruct
       name: Meta Llama 3.1 405B
       description: Meta 最大开源模型
       default_rpd: 50
       default_rpm: 10
       category: 推理
+      tool_calling: true
     - id: meta-llama-3.1-70b-instruct
       name: Meta Llama 3.1 70B
-      description: Meta 70B 指令调优
+      description: Meta 70B（GitHub/Azure 端点不支持 tool calling，返回400），已禁用
       default_rpd: 50
       default_rpm: 10
       category: 通用
-      enabled: true
+      enabled: false
       priority: 6
+      tool_calling: false
     - id: mistral-large
       name: Mistral Large
       description: Mistral AI 旗舰模型

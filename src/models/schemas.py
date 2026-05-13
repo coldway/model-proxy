@@ -26,6 +26,8 @@ class ModelConfig(BaseModel):
     enabled: bool = True
     priority: int = 1
     rate_limit: RateLimit | None = None
+    tool_calling: bool = False
+    timeout: int = Field(default=60, description="请求超时时间（秒），延迟高的模型可设置更长")
 
 
 class ProviderConfig(BaseModel):
@@ -50,9 +52,38 @@ class AppConfig(BaseModel):
 
 # --- API 请求/响应模型 ---
 
+class FunctionCall(BaseModel):
+    """函数调用信息"""
+    name: str
+    arguments: str
+
+
+class ToolCall(BaseModel):
+    """工具调用（OpenAI tool_calls 格式）"""
+    id: str
+    type: str = "function"
+    function: FunctionCall
+
+
+class ToolFunction(BaseModel):
+    """Tool definition: function schema"""
+    name: str
+    description: str = ""
+    parameters: dict[str, Any] = Field(default_factory=dict)
+
+
+class ToolDefinition(BaseModel):
+    """Tool definition（OpenAI tools 格式）"""
+    type: str = "function"
+    function: ToolFunction
+
+
 class ChatMessage(BaseModel):
     role: str
-    content: str
+    content: str | list | None = None
+    tool_calls: list[ToolCall] | None = None
+    tool_call_id: str | None = None
+    name: str | None = None
 
 
 class ChatCompletionRequest(BaseModel):
@@ -61,6 +92,8 @@ class ChatCompletionRequest(BaseModel):
     temperature: float = 0.7
     max_tokens: int | None = None
     stream: bool = False
+    tools: list[ToolDefinition] | None = None
+    tool_choice: str | dict | None = None
 
 
 class Choice(BaseModel):
@@ -90,6 +123,7 @@ class ModelInfo(BaseModel):
     enabled: bool
     priority: int
     rate_limit: RateLimit | None = None
+    tool_calling: bool = False
 
 
 class ModelListResponse(BaseModel):
@@ -118,3 +152,33 @@ class ProviderDiscovery(BaseModel):
     free_models: list[str]
     integration_guide: str
     new_user_only: bool = False
+
+
+class ProviderSummary(BaseModel):
+    """厂商摘要信息"""
+    id: str
+    enabled: bool
+    priority: int
+    model_count: int = Field(description="已启用的模型数量")
+    total_models: int = Field(description="目录中全部模型数量")
+    has_api_key: bool = Field(description="是否已配置 API Key")
+
+
+class ProviderListResponse(BaseModel):
+    providers: list[ProviderSummary]
+
+
+class ModelDetail(BaseModel):
+    """模型详情（含能力信息）"""
+    id: str
+    provider: str
+    enabled: bool
+    priority: int
+    tool_calling: bool = False
+    rate_limit: RateLimit | None = None
+    capabilities: dict[str, Any] = Field(default_factory=dict, description="已检测的能力信息")
+
+
+class ProviderModelsResponse(BaseModel):
+    provider: str
+    models: list[ModelDetail]

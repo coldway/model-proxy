@@ -12,6 +12,7 @@ from fastapi.responses import HTMLResponse
 
 from src.api.routes import init_routes, router
 from src.api.ui import UI_HTML
+from src.config.capability_tester import CapabilityCache, CapabilityTester
 from src.config.catalog import CatalogManager
 from src.config.manager import ConfigManager
 from src.providers.cloudflare import CloudflareProvider
@@ -43,7 +44,8 @@ def create_app() -> FastAPI:
 
     rate_limiter = RateLimiter()
     history = RequestHistory(persist=True)
-    dispatcher = Dispatcher(rate_limiter)
+    capability_cache = CapabilityCache()
+    dispatcher = Dispatcher(rate_limiter, capability_cache=capability_cache, history=history)
 
     # 注册各厂商 Provider（根据 API Key 是否存在决定是否注册）
     provider_factories = {
@@ -68,7 +70,12 @@ def create_app() -> FastAPI:
         dispatcher.register_provider("cursor", CursorProvider())
         logger.info("已注册 Cursor Agent CLI 厂商")
 
-    init_routes(config_manager, dispatcher, rate_limiter, history, catalog, provider_factories)
+    capability_tester = CapabilityTester(capability_cache)
+
+    init_routes(
+        config_manager, dispatcher, rate_limiter,
+        history, catalog, provider_factories, capability_tester,
+    )
 
     app = FastAPI(
         title="Model Proxy",

@@ -16,6 +16,8 @@ from src.models.schemas import (
     ChatCompletionResponse,
     ChatMessage,
     Choice,
+    FunctionCall,
+    ToolCall,
     UsageInfo,
 )
 from src.providers.base import BaseProvider
@@ -26,7 +28,7 @@ GOOGLE_API_BASE = "https://generativelanguage.googleapis.com/v1beta"
 
 
 class GoogleProvider(BaseProvider):
-    """Google AI Studio (Gemini) 适配器"""
+    """Google AI Studio (Gemini) 适配器（支持 tool calling）"""
 
     def __init__(self, api_key: str):
         super().__init__(api_key)
@@ -42,7 +44,34 @@ class GoogleProvider(BaseProvider):
         }
         if request.max_tokens:
             payload["generationConfig"]["maxOutputTokens"] = request.max_tokens
+        if request.tools:
+            payload["tools"] = [self._convert_tools(request.tools)]
         return payload
+
+    def _convert_tools(self, tools) -> dict:
+        """将 OpenAI tools 格式转为 Google functionDeclarations"""
+        declarations = []
+        for tool in tools:
+            func = tool.function
+            decl = {"name": func.name, "description": func.description}
+            if func.parameters:
+                decl["parameters"] = self._clean_json_schema(func.parameters)
+            declarations.append(decl)
+        return {"functionDeclarations": declarations}
+
+    def _clean_json_schema(self, schema: dict) -> dict:
+        """清理 JSON Schema 使其兼容 Google API（移除 title 等不支持的字段）"""
+        cleaned = {}
+        for k, v in schema.items():
+            if k in ("title", "default"):
+                continue
+            if isinstance(v, dict):
+                cleaned[k] = self._clean_json_schema(v)
+            elif isinstance(v, list):
+                cleaned[k] = [self._clean_json_schema(i) if isinstance(i, dict) else i for i in v]
+            else:
+                cleaned[k] = v
+        return cleaned
 
     async def chat_completion(
         self, model: str, request: ChatCompletionRequest
@@ -54,7 +83,9 @@ class GoogleProvider(BaseProvider):
         resp.raise_for_status()
         data = resp.json()
 
-        text = self._extract_text(data)
+        text, tool_calls = self._extract_response(data)
+        finish_reason = "tool_calls" if tool_calls else "stop"
+
         return ChatCompletionResponse(
             id=f"chatcmpl-{uuid.uuid4().hex[:12]}",
             created=int(time.time()),
@@ -62,8 +93,12 @@ class GoogleProvider(BaseProvider):
             choices=[
                 Choice(
                     index=0,
-                    message=ChatMessage(role="assistant", content=text),
-                    finish_reason="stop",
+                    message=ChatMessage(
+                        role="assistant",
+                        content=text,
+                        tool_calls=tool_calls,
+                    ),
+                    finish_reason=finish_reason,
                 )
             ],
             usage=UsageInfo(
@@ -125,19 +160,84 @@ class GoogleProvider(BaseProvider):
             return False
 
     def _convert_messages(self, messages: list[ChatMessage]) -> list[dict]:
-        """将 OpenAI 格式消息转换为 Gemini 格式"""
+        """将 OpenAI 格式消息转换为 Gemini 格式（含 tool 消息）"""
         contents = []
         for msg in messages:
-            role = "user" if msg.role in ("user", "system") else "model"
-            contents.append({
-                "role": role,
-                "parts": [{"text": msg.content}],
-            })
+            if msg.role == "tool":
+                contents.append({
+                    "role": "user",
+                    "parts": [{
+                        "functionResponse": {
+                            "name": msg.name or "unknown",
+                            "response": {"result": msg.content or ""},
+                        }
+                    }],
+                })
+            elif msg.role == "assistant" and msg.tool_calls:
+                parts = []
+                if msg.content:
+                    parts.append({"text": msg.content})
+                for tc in msg.tool_calls:
+                    parts.append({
+                        "functionCall": {
+                            "name": tc.function.name,
+                            "args": json.loads(tc.function.arguments) if isinstance(tc.function.arguments, str) else tc.function.arguments,
+                        }
+                    })
+                contents.append({"role": "model", "parts": parts})
+            else:
+                role = "user" if msg.role in ("user", "system") else "model"
+                if isinstance(msg.content, list):
+                    parts = []
+                    for part in msg.content:
+                        if isinstance(part, dict):
+                            if part.get("type") == "text":
+                                parts.append({"text": part.get("text", "")})
+                            elif part.get("type") == "image_url":
+                                url = part.get("image_url", {}).get("url", "")
+                                if url and url.startswith("data:"):
+                                    import re
+                                    m = re.match(r"data:([^;]+);base64,(.+)", url, re.DOTALL)
+                                    if m:
+                                        parts.append({"inlineData": {"mimeType": m.group(1), "data": m.group(2)}})
+                                elif url:
+                                    parts.append({"inlineData": {"mimeType": "image/png", "data": ""}})
+                        else:
+                            parts.append({"text": str(part)})
+                    if not parts:
+                        parts = [{"text": ""}]
+                    contents.append({"role": role, "parts": parts})
+                else:
+                    text = msg.content or ""
+                    contents.append({
+                        "role": role,
+                        "parts": [{"text": text}],
+                    })
         return contents
 
-    def _extract_text(self, data: dict) -> str:
+    def _extract_response(self, data: dict) -> tuple[str | None, list[ToolCall] | None]:
+        """从 Gemini 响应中提取文本和/或 function calls"""
         candidates = data.get("candidates", [])
         if not candidates:
-            return ""
+            return "", None
+
         parts = candidates[0].get("content", {}).get("parts", [])
-        return "".join(p.get("text", "") for p in parts)
+        texts = []
+        tool_calls = []
+
+        for part in parts:
+            if "text" in part:
+                texts.append(part["text"])
+            elif "functionCall" in part:
+                fc = part["functionCall"]
+                tool_calls.append(ToolCall(
+                    id=f"call_{uuid.uuid4().hex[:12]}",
+                    type="function",
+                    function=FunctionCall(
+                        name=fc["name"],
+                        arguments=json.dumps(fc.get("args", {}), ensure_ascii=False),
+                    ),
+                ))
+
+        text = "".join(texts) if texts else None
+        return text, tool_calls if tool_calls else None

@@ -103,6 +103,7 @@ class ConfigManager:
                             enabled=True,
                             priority=m.get("priority", 99),
                             rate_limit=rl,
+                            tool_calling=m.get("tool_calling", False),
                         ))
                 providers[prov_id] = ProviderConfig(
                     api_key=self._api_keys.get(prov_id, ""),
@@ -128,6 +129,7 @@ class ConfigManager:
                 enabled=True,
                 priority=model_data.get("priority", 99),
                 rate_limit=rl,
+                tool_calling=model_data.get("tool_calling", False),
             )
             result.append((prov_id, mc))
         return result
@@ -151,6 +153,7 @@ class ConfigManager:
                         enabled=True,
                         priority=m.get("priority", 99),
                         rate_limit=rl,
+                        tool_calling=m.get("tool_calling", False),
                     ))
             pc = ProviderConfig(
                 api_key=self._api_keys.get(prov_id, ""),

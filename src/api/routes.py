@@ -11,17 +11,23 @@ from fastapi import APIRouter, HTTPException
 from src.models.schemas import (
     ChatCompletionRequest,
     ChatCompletionResponse,
+    ChatMessage,
     ModelConfig,
+    ModelDetail,
     ModelInfo,
     ModelListResponse,
     ProviderConfig,
     ProviderDiscovery,
+    ProviderListResponse,
+    ProviderModelsResponse,
+    ProviderSummary,
     RateLimit,
     UsageResponse,
     UsageStats,
 )
 from src.config.catalog import CatalogManager
 from src.scheduler.history import RequestHistory
+from src.scheduler.session import SessionManager
 
 logger = logging.getLogger(__name__)
 
@@ -34,16 +40,20 @@ _rate_limiter = None
 _history: RequestHistory | None = None
 _catalog: CatalogManager | None = None
 _provider_factories: dict = {}
+_capability_tester = None
+_session_mgr: SessionManager | None = None
 
 
-def init_routes(config_manager, dispatcher, rate_limiter, history=None, catalog=None, provider_factories=None):
-    global _config_manager, _dispatcher, _rate_limiter, _history, _catalog, _provider_factories
+def init_routes(config_manager, dispatcher, rate_limiter, history=None, catalog=None, provider_factories=None, capability_tester=None):
+    global _config_manager, _dispatcher, _rate_limiter, _history, _catalog, _provider_factories, _capability_tester, _session_mgr
     _config_manager = config_manager
     _dispatcher = dispatcher
     _rate_limiter = rate_limiter
     _history = history
     _catalog = catalog
     _provider_factories = provider_factories or {}
+    _capability_tester = capability_tester
+    _session_mgr = SessionManager()
 
 
 @router.post("/v1/chat/completions")
@@ -60,16 +70,17 @@ async def chat_completions(request: ChatCompletionRequest):
 
     start_time = time.time()
     try:
-        result = await _dispatcher.dispatch(request, enabled_models)
+        provider_name, model_name, result = await _dispatcher.dispatch(request, enabled_models)
         latency = (time.time() - start_time) * 1000
         if _history:
             _history.record(
-                provider=result.model.split("/")[0] if "/" in result.model else "unknown",
-                model=result.model,
+                provider=provider_name,
+                model=model_name,
                 success=True,
                 latency_ms=latency,
                 prompt_tokens=result.usage.prompt_tokens,
                 completion_tokens=result.usage.completion_tokens,
+                route_strategy=_dispatcher.last_route_strategy,
             )
         return result
     except RateLimitExceeded as e:
@@ -92,30 +103,36 @@ async def _handle_stream(request: ChatCompletionRequest, enabled_models):
     from src.api.streaming import create_stream_response
     from src.scheduler.dispatcher import AllModelsUnavailable, ModelNotFound, RateLimitExceeded
 
+    start_time = time.time()
     try:
         provider_name, model_name, content_iter = await _dispatcher.dispatch_stream(request, enabled_models)
     except RateLimitExceeded as e:
+        _record_failure(start_time, str(e))
         raise HTTPException(status_code=429, detail=str(e))
     except ModelNotFound as e:
+        _record_failure(start_time, str(e))
         raise HTTPException(status_code=404, detail=str(e))
     except AllModelsUnavailable as e:
+        _record_failure(start_time, str(e))
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
+        _record_failure(start_time, str(e))
         logger.error(f"流式请求异常: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"内部错误: {e}")
 
+    latency = (time.time() - start_time) * 1000
     if _history:
         _history.record(
             provider=provider_name, model=model_name,
-            success=True, latency_ms=0,
+            success=True, latency_ms=latency,
         )
     return create_stream_response(model_name, content_iter)
 
 
-def _record_failure(start_time: float, error: str) -> None:
+def _record_failure(start_time: float, error: str, provider: str = "unknown", model: str = "unknown") -> None:
     if _history:
         latency = (time.time() - start_time) * 1000
-        _history.record(provider="unknown", model="unknown", success=False, latency_ms=latency, error=error)
+        _history.record(provider=provider, model=model, success=False, latency_ms=latency, error=error)
 
 
 @router.get("/v1/models", response_model=ModelListResponse)
@@ -130,8 +147,62 @@ async def list_models():
                 enabled=m.enabled,
                 priority=m.priority,
                 rate_limit=m.rate_limit,
+                tool_calling=m.tool_calling,
             ))
     return ModelListResponse(models=models)
+
+
+@router.get("/v1/providers", response_model=ProviderListResponse)
+async def list_providers():
+    """查询支持的厂商列表"""
+    providers = []
+    for prov_name, prov in _config_manager.config.providers.items():
+        enabled_count = sum(1 for m in prov.models if m.enabled)
+        catalog_total = 0
+        if _catalog:
+            catalog_models = _catalog.get_models(prov_name)
+            catalog_total = len(catalog_models)
+        providers.append(ProviderSummary(
+            id=prov_name,
+            enabled=prov.enabled,
+            priority=prov.priority,
+            model_count=enabled_count,
+            total_models=max(catalog_total, len(prov.models)),
+            has_api_key=bool(prov.api_key),
+        ))
+    providers.sort(key=lambda p: (not p.enabled, p.priority))
+    return ProviderListResponse(providers=providers)
+
+
+@router.get("/v1/providers/{provider_id}/models", response_model=ProviderModelsResponse)
+async def list_provider_models(provider_id: str):
+    """查询指定厂商支持的模型列表（含能力信息）"""
+    prov = _config_manager.config.providers.get(provider_id)
+    if not prov:
+        raise HTTPException(status_code=404, detail=f"厂商 {provider_id} 不存在")
+
+    cap_cache = {}
+    if _capability_tester:
+        all_caps = _capability_tester.cache.get_all()
+        for key, val in all_caps.items():
+            parts = key.split("/", 1)
+            if parts[0] == provider_id and len(parts) > 1:
+                cap_cache[parts[1]] = val
+
+    models = []
+    for m in prov.models:
+        cap = cap_cache.get(m.name, {})
+        models.append(ModelDetail(
+            id=m.name,
+            provider=provider_id,
+            enabled=m.enabled,
+            priority=m.priority,
+            tool_calling=m.tool_calling,
+            rate_limit=m.rate_limit,
+            capabilities=cap,
+        ))
+    models.sort(key=lambda x: (not x.enabled, x.priority))
+    return ProviderModelsResponse(provider=provider_id, models=models)
 
 
 @router.get("/v1/usage", response_model=UsageResponse)
@@ -395,8 +466,15 @@ async def discover_providers():
 
 
 @router.get("/api/provider/{provider_name}/models")
-async def fetch_provider_models(provider_name: str):
-    """拉取厂商最新模型列表"""
+async def fetch_provider_models(provider_name: str, force: bool = False):
+    """拉取厂商最新模型列表并自动测试能力
+
+    默认行为：自动测试未缓存的模型能力（tool_calling 等），
+    已缓存的模型直接跳过。全部已缓存时不发起任何测试请求。
+
+    Args:
+        force: 强制重新测试所有模型（忽略缓存）
+    """
     if provider_name not in _dispatcher._providers:
         has_key = _config_manager.has_api_key(provider_name) if _config_manager else False
         if not has_key:
@@ -415,7 +493,144 @@ async def fetch_provider_models(provider_name: str):
     except Exception as e:
         logger.error(f"拉取 {provider_name} 模型列表失败: {e}", exc_info=True)
         raise HTTPException(status_code=502, detail=f"拉取 {provider_name} 模型列表失败: {e}")
-    return {"provider": provider_name, "available_models": models}
+
+    result = {"provider": provider_name, "available_models": models}
+
+    if _capability_tester:
+        to_test = []
+        skipped = []
+        for mid in models:
+            if not force and _capability_tester.cache.has(provider_name, mid):
+                cached = _capability_tester.cache.get(provider_name, mid)
+                err = (cached or {}).get("error", "")
+                if err and ("429" in err or "rate_limit" in err):
+                    to_test.append(mid)
+                else:
+                    skipped.append(mid)
+            else:
+                to_test.append(mid)
+
+        test_results = []
+        if to_test:
+            test_results = await _capability_tester.test_provider_models(
+                provider, provider_name, to_test, force=force,
+            )
+            _apply_capabilities_to_catalog(provider_name, test_results)
+
+        cached_results = [
+            {**_capability_tester.cache.get(provider_name, mid), "cached": True}
+            for mid in skipped
+        ]
+
+        result["capabilities"] = {
+            "tested": test_results,
+            "cached": cached_results,
+            "summary": {
+                "total": len(models),
+                "tested_now": len(to_test),
+                "from_cache": len(skipped),
+                "all_cached": len(to_test) == 0,
+            },
+        }
+
+    return result
+
+
+def _apply_capabilities_to_catalog(provider_name: str, test_results: list[dict]) -> None:
+    """将测试结果回写到 catalog（更新 tool_calling 标记）"""
+    if not _catalog:
+        return
+    for r in test_results:
+        mid = r.get("model", "")
+        for model in _catalog.get_models(provider_name):
+            if model["id"] == mid:
+                model["tool_calling"] = r.get("tool_calling", False)
+                break
+    _catalog.save()
+
+
+# --- 模型能力测试 ---
+
+@router.post("/api/capabilities/test")
+async def test_capabilities(provider: str = "", force: bool = False):
+    """测试模型能力
+
+    - 指定 provider: 只测试该厂商的所有模型
+    - 不指定 provider: 测试所有已注册厂商
+    - force=true: 强制重新测试已缓存的模型
+    """
+    if not _capability_tester:
+        raise HTTPException(status_code=500, detail="能力测试器未初始化")
+
+    if provider:
+        if provider not in _dispatcher._providers:
+            raise HTTPException(status_code=404, detail=f"厂商 {provider} 未注册")
+        prov_inst = _dispatcher._providers[provider]
+        try:
+            models = await prov_inst.list_models()
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"拉取模型列表失败: {e}")
+
+        results = await _capability_tester.test_provider_models(
+            prov_inst, provider, models, force=force,
+        )
+        _apply_capabilities_to_catalog(provider, results)
+        return {"provider": provider, "results": results}
+
+    model_map = {}
+    for prov_name, prov_inst in _dispatcher._providers.items():
+        try:
+            models = await prov_inst.list_models()
+            model_map[prov_name] = models
+        except Exception as e:
+            logger.error("拉取 %s 模型列表失败: %s", prov_name, e)
+
+    all_results = await _capability_tester.test_all_providers(
+        _dispatcher._providers, model_map, force=force,
+    )
+
+    for prov_name, results in all_results.items():
+        _apply_capabilities_to_catalog(prov_name, results)
+
+    summary = {}
+    for prov_name, results in all_results.items():
+        tested_now = sum(1 for r in results if not r.get("cached"))
+        from_cache = sum(1 for r in results if r.get("cached"))
+        tc_count = sum(1 for r in results if r.get("tool_calling"))
+        available_count = sum(1 for r in results if r.get("available"))
+        summary[prov_name] = {
+            "total": len(results),
+            "tested_now": tested_now,
+            "from_cache": from_cache,
+            "tool_calling": tc_count,
+            "available": available_count,
+        }
+
+    return {"results": all_results, "summary": summary}
+
+
+@router.get("/api/capabilities")
+async def get_capabilities():
+    """查看已缓存的模型能力"""
+    if not _capability_tester:
+        raise HTTPException(status_code=500, detail="能力测试器未初始化")
+    cached = _capability_tester.cache.get_all()
+    summary = {
+        "total": len(cached),
+        "tool_calling": sum(1 for v in cached.values() if v.get("tool_calling")),
+        "available": sum(1 for v in cached.values() if v.get("available")),
+    }
+    return {"capabilities": cached, "summary": summary}
+
+
+@router.delete("/api/capabilities/clear")
+async def clear_capabilities():
+    """清除能力缓存（下次拉取时重新测试所有模型）"""
+    if not _capability_tester:
+        raise HTTPException(status_code=500, detail="能力测试器未初始化")
+    _capability_tester.cache.clear()
+    _capability_tester.cache.save()
+    return {"status": "ok", "message": "能力缓存已清除"}
 
 
 # --- 请求历史 ---
@@ -434,6 +649,37 @@ async def get_history_stats():
     if not _history:
         return {"total": 0, "success_rate": 0, "avg_latency_ms": 0, "by_provider": {}}
     return _history.get_stats()
+
+
+@router.get("/api/routing/log")
+async def get_routing_log():
+    """获取最近的路由决策日志"""
+    return {"decisions": _dispatcher.get_route_log() if _dispatcher else []}
+
+
+@router.get("/api/routing/breaker")
+async def get_breaker_status():
+    """获取厂商熔断状态"""
+    return {"breakers": _dispatcher.get_breaker_status() if _dispatcher else {}}
+
+
+@router.get("/api/blacklist")
+async def get_blacklist():
+    """获取 429 黑名单"""
+    bl = _rate_limiter.get_blacklist()
+    return {
+        "blacklist": [
+            {"model": k, "blocked_date": v} for k, v in bl.items()
+        ],
+        "count": len(bl),
+    }
+
+
+@router.delete("/api/blacklist/clear")
+async def clear_blacklist(provider: str = "", model: str = ""):
+    """清除 429 黑名单（可指定模型或清除全部）"""
+    count = _rate_limiter.clear_blacklist(provider, model)
+    return {"status": "ok", "cleared": count}
 
 
 # --- 模型目录（可提交到 GitHub 的部分） ---
@@ -527,3 +773,218 @@ async def config_delete_model(provider: str, model_name: str):
     if _catalog.deactivate_model(provider, model_name):
         return {"status": "ok", "message": f"模型 {model_name} 已停用"}
     raise HTTPException(status_code=404, detail=f"模型 {model_name} 不存在")
+
+
+# --- 聊天会话管理 ---
+
+@router.get("/api/chat/sessions")
+async def list_chat_sessions():
+    """获取所有聊天会话列表"""
+    return {"sessions": _session_mgr.list_sessions()}
+
+
+@router.post("/api/chat/sessions")
+async def create_chat_session(model: str = "auto", title: str = "新对话"):
+    """创建新聊天会话"""
+    session = _session_mgr.create(model=model, title=title)
+    return {"session": {"id": session.id, "title": session.title, "model": session.model}}
+
+
+@router.get("/api/chat/sessions/{session_id}")
+async def get_chat_session(session_id: str):
+    """获取指定会话的完整消息历史"""
+    session = _session_mgr.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    return {
+        "session": {
+            "id": session.id,
+            "title": session.title,
+            "model": session.model,
+            "messages": session.messages,
+            "tokens_est": session.total_tokens_est,
+            "created_at": session.created_at,
+            "updated_at": session.updated_at,
+        },
+    }
+
+
+@router.delete("/api/chat/sessions/{session_id}")
+async def delete_chat_session(session_id: str):
+    """删除聊天会话"""
+    if _session_mgr.delete(session_id):
+        return {"status": "ok"}
+    raise HTTPException(status_code=404, detail="会话不存在")
+
+
+@router.put("/api/chat/sessions/{session_id}/title")
+async def rename_chat_session(session_id: str, title: str):
+    """重命名聊天会话"""
+    if _session_mgr.rename(session_id, title):
+        return {"status": "ok"}
+    raise HTTPException(status_code=404, detail="会话不存在")
+
+
+@router.post("/api/chat/sessions/{session_id}/send")
+async def send_chat_message(session_id: str, request: ChatCompletionRequest):
+    """向指定会话发送消息并获取回复（自动管理上下文）"""
+    from src.scheduler.dispatcher import AllModelsUnavailable, ModelNotFound, RateLimitExceeded
+
+    session = _session_mgr.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="会话不存在")
+
+    user_msg = ""
+    if request.messages:
+        user_msg = request.messages[-1].content or ""
+
+    session.add_message("user", user_msg)
+
+    if len(session.messages) == 1:
+        session.auto_title()
+
+    context_messages = session.get_context_messages()
+    ctx_request = ChatCompletionRequest(
+        model=request.model or session.model,
+        messages=[ChatMessage(role=m["role"], content=m["content"]) for m in context_messages],
+        temperature=request.temperature,
+        max_tokens=request.max_tokens,
+        stream=False,
+    )
+
+    enabled_models = _config_manager.get_enabled_models()
+    if not enabled_models:
+        session.add_message("assistant", "❌ 没有可用模型，请检查配置")
+        _session_mgr.save()
+        raise HTTPException(status_code=503, detail="没有可用模型")
+
+    start_time = time.time()
+    try:
+        provider_name, model_name, result = await _dispatcher.dispatch(ctx_request, enabled_models)
+        latency = (time.time() - start_time) * 1000
+        if _history:
+            _history.record(
+                provider=provider_name,
+                model=model_name,
+                success=True,
+                latency_ms=latency,
+                prompt_tokens=result.usage.prompt_tokens,
+                completion_tokens=result.usage.completion_tokens,
+                route_strategy=_dispatcher.last_route_strategy,
+            )
+
+        reply = result.choices[0].message.content or ""
+        session.add_message("assistant", reply, model=result.model)
+        _session_mgr.save()
+
+        return {
+            "reply": reply,
+            "model": result.model,
+            "usage": result.usage.model_dump(),
+            "tokens_est": session.total_tokens_est,
+            "context_messages": len(context_messages),
+            "total_messages": len(session.messages),
+            "title": session.title,
+        }
+    except (RateLimitExceeded, ModelNotFound, AllModelsUnavailable) as e:
+        _record_failure(start_time, str(e))
+        status = 429 if isinstance(e, RateLimitExceeded) else (404 if isinstance(e, ModelNotFound) else 503)
+        raise HTTPException(status_code=status, detail=str(e))
+    except Exception as e:
+        _record_failure(start_time, str(e))
+        logger.error("会话推理异常: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"内部错误: {e}")
+
+
+@router.post("/api/chat/sessions/{session_id}/stream")
+async def stream_chat_message(session_id: str, request: ChatCompletionRequest):
+    """向指定会话发送消息（流式 SSE 响应 + 自动上下文管理）"""
+    from src.api.streaming import create_stream_response
+    from src.scheduler.dispatcher import AllModelsUnavailable, ModelNotFound, RateLimitExceeded
+
+    session = _session_mgr.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="会话不存在")
+
+    user_msg = ""
+    if request.messages:
+        user_msg = request.messages[-1].content or ""
+    session.add_message("user", user_msg)
+    if len(session.messages) == 1:
+        session.auto_title()
+
+    context_messages = session.get_context_messages()
+    ctx_request = ChatCompletionRequest(
+        model=request.model or session.model,
+        messages=[ChatMessage(role=m["role"], content=m["content"]) for m in context_messages],
+        temperature=request.temperature,
+        max_tokens=request.max_tokens,
+        stream=True,
+    )
+
+    enabled_models = _config_manager.get_enabled_models()
+    if not enabled_models:
+        raise HTTPException(status_code=503, detail="没有可用模型")
+
+    start_time = time.time()
+    try:
+        provider_name, model_name, content_iter = await _dispatcher.dispatch_stream(ctx_request, enabled_models)
+    except (RateLimitExceeded, ModelNotFound, AllModelsUnavailable) as e:
+        _record_failure(start_time, str(e))
+        status = 429 if isinstance(e, RateLimitExceeded) else (404 if isinstance(e, ModelNotFound) else 503)
+        raise HTTPException(status_code=status, detail=str(e))
+    except Exception as e:
+        _record_failure(start_time, str(e))
+        raise HTTPException(status_code=500, detail=f"内部错误: {e}")
+
+    latency = (time.time() - start_time) * 1000
+    if _history:
+        _history.record(provider=provider_name, model=model_name, success=True, latency_ms=latency)
+
+    async def _collect_and_stream():
+        """流式输出的同时收集完整回复写入会话"""
+        import json as _json
+        import uuid as _uuid
+
+        chat_id = f"chatcmpl-{_uuid.uuid4().hex[:12]}"
+        created = int(time.time())
+        full_reply = []
+
+        # 先发一个 meta 事件，告知前端 model 和 title
+        meta = {"model": model_name, "title": session.title, "session_id": session.id}
+        yield f"data: {_json.dumps({'meta': meta}, ensure_ascii=False)}\n\n"
+
+        try:
+            async for chunk in content_iter:
+                full_reply.append(chunk)
+                data = {
+                    "id": chat_id, "object": "chat.completion.chunk", "created": created,
+                    "model": model_name,
+                    "choices": [{"index": 0, "delta": {"content": chunk}, "finish_reason": None}],
+                }
+                yield f"data: {_json.dumps(data, ensure_ascii=False)}\n\n"
+        except Exception as ex:
+            logger.error("流式会话异常: %s", ex)
+
+        reply_text = "".join(full_reply)
+        session.add_message("assistant", reply_text, model=model_name)
+        _session_mgr.save()
+
+        end_data = {
+            "id": chat_id, "object": "chat.completion.chunk", "created": created,
+            "model": model_name,
+            "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+            "session_info": {
+                "tokens_est": session.total_tokens_est,
+                "total_messages": len(session.messages),
+            },
+        }
+        yield f"data: {_json.dumps(end_data, ensure_ascii=False)}\n\n"
+        yield "data: [DONE]\n\n"
+
+    from starlette.responses import StreamingResponse
+    return StreamingResponse(
+        _collect_and_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+    )

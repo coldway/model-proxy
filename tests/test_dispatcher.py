@@ -51,7 +51,7 @@ class MockProvider(BaseProvider):
 
 @pytest.fixture
 def setup_dispatcher():
-    rate_limiter = RateLimiter()
+    rate_limiter = RateLimiter(persist=False)
     dispatcher = Dispatcher(rate_limiter)
     mock_provider = MockProvider()
     dispatcher.register_provider("mock", mock_provider)
@@ -67,8 +67,10 @@ class TestDispatcher:
             ("mock", ModelConfig(name="model-b", priority=2, rate_limit=RateLimit(rpd=100, rpm=10))),
         ]
         request = ChatCompletionRequest(messages=[ChatMessage(role="user", content="hi")])
-        resp = await dispatcher.dispatch(request, models)
+        prov, model, resp = await dispatcher.dispatch(request, models)
         assert resp.model == "model-a"
+        assert prov == "mock"
+        assert model == "model-a"
 
     @pytest.mark.asyncio
     async def test_specific_model_dispatch(self, setup_dispatcher):
@@ -81,8 +83,9 @@ class TestDispatcher:
             model="model-b",
             messages=[ChatMessage(role="user", content="hi")],
         )
-        resp = await dispatcher.dispatch(request, models)
+        prov, model, resp = await dispatcher.dispatch(request, models)
         assert resp.model == "model-b"
+        assert prov == "mock"
 
     @pytest.mark.asyncio
     async def test_model_not_found(self, setup_dispatcher):
@@ -99,7 +102,7 @@ class TestDispatcher:
 
     @pytest.mark.asyncio
     async def test_auto_switch_on_failure(self):
-        rate_limiter = RateLimiter()
+        rate_limiter = RateLimiter(persist=False)
         dispatcher = Dispatcher(rate_limiter)
 
         fail_provider = MockProvider(should_fail=True)
@@ -112,14 +115,15 @@ class TestDispatcher:
             ("good", ModelConfig(name="good-model", priority=2, rate_limit=RateLimit(rpd=100, rpm=10))),
         ]
         request = ChatCompletionRequest(messages=[ChatMessage(role="user", content="hi")])
-        resp = await dispatcher.dispatch(request, models)
+        prov, model, resp = await dispatcher.dispatch(request, models)
         assert resp.model == "good-model"
+        assert prov == "good"
         assert fail_provider.call_count == 1
         assert ok_provider.call_count == 1
 
     @pytest.mark.asyncio
     async def test_all_models_unavailable(self):
-        rate_limiter = RateLimiter()
+        rate_limiter = RateLimiter(persist=False)
         dispatcher = Dispatcher(rate_limiter)
         fail_provider = MockProvider(should_fail=True)
         dispatcher.register_provider("bad", fail_provider)
@@ -143,5 +147,5 @@ class TestDispatcher:
             ("mock", ModelConfig(name="model-b", priority=2, rate_limit=RateLimit(rpd=100, rpm=10))),
         ]
         request = ChatCompletionRequest(messages=[ChatMessage(role="user", content="hi")])
-        resp = await dispatcher.dispatch(request, models)
+        prov, model, resp = await dispatcher.dispatch(request, models)
         assert resp.model == "model-b"

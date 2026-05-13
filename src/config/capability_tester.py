@@ -1,0 +1,568 @@
+# Created by model-proxy on 2026/05/13
+# Copyright © 2026
+
+"""模型能力自动检测与缓存
+
+拉取远程模型时，自动测试每个模型的能力（tool_calling 等），
+结果持久化到 conf/model_capabilities.yaml，已测试的模型下次跳过。
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import time
+import uuid
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+logger = logging.getLogger(__name__)
+
+CAPABILITIES_FILE = Path("conf/model_capabilities.yaml")
+
+TOOL_CALLING_PROBE = {
+    "messages": [{"role": "user", "content": "北京现在几点？"}],
+    "tools": [{
+        "type": "function",
+        "function": {
+            "name": "get_current_time",
+            "description": "获取指定城市的当前时间",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "city": {"type": "string", "description": "城市名"}
+                },
+                "required": ["city"],
+            },
+        },
+    }],
+    "tool_choice": "auto",
+    "temperature": 0.1,
+    "max_tokens": 200,
+}
+
+
+class CapabilityCache:
+    """模型能力缓存管理"""
+
+    def __init__(self, path: Path | None = None):
+        self._path = path or CAPABILITIES_FILE
+        self._data: dict[str, dict[str, Any]] = self._load()
+
+    def _load(self) -> dict[str, dict[str, Any]]:
+        if self._path.exists():
+            try:
+                with open(self._path, "r", encoding="utf-8") as f:
+                    return yaml.safe_load(f) or {}
+            except Exception as e:
+                logger.error("加载能力缓存失败: %s", e)
+        return {}
+
+    def save(self) -> None:
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        with open(self._path, "w", encoding="utf-8") as f:
+            yaml.dump(
+                self._data, f,
+                allow_unicode=True, default_flow_style=False, sort_keys=False,
+            )
+        logger.info("能力缓存已保存至 %s", self._path)
+
+    def _key(self, provider: str, model_id: str) -> str:
+        return f"{provider}/{model_id}"
+
+    def get(self, provider: str, model_id: str) -> dict[str, Any] | None:
+        return self._data.get(self._key(provider, model_id))
+
+    def has(self, provider: str, model_id: str) -> bool:
+        return self._key(provider, model_id) in self._data
+
+    def set(
+        self,
+        provider: str,
+        model_id: str,
+        capabilities: dict[str, Any],
+    ) -> None:
+        key = self._key(provider, model_id)
+        self._data[key] = {
+            **capabilities,
+            "tested_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        }
+
+    def get_all(self) -> dict[str, dict[str, Any]]:
+        return dict(self._data)
+
+    def remove(self, provider: str, model_id: str) -> bool:
+        key = self._key(provider, model_id)
+        if key in self._data:
+            del self._data[key]
+            return True
+        return False
+
+    def clear(self) -> None:
+        self._data.clear()
+
+
+class CapabilityTester:
+    """模型能力测试器
+
+    通过向模型发送探针请求来检测能力：
+    - tool_calling: 发送带 tools 的请求，检查响应是否包含 tool_calls
+    - available: 模型是否可正常调用（非 429/503）
+    """
+
+    def __init__(self, cache: CapabilityCache | None = None):
+        self._cache = cache or CapabilityCache()
+
+    @property
+    def cache(self) -> CapabilityCache:
+        return self._cache
+
+    def _build_tool_defs(self):
+        """构建测试用的工具定义"""
+        from src.models.schemas import ToolDefinition, ToolFunction
+        return [
+            ToolDefinition(
+                type="function",
+                function=ToolFunction(
+                    name="get_current_time",
+                    description="获取指定城市的当前时间",
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "city": {"type": "string", "description": "城市名"},
+                        },
+                        "required": ["city"],
+                    },
+                ),
+            )
+        ]
+
+    async def _test_tool_calling(
+        self, provider, model_id: str, tools,
+    ) -> dict[str, Any]:
+        """测试单轮 tool calling"""
+        from src.models.schemas import ChatCompletionRequest, ChatMessage
+
+        request = ChatCompletionRequest(
+            model=model_id,
+            messages=[ChatMessage(role="user", content="北京现在几点？")],
+            tools=tools,
+            tool_choice="auto",
+            temperature=0.1,
+            max_tokens=200,
+        )
+
+        response = await provider.chat_completion(model_id, request)
+        msg = response.choices[0].message if response.choices else None
+
+        if msg and msg.tool_calls:
+            tc = msg.tool_calls[0]
+            return {
+                "tool_calling": True,
+                "probe_response": f"{tc.function.name}({tc.function.arguments})",
+            }
+        elif msg and msg.content:
+            return {"tool_calling": False, "probe_response": msg.content[:80]}
+        return {"tool_calling": False, "probe_response": "empty response"}
+
+    async def _test_multi_turn_tc(
+        self, provider, model_id: str, tools,
+    ) -> dict[str, Any]:
+        """测试多轮 tool calling（模型能否正确消化工具返回并回复用户）"""
+        from src.models.schemas import (
+            ChatCompletionRequest, ChatMessage, FunctionCall, ToolCall,
+        )
+
+        messages = [
+            ChatMessage(role="user", content="北京现在几点？"),
+            ChatMessage(
+                role="assistant",
+                content=None,
+                tool_calls=[ToolCall(
+                    id="call_probe_mt",
+                    type="function",
+                    function=FunctionCall(
+                        name="get_current_time",
+                        arguments='{"city": "北京"}',
+                    ),
+                )],
+            ),
+            ChatMessage(
+                role="tool",
+                content="2026-05-13 16:00:00 CST",
+                tool_call_id="call_probe_mt",
+                name="get_current_time",
+            ),
+        ]
+
+        request = ChatCompletionRequest(
+            model=model_id,
+            messages=messages,
+            tools=tools,
+            temperature=0.1,
+            max_tokens=200,
+        )
+
+        response = await provider.chat_completion(model_id, request)
+        msg = response.choices[0].message if response.choices else None
+
+        if msg and msg.tool_calls:
+            return {"multi_turn_tc": False, "mt_issue": "loop_call"}
+        elif msg and msg.content and msg.content.strip():
+            return {"multi_turn_tc": True, "mt_response": msg.content[:80]}
+        return {"multi_turn_tc": False, "mt_issue": "empty_response"}
+
+    async def _test_chinese(
+        self, provider, model_id: str,
+    ) -> dict[str, Any]:
+        """测试中文能力"""
+        from src.models.schemas import ChatCompletionRequest, ChatMessage
+
+        request = ChatCompletionRequest(
+            model=model_id,
+            messages=[ChatMessage(role="user", content="用中文20字以内回答：什么是和弦？")],
+            temperature=0.1,
+            max_tokens=100,
+        )
+
+        response = await provider.chat_completion(model_id, request)
+        msg = response.choices[0].message if response.choices else None
+        content = (msg.content or "") if msg else ""
+
+        has_chinese = any("\u4e00" <= c <= "\u9fff" for c in content)
+        return {
+            "chinese": has_chinese,
+            "chinese_response": content[:60],
+        }
+
+    def _make_test_image_b64(self) -> str:
+        """生成一个 20x20 的红色方块 PNG（base64），用于视觉探针测试"""
+        import base64
+        import struct
+        import zlib
+
+        width, height = 20, 20
+        raw_data = b""
+        for _ in range(height):
+            raw_data += b"\x00"
+            for _ in range(width):
+                raw_data += b"\xff\x00\x00\xff"
+
+        def _png_chunk(chunk_type: bytes, data: bytes) -> bytes:
+            chunk = chunk_type + data
+            return struct.pack(">I", len(data)) + chunk + struct.pack(">I", zlib.crc32(chunk) & 0xFFFFFFFF)
+
+        ihdr = struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)
+        png = b"\x89PNG\r\n\x1a\n"
+        png += _png_chunk(b"IHDR", ihdr)
+        png += _png_chunk(b"IDAT", zlib.compress(raw_data))
+        png += _png_chunk(b"IEND", b"")
+
+        return base64.b64encode(png).decode("ascii")
+
+    async def _test_vision(
+        self, provider, model_id: str,
+    ) -> dict[str, Any]:
+        """测试视觉/图像理解能力（使用内联 base64 小图片，避免网络依赖）"""
+        from src.models.schemas import ChatCompletionRequest, ChatMessage
+
+        img_b64 = self._make_test_image_b64()
+        data_url = f"data:image/png;base64,{img_b64}"
+
+        messages = [
+            ChatMessage(
+                role="user",
+                content=[
+                    {"type": "text", "text": "What color is this image? Answer in one word."},
+                    {"type": "image_url", "image_url": {"url": data_url}},
+                ],
+            )
+        ]
+
+        request = ChatCompletionRequest(
+            model=model_id,
+            messages=messages,
+            temperature=0.1,
+            max_tokens=50,
+        )
+
+        try:
+            response = await provider.chat_completion(model_id, request)
+            msg = response.choices[0].message if response.choices else None
+            content = (msg.content or "") if msg else ""
+            if content.strip():
+                return {"vision": True, "vision_response": content[:60]}
+            return {"vision": False, "vision_response": "empty"}
+        except Exception as e:
+            err = str(e)
+            if "400" in err or "not support" in err.lower() or "invalid" in err.lower() or "INVALID" in err:
+                return {"vision": False, "vision_error": "not_supported"}
+            raise
+
+    async def _test_json_mode(
+        self, provider, model_id: str,
+    ) -> dict[str, Any]:
+        """测试结构化 JSON 输出能力"""
+        from src.models.schemas import ChatCompletionRequest, ChatMessage
+
+        request = ChatCompletionRequest(
+            model=model_id,
+            messages=[
+                ChatMessage(role="system", content="你是一个只输出 JSON 的助手，不要输出任何其他内容。"),
+                ChatMessage(role="user", content='用 JSON 格式回答：列出 3 种乐器，格式为 {"instruments": [{"name": "...", "type": "..."}]}'),
+            ],
+            temperature=0.1,
+            max_tokens=200,
+        )
+
+        response = await provider.chat_completion(model_id, request)
+        msg = response.choices[0].message if response.choices else None
+        content = (msg.content or "").strip() if msg else ""
+
+        if content.startswith("```"):
+            lines = content.split("\n")
+            content = "\n".join(lines[1:-1] if len(lines) > 2 else lines[1:])
+            content = content.strip()
+
+        try:
+            parsed = json.loads(content)
+            valid = isinstance(parsed, dict) and "instruments" in parsed
+            return {"json_mode": valid, "json_sample": content[:80]}
+        except (json.JSONDecodeError, ValueError):
+            return {"json_mode": False, "json_sample": content[:80]}
+
+    async def _test_streaming(
+        self, provider, model_id: str,
+    ) -> dict[str, Any]:
+        """测试流式输出能力"""
+        from src.models.schemas import ChatCompletionRequest, ChatMessage
+
+        request = ChatCompletionRequest(
+            model=model_id,
+            messages=[ChatMessage(role="user", content="用10个字回答：什么是音乐？")],
+            stream=True,
+            temperature=0.1,
+            max_tokens=50,
+        )
+
+        chunk_count = 0
+        first_chunk_time = None
+        start_time = time.time()
+
+        try:
+            async for _chunk in provider.stream_chat_completion(model_id, request):
+                chunk_count += 1
+                if first_chunk_time is None:
+                    first_chunk_time = time.time()
+                if chunk_count >= 5:
+                    break
+        except Exception as e:
+            return {"streaming": False, "stream_error": str(e)[:60]}
+
+        ttfb = round((first_chunk_time - start_time) * 1000) if first_chunk_time else 0
+        return {
+            "streaming": chunk_count >= 2,
+            "stream_chunks": chunk_count,
+            "stream_ttfb_ms": ttfb,
+        }
+
+    async def _test_reasoning(
+        self, provider, model_id: str,
+    ) -> dict[str, Any]:
+        """测试逻辑推理能力（一个简单但需要推理的问题）"""
+        from src.models.schemas import ChatCompletionRequest, ChatMessage
+
+        request = ChatCompletionRequest(
+            model=model_id,
+            messages=[ChatMessage(
+                role="user",
+                content="一个房间有3盏灯，门外有3个开关分别控制它们。你只能进房间一次。如何确定每个开关对应哪盏灯？只回答方法，30字以内。",
+            )],
+            temperature=0.1,
+            max_tokens=150,
+        )
+
+        response = await provider.chat_completion(model_id, request)
+        msg = response.choices[0].message if response.choices else None
+        content = (msg.content or "") if msg else ""
+
+        has_key_concept = any(kw in content for kw in ["热", "温", "摸", "烫", "warm", "heat", "touch"])
+        return {
+            "reasoning": has_key_concept,
+            "reasoning_response": content[:80],
+        }
+
+    async def test_model_via_provider(
+        self,
+        provider: "BaseProvider",
+        provider_name: str,
+        model_id: str,
+        force: bool = False,
+    ) -> dict[str, Any]:
+        """通过已注册的 Provider 实例测试单个模型
+
+        返回 {available, tool_calling, multi_turn_tc, chinese,
+              vision, json_mode, streaming, reasoning, latency_ms, error, ...}
+        """
+        if not force and self._cache.has(provider_name, model_id):
+            cached = self._cache.get(provider_name, model_id)
+            err = cached.get("error", "")
+            if err and ("429" in err or "rate_limit" in err):
+                logger.info("模型 %s/%s 上次因限流跳过，重新测试", provider_name, model_id)
+            else:
+                logger.debug("跳过已测试模型 %s/%s", provider_name, model_id)
+                return {**cached, "cached": True}
+
+        import asyncio
+
+        result: dict[str, Any] = {
+            "provider": provider_name,
+            "model": model_id,
+            "available": False,
+            "tool_calling": False,
+            "multi_turn_tc": False,
+            "chinese": False,
+            "vision": False,
+            "json_mode": False,
+            "streaming": False,
+            "reasoning": False,
+            "latency_ms": 0,
+            "error": None,
+        }
+
+        tools = self._build_tool_defs()
+
+        # ── 阶段 1：单轮 tool calling（同时测延迟） ──
+        t0 = time.time()
+        try:
+            tc_result = await self._test_tool_calling(provider, model_id, tools)
+            result["latency_ms"] = round((time.time() - t0) * 1000)
+            result["available"] = True
+            result.update(tc_result)
+        except Exception as e:
+            err_str = str(e)
+            if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+                result["error"] = "rate_limited (429)"
+            elif "503" in err_str or "UNAVAILABLE" in err_str:
+                result["error"] = "unavailable (503)"
+            elif "400" in err_str:
+                result["available"] = True
+                result["error"] = f"bad_request (400): {err_str[:80]}"
+            else:
+                result["error"] = err_str[:120]
+            self._cache.set(provider_name, model_id, result)
+            logger.info("测试 %s/%s: 阶段1失败 - %s", provider_name, model_id, result["error"])
+            return {**result, "cached": False}
+
+        # ── 阶段 2：多轮 tool calling（仅当单轮通过时） ──
+        if result["tool_calling"]:
+            try:
+                await asyncio.sleep(1)
+                mt_result = await self._test_multi_turn_tc(provider, model_id, tools)
+                result.update(mt_result)
+            except Exception as e:
+                result["multi_turn_tc"] = False
+                result["mt_issue"] = f"error: {str(e)[:60]}"
+
+        # ── 阶段 3：中文能力 ──
+        try:
+            await asyncio.sleep(1)
+            cn_result = await self._test_chinese(provider, model_id)
+            result.update(cn_result)
+        except Exception as e:
+            result["chinese"] = False
+
+        # ── 阶段 4：视觉/图像理解 ──
+        try:
+            await asyncio.sleep(1)
+            vis_result = await self._test_vision(provider, model_id)
+            result.update(vis_result)
+        except Exception as e:
+            result["vision"] = False
+
+        # ── 阶段 5：结构化 JSON 输出 ──
+        try:
+            await asyncio.sleep(1)
+            json_result = await self._test_json_mode(provider, model_id)
+            result.update(json_result)
+        except Exception as e:
+            result["json_mode"] = False
+
+        # ── 阶段 6：流式输出 ──
+        try:
+            await asyncio.sleep(1)
+            stream_result = await self._test_streaming(provider, model_id)
+            result.update(stream_result)
+        except Exception as e:
+            result["streaming"] = False
+
+        # ── 阶段 7：推理能力 ──
+        try:
+            await asyncio.sleep(1)
+            reason_result = await self._test_reasoning(provider, model_id)
+            result.update(reason_result)
+        except Exception as e:
+            result["reasoning"] = False
+
+        self._cache.set(provider_name, model_id, result)
+        logger.info(
+            "测试 %s/%s: avail=%s tc=%s mt=%s cn=%s vis=%s json=%s stream=%s reason=%s lat=%dms",
+            provider_name, model_id,
+            result["available"], result["tool_calling"],
+            result["multi_turn_tc"], result["chinese"],
+            result["vision"], result["json_mode"],
+            result["streaming"], result["reasoning"],
+            result["latency_ms"],
+        )
+        return {**result, "cached": False}
+
+    async def test_provider_models(
+        self,
+        provider: "BaseProvider",
+        provider_name: str,
+        model_ids: list[str],
+        force: bool = False,
+    ) -> list[dict[str, Any]]:
+        """批量测试一个厂商的所有模型"""
+        import asyncio
+
+        results = []
+        for mid in model_ids:
+            result = await self.test_model_via_provider(
+                provider, provider_name, mid, force=force,
+            )
+            results.append(result)
+            if not result.get("cached"):
+                await asyncio.sleep(2)
+
+        self._cache.save()
+        return results
+
+    async def test_all_providers(
+        self,
+        providers: dict[str, "BaseProvider"],
+        model_map: dict[str, list[str]],
+        force: bool = False,
+    ) -> dict[str, list[dict[str, Any]]]:
+        """测试所有厂商的所有模型
+
+        Args:
+            providers: {provider_name: provider_instance}
+            model_map: {provider_name: [model_id, ...]}
+            force: 强制重新测试已缓存的模型
+        """
+        all_results = {}
+        for prov_name, model_ids in model_map.items():
+            provider = providers.get(prov_name)
+            if not provider:
+                logger.warning("厂商 %s 未注册，跳过测试", prov_name)
+                continue
+
+            results = await self.test_provider_models(
+                provider, prov_name, model_ids, force=force,
+            )
+            all_results[prov_name] = results
+
+        return all_results

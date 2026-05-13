@@ -16,6 +16,8 @@ from src.models.schemas import (
     ChatCompletionResponse,
     ChatMessage,
     Choice,
+    FunctionCall,
+    ToolCall,
     UsageInfo,
 )
 from src.providers.base import BaseProvider
@@ -25,8 +27,37 @@ logger = logging.getLogger(__name__)
 GITHUB_MODELS_BASE = "https://models.inference.ai.azure.com"
 
 
+def _msg_to_dict(m: ChatMessage) -> dict:
+    d: dict = {"role": m.role}
+    if m.content is not None:
+        d["content"] = m.content
+    if m.tool_calls:
+        d["tool_calls"] = [tc.model_dump() for tc in m.tool_calls]
+    if m.tool_call_id:
+        d["tool_call_id"] = m.tool_call_id
+    if m.name:
+        d["name"] = m.name
+    return d
+
+
+def _parse_tool_calls(raw_tcs: list[dict] | None) -> list[ToolCall] | None:
+    if not raw_tcs:
+        return None
+    return [
+        ToolCall(
+            id=tc["id"],
+            type=tc.get("type", "function"),
+            function=FunctionCall(
+                name=tc["function"]["name"],
+                arguments=tc["function"]["arguments"],
+            ),
+        )
+        for tc in raw_tcs
+    ]
+
+
 class GitHubProvider(BaseProvider):
-    """GitHub Models 适配器"""
+    """GitHub Models 适配器（支持 tool calling）"""
 
     def __init__(self, api_key: str):
         super().__init__(api_key)
@@ -41,12 +72,16 @@ class GitHubProvider(BaseProvider):
     def _build_payload(self, model: str, request: ChatCompletionRequest, stream: bool = False) -> dict:
         payload: dict = {
             "model": model,
-            "messages": [{"role": m.role, "content": m.content} for m in request.messages],
+            "messages": [_msg_to_dict(m) for m in request.messages],
             "temperature": request.temperature,
             "stream": stream,
         }
         if request.max_tokens:
             payload["max_tokens"] = request.max_tokens
+        if request.tools:
+            payload["tools"] = [t.model_dump() for t in request.tools]
+        if request.tool_choice is not None:
+            payload["tool_choice"] = request.tool_choice
         return payload
 
     async def chat_completion(
@@ -61,6 +96,7 @@ class GitHubProvider(BaseProvider):
 
         choice = data["choices"][0]
         usage = data.get("usage", {})
+        msg = choice["message"]
 
         return ChatCompletionResponse(
             id=data.get("id", f"chatcmpl-{uuid.uuid4().hex[:12]}"),
@@ -70,8 +106,9 @@ class GitHubProvider(BaseProvider):
                 Choice(
                     index=0,
                     message=ChatMessage(
-                        role=choice["message"]["role"],
-                        content=choice["message"]["content"],
+                        role=msg["role"],
+                        content=msg.get("content"),
+                        tool_calls=_parse_tool_calls(msg.get("tool_calls")),
                     ),
                     finish_reason=choice.get("finish_reason", "stop"),
                 )

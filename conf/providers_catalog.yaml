@@ -126,6 +126,7 @@ providers:
       description: Meta 最新 Llama 3.3 70B 通用模型
       default_rpd: 14400
       default_rpm: 30
+      default_tpm: 6000
       category: 通用
       enabled: true
       priority: 5
@@ -135,6 +136,7 @@ providers:
       description: Meta Llama 4 Scout，最新一代，完美支持 tool calling
       default_rpd: 14400
       default_rpm: 30
+      default_tpm: 20000
       category: 通用
       enabled: true
       priority: 3
@@ -144,6 +146,7 @@ providers:
       description: OpenAI 开源 120B 大模型，推理能力强
       default_rpd: 14400
       default_rpm: 30
+      default_tpm: 6000
       category: 推理
       enabled: true
       priority: 4
@@ -153,6 +156,7 @@ providers:
       description: OpenAI 开源 20B 轻量模型，速度快
       default_rpd: 14400
       default_rpm: 30
+      default_tpm: 20000
       category: 快速
       enabled: true
       priority: 5
@@ -162,6 +166,7 @@ providers:
       description: 阿里 Qwen3 32B，中文能力强，支持 tool calling
       default_rpd: 14400
       default_rpm: 30
+      default_tpm: 6000
       category: 通用
       enabled: true
       priority: 4
@@ -171,6 +176,7 @@ providers:
       description: OpenAI 开源安全增强 20B 模型，支持 tool calling
       default_rpd: 14400
       default_rpm: 30
+      default_tpm: 20000
       category: 通用
       enabled: true
       priority: 5

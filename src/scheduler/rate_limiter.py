@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import datetime
 import logging
 import threading
 import time
@@ -21,22 +20,37 @@ BLACKLIST_FILE = Path("data/model_blacklist.yaml")
 SAVE_DEBOUNCE_SECONDS = 30
 
 
+_BLACKLIST_BASE_COOLDOWN = 120
+_BLACKLIST_MAX_COOLDOWN = 1800
+
+
 @dataclass
 class ModelUsage:
-    """单个模型的使用计数"""
+    """单个模型的使用计数（含 token 维度）"""
     daily_count: int = 0
     minute_counts: list[float] = field(default_factory=list)
     last_reset_day: str = ""
+    daily_tokens: int = 0
+    minute_token_entries: list = field(default_factory=list)
 
     def reset_if_new_day(self, today: str) -> None:
         if self.last_reset_day != today:
             self.daily_count = 0
+            self.daily_tokens = 0
             self.minute_counts.clear()
+            self.minute_token_entries.clear()
             self.last_reset_day = today
 
     def clean_minute_window(self) -> None:
         now = time.time()
         self.minute_counts = [t for t in self.minute_counts if now - t < 60]
+        self.minute_token_entries = [
+            (t, n) for t, n in self.minute_token_entries if now - t < 60
+        ]
+
+    @property
+    def minute_tokens(self) -> int:
+        return sum(n for _, n in self.minute_token_entries)
 
 
 class RateLimiter:
@@ -47,7 +61,8 @@ class RateLimiter:
         self._persist = persist
         self._dirty = False
         self._save_timer: threading.Timer | None = None
-        self._blacklist: dict[str, str] = {}
+        self._blacklist: dict[str, float] = {}
+        self._blacklist_consecutive: dict[str, int] = {}
         if persist:
             self._load()
             self._load_blacklist()
@@ -128,8 +143,11 @@ class RateLimiter:
         except Exception as e:
             logger.warning("保存使用量持久化文件失败: %s", e)
 
-    def can_request(self, provider: str, model: str, rpd: int, rpm: int) -> bool:
-        """检查当前模型是否可以发起请求（含 429 黑名单检查）"""
+    def can_request(
+        self, provider: str, model: str,
+        rpd: int, rpm: int, tpm: int = 0, tpd: int = 0,
+    ) -> bool:
+        """检查当前模型是否可以发起请求（含 429 黑名单 + token 维度检查）"""
         key = self._key(provider, model)
 
         if self.is_blacklisted(provider, model):
@@ -141,33 +159,57 @@ class RateLimiter:
         usage.clean_minute_window()
 
         if rpd > 0 and usage.daily_count >= rpd:
-            logger.warning(f"{key} 已达每日上限 ({rpd} RPD)")
+            logger.warning(f"{key} 已达每日请求上限 ({rpd} RPD)")
             return False
 
         if rpm > 0 and len(usage.minute_counts) >= rpm:
-            logger.warning(f"{key} 已达每分钟上限 ({rpm} RPM)")
+            logger.warning(f"{key} 已达每分钟请求上限 ({rpm} RPM)")
+            return False
+
+        if tpm > 0 and usage.minute_tokens >= tpm:
+            logger.warning(f"{key} 已达每分钟 token 上限 ({usage.minute_tokens}/{tpm} TPM)")
+            return False
+
+        if tpd > 0 and usage.daily_tokens >= tpd:
+            logger.warning(f"{key} 已达每日 token 上限 ({tpd} TPD)")
             return False
 
         return True
 
-    def record_request(self, provider: str, model: str) -> None:
-        """记录一次请求，延迟批量持久化（避免每次请求都写磁盘）"""
+    def record_request(self, provider: str, model: str, tokens: int = 0) -> None:
+        """记录一次请求及其 token 用量，延迟批量持久化"""
         key = self._key(provider, model)
         usage = self._usage[key]
         today = self._today()
         usage.reset_if_new_day(today)
         usage.daily_count += 1
-        usage.minute_counts.append(time.time())
+        now = time.time()
+        usage.minute_counts.append(now)
+        if tokens > 0:
+            usage.daily_tokens += tokens
+            usage.minute_token_entries.append((now, tokens))
         self._schedule_save()
 
-    def get_usage(self, provider: str, model: str) -> tuple[int, int]:
-        """返回 (今日请求数, 当前分钟请求数)"""
+    def record_tokens(self, provider: str, model: str, tokens: int) -> None:
+        """补充记录 token 用量（用于流式响应完成后追加）"""
+        if tokens <= 0:
+            return
+        key = self._key(provider, model)
+        usage = self._usage[key]
+        today = self._today()
+        usage.reset_if_new_day(today)
+        usage.daily_tokens += tokens
+        usage.minute_token_entries.append((time.time(), tokens))
+        self._schedule_save()
+
+    def get_usage(self, provider: str, model: str) -> tuple[int, int, int, int]:
+        """返回 (今日请求数, 分钟请求数, 今日token数, 分钟token数)"""
         key = self._key(provider, model)
         usage = self._usage[key]
         today = self._today()
         usage.reset_if_new_day(today)
         usage.clean_minute_window()
-        return usage.daily_count, len(usage.minute_counts)
+        return usage.daily_count, len(usage.minute_counts), usage.daily_tokens, usage.minute_tokens
 
     def is_exhausted(self, provider: str, model: str, rpd: int) -> bool:
         """判断模型今日额度是否已用尽"""
@@ -177,21 +219,30 @@ class RateLimiter:
         usage.reset_if_new_day(today)
         return rpd > 0 and usage.daily_count >= rpd
 
-    # --- 429 黑名单管理 ---
-
-    @staticmethod
-    def _end_of_today() -> float:
-        """返回今天 23:59:59 之后的时间戳（即明天 00:00:00）"""
-        tomorrow = datetime.date.today() + datetime.timedelta(days=1)
-        return datetime.datetime.combine(tomorrow, datetime.time.min).timestamp()
+    # --- 429 黑名单管理（短期冷却 + 指数退避） ---
 
     def mark_429(self, provider: str, model: str) -> None:
-        """将模型标记为 429 限流状态，封禁到当天自然日结束（与厂商每日额度重置对齐）"""
+        """将模型标记为 429 限流状态，使用指数退避冷却（120s→240s→…→1800s 上限）
+
+        相比旧版封禁到午夜，新策略更精准：
+        - 首次 429：冷却 120 秒（覆盖 Groq TPM 重置周期）
+        - 连续 429：每次翻倍，最长 30 分钟
+        - 成功请求后重置退避计数器
+        """
         key = self._key(provider, model)
-        expire_at = self._end_of_today()
+        consecutive = self._blacklist_consecutive.get(key, 0) + 1
+        self._blacklist_consecutive[key] = consecutive
+        cooldown = min(
+            _BLACKLIST_BASE_COOLDOWN * (2 ** (consecutive - 1)),
+            _BLACKLIST_MAX_COOLDOWN,
+        )
+        expire_at = time.time() + cooldown
         self._blacklist[key] = expire_at
         expire_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(expire_at))
-        logger.warning("模型 %s 标记为 429 限流（将于 %s 恢复）", key, expire_str)
+        logger.warning(
+            "模型 %s 标记为 429 限流（第 %d 次，冷却 %ds，将于 %s 恢复）",
+            key, consecutive, cooldown, expire_str,
+        )
         self._save_blacklist()
 
     def is_blacklisted(self, provider: str, model: str) -> bool:
@@ -206,6 +257,12 @@ class RateLimiter:
             self._save_blacklist()
             return False
         return True
+
+    def clear_429_backoff(self, provider: str, model: str) -> None:
+        """模型请求成功后调用，重置其 429 退避计数器"""
+        key = self._key(provider, model)
+        if key in self._blacklist_consecutive:
+            del self._blacklist_consecutive[key]
 
     def get_blacklist_remaining(self, provider: str, model: str) -> int:
         """返回封禁剩余秒数，未封禁返回 0"""

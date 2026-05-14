@@ -65,6 +65,18 @@ class Dispatcher:
         self._breaker_threshold = breaker_threshold
         self._breaker_cooldown = breaker_cooldown
 
+    # 不应触发熔断的 HTTP 状态码（客户端请求自身问题，非厂商故障）
+    _CLIENT_ERROR_NO_BREAKER = {400, 404, 413, 414, 415, 422}
+
+    @staticmethod
+    def _should_trigger_breaker(status_code: int) -> bool:
+        """判断 HTTP 状态码是否应触发熔断计数。
+        5xx/429/401/403 视为厂商故障；400/404/413 等客户端错误不触发。
+        """
+        if status_code in Dispatcher._CLIENT_ERROR_NO_BREAKER:
+            return False
+        return True
+
     def _record_provider_failure(self, provider_name: str) -> None:
         """记录厂商失败，达到阈值时触发熔断"""
         now = time.time()
@@ -110,6 +122,24 @@ class Dispatcher:
                 "failures": len(self._provider_failures.get(prov, [])),
             }
         return result
+
+    def clear_breaker(self, provider_name: str = "") -> int:
+        """手动清除熔断状态并重置失败计数。返回清除的厂商数量。"""
+        if provider_name:
+            count = 0
+            if provider_name in self._provider_breaker:
+                del self._provider_breaker[provider_name]
+                count += 1
+            self._provider_failures.pop(provider_name, None)
+            if count:
+                logger.info("手动清除厂商 %s 的熔断状态", provider_name)
+            return count
+        count = len(self._provider_breaker)
+        self._provider_breaker.clear()
+        self._provider_failures.clear()
+        if count:
+            logger.info("手动清除全部 %d 个厂商的熔断状态", count)
+        return count
 
     def get_route_log(self) -> list[dict[str, Any]]:
         """获取最近的路由决策记录"""
@@ -183,10 +213,9 @@ class Dispatcher:
         """路由到指定模型"""
         for provider_name, model_cfg in enabled_models:
             if model_cfg.name == request.model:
-                rpd = model_cfg.rate_limit.rpd if model_cfg.rate_limit else 0
-                rpm = model_cfg.rate_limit.rpm if model_cfg.rate_limit else 0
+                rpd, rpm, tpm, tpd = self._unpack_rate_limit(model_cfg)
 
-                if not self._rate_limiter.can_request(provider_name, model_cfg.name, rpd, rpm):
+                if not self._rate_limiter.can_request(provider_name, model_cfg.name, rpd, rpm, tpm, tpd):
                     raise RateLimitExceeded(
                         f"模型 {model_cfg.name} 已达速率限制，请稍后重试或切换模型"
                     )
@@ -337,15 +366,21 @@ class Dispatcher:
 
         return False
 
+    @staticmethod
+    def _unpack_rate_limit(model_cfg: ModelConfig) -> tuple[int, int, int, int]:
+        rl = model_cfg.rate_limit
+        if not rl:
+            return 0, 0, 0, 0
+        return rl.rpd, rl.rpm, getattr(rl, "tpm", 0), getattr(rl, "tpd", 0)
+
     def _filter_available(
         self, models: list[tuple[str, ModelConfig]]
     ) -> list[tuple[str, ModelConfig]]:
         """过滤出配额未耗尽的模型"""
         result = []
         for prov_name, model_cfg in models:
-            rpd = model_cfg.rate_limit.rpd if model_cfg.rate_limit else 0
-            rpm = model_cfg.rate_limit.rpm if model_cfg.rate_limit else 0
-            if self._rate_limiter.can_request(prov_name, model_cfg.name, rpd, rpm):
+            rpd, rpm, tpm, tpd = self._unpack_rate_limit(model_cfg)
+            if self._rate_limiter.can_request(prov_name, model_cfg.name, rpd, rpm, tpm, tpd):
                 result.append((prov_name, model_cfg))
         return result
 
@@ -614,9 +649,8 @@ class Dispatcher:
             if not candidates:
                 raise ModelNotFound(f"模型 {request.model} 未找到或未启用")
             prov_name, model_cfg = candidates[0]
-            rpd = model_cfg.rate_limit.rpd if model_cfg.rate_limit else 0
-            rpm = model_cfg.rate_limit.rpm if model_cfg.rate_limit else 0
-            if not self._rate_limiter.can_request(prov_name, model_cfg.name, rpd, rpm):
+            rpd, rpm, tpm, tpd = self._unpack_rate_limit(model_cfg)
+            if not self._rate_limiter.can_request(prov_name, model_cfg.name, rpd, rpm, tpm, tpd):
                 raise RateLimitExceeded(f"模型 {model_cfg.name} 已达速率限制")
             return await self._try_stream(prov_name, model_cfg, request, trace_id=trace_id)
 
@@ -695,9 +729,16 @@ class Dispatcher:
         except StopAsyncIteration:
             pass
         except Exception as e:
+            import httpx as _httpx
             elapsed_ms = (time.monotonic_ns() - stream_start) / 1_000_000
-            self._record_provider_failure(prov_name)
-            logger.error("[流式] trace=%s %s:%s 连接建立失败（%.0fms）: %s", trace_id, prov_name, model_cfg.name, elapsed_ms, e)
+            if isinstance(e, _httpx.HTTPStatusError) and not self._should_trigger_breaker(e.response.status_code):
+                logger.warning(
+                    "[流式] trace=%s %s:%s HTTP %d 客户端错误（不计入熔断, %.0fms）: %s",
+                    trace_id, prov_name, model_cfg.name, e.response.status_code, elapsed_ms, e,
+                )
+            else:
+                self._record_provider_failure(prov_name)
+                logger.error("[流式] trace=%s %s:%s 连接建立失败（%.0fms）: %s", trace_id, prov_name, model_cfg.name, elapsed_ms, e)
             raise ProviderCallError(f"流式连接失败: {e}") from e
 
         rate_limiter = self._rate_limiter
@@ -715,8 +756,11 @@ class Dispatcher:
                     chunks_collected.append(chunk)
                     yield chunk
                 record_success(prov_name)
+                rate_limiter.clear_429_backoff(prov_name, model_cfg.name)
                 elapsed_ms = (time.monotonic_ns() - stream_start) / 1_000_000
                 full_text = "".join(chunks_collected)
+                estimated_tokens = len(full_text) // 2
+                rate_limiter.record_tokens(prov_name, model_cfg.name, estimated_tokens)
                 logger.info(
                     "[流式] trace=%s 响应完成 %s:%s | 耗时=%.0fms chunks=%d 响应长度=%d",
                     trace_id, prov_name, model_cfg.name,
@@ -728,12 +772,16 @@ class Dispatcher:
                 )
             except httpx.HTTPStatusError as e:
                 elapsed_ms = (time.monotonic_ns() - stream_start) / 1_000_000
-                record_failure(prov_name)
-                if e.response.status_code == 429:
+                status = e.response.status_code
+                if Dispatcher._should_trigger_breaker(status):
+                    record_failure(prov_name)
+                if status == 429:
                     rate_limiter.mark_429(prov_name, model_cfg.name)
                     logger.warning("[流式] trace=%s %s:%s 收到 429（%.0fms），已加入黑名单", trace_id, prov_name, model_cfg.name, elapsed_ms)
+                elif status in Dispatcher._CLIENT_ERROR_NO_BREAKER:
+                    logger.warning("[流式] trace=%s %s:%s HTTP %d 客户端错误（不计入熔断, %.0fms）", trace_id, prov_name, model_cfg.name, status, elapsed_ms)
                 else:
-                    logger.error("[流式] trace=%s %s:%s HTTP %d（%.0fms）", trace_id, prov_name, model_cfg.name, e.response.status_code, elapsed_ms)
+                    logger.error("[流式] trace=%s %s:%s HTTP %d（%.0fms）", trace_id, prov_name, model_cfg.name, status, elapsed_ms)
                 raise
             except Exception as ex:
                 elapsed_ms = (time.monotonic_ns() - stream_start) / 1_000_000
@@ -822,8 +870,10 @@ class Dispatcher:
                 timeout=timeout,
             )
             elapsed_ms = (time.monotonic_ns() - start_ns) / 1_000_000
+            total_tokens = result.usage.total_tokens if result.usage else 0
             if not is_routing:
-                self._rate_limiter.record_request(provider_name, model_name)
+                self._rate_limiter.record_request(provider_name, model_name, tokens=total_tokens)
+                self._rate_limiter.clear_429_backoff(provider_name, model_name)
             self._record_provider_success(provider_name)
 
             reply_content = result.choices[0].message.content if result.choices else ""
@@ -850,18 +900,26 @@ class Dispatcher:
             raise ProviderCallError(f"{provider_name}:{model_name} 请求超时（{timeout}s）")
         except httpx.HTTPStatusError as e:
             elapsed_ms = (time.monotonic_ns() - start_ns) / 1_000_000
-            self._record_provider_failure(provider_name)
+            status = e.response.status_code
             resp_body = ""
             try:
                 resp_body = e.response.text[:500]
             except Exception:
                 pass
-            logger.error(
-                "[%s] trace=%s %s:%s HTTP %d (%.0fms) 响应: %s",
-                tag, trace_id, provider_name, model_name,
-                e.response.status_code, elapsed_ms, resp_body,
-            )
-            if e.response.status_code == 429:
+            if self._should_trigger_breaker(status):
+                self._record_provider_failure(provider_name)
+                logger.error(
+                    "[%s] trace=%s %s:%s HTTP %d (%.0fms) 响应: %s",
+                    tag, trace_id, provider_name, model_name,
+                    status, elapsed_ms, resp_body,
+                )
+            else:
+                logger.warning(
+                    "[%s] trace=%s %s:%s HTTP %d (%.0fms) 客户端错误（不计入熔断）: %s",
+                    tag, trace_id, provider_name, model_name,
+                    status, elapsed_ms, resp_body,
+                )
+            if status == 429:
                 self._rate_limiter.mark_429(provider_name, model_name)
                 raise RateLimitExceeded(
                     f"{provider_name}:{model_name} 厂商返回 429 限流，已加入黑名单（次日恢复）"

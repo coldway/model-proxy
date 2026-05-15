@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import logging.handlers
 import sys
@@ -105,9 +106,28 @@ def create_app() -> FastAPI:
         history, catalog, provider_factories, capability_tester,
     )
 
+    _PERIODIC_FLUSH_INTERVAL = 60
+
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
+        async def _periodic_flush():
+            while True:
+                await asyncio.sleep(_PERIODIC_FLUSH_INTERVAL)
+                try:
+                    rate_limiter.flush()
+                    history.flush()
+                    catalog.flush()
+                except Exception as exc:
+                    logger.warning("周期性刷盘异常: %s", exc)
+
+        flush_task = asyncio.create_task(_periodic_flush())
+
+        if capability_cache and capability_cache.get_all():
+            cached_count = len(capability_cache.get_all())
+            logger.info("已加载 %d 个模型的能力缓存（预热）", cached_count)
+
         yield
+        flush_task.cancel()
         logger.info("正在优雅关闭…")
         rate_limiter.flush()
         history.flush()
@@ -116,7 +136,8 @@ def create_app() -> FastAPI:
         logger.info("所有资源已释放")
 
     admin_token = settings.admin_token.strip()
-    OPEN_PATHS = frozenset({"/", "/ui"})
+    proxy_api_key = settings.proxy_api_key.strip()
+    OPEN_PATHS = frozenset({"/", "/ui", "/health", "/health/ready"})
 
     app = FastAPI(
         title="Model Proxy",
@@ -125,17 +146,29 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    if admin_token:
+    if admin_token or proxy_api_key:
         @app.middleware("http")
-        async def admin_auth_middleware(request: Request, call_next):
+        async def auth_middleware(request: Request, call_next):
             path = request.url.path
-            if path in OPEN_PATHS or path.startswith("/v1/"):
+            if path in OPEN_PATHS:
                 return await call_next(request)
+
             auth = request.headers.get("Authorization", "")
-            if auth != f"Bearer {admin_token}":
+            bearer_token = auth.removeprefix("Bearer ").strip() if auth.startswith("Bearer ") else ""
+
+            if path.startswith("/v1/"):
+                if proxy_api_key and bearer_token != proxy_api_key:
+                    return JSONResponse(status_code=401, content={"detail": "未授权，请提供有效的 API Key"})
+                return await call_next(request)
+
+            if admin_token and bearer_token != admin_token:
                 return JSONResponse(status_code=401, content={"detail": "未授权，请提供有效的管理令牌"})
             return await call_next(request)
-        logger.info("管理面板认证已启用（/api/* 路由需要 Bearer Token）")
+
+        if proxy_api_key:
+            logger.info("/v1 推理接口认证已启用（需要 Bearer Token）")
+        if admin_token:
+            logger.info("管理面板认证已启用（/api/* 路由需要 Bearer Token）")
 
     app.include_router(router)
 
@@ -160,8 +193,28 @@ def create_app() -> FastAPI:
 app = create_app()
 
 if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Model Proxy")
+    parser.add_argument("--validate", action="store_true", help="校验配置后退出（dry-run 模式）")
+    args = parser.parse_args()
+
     _catalog = CatalogManager()
     _config = ConfigManager(catalog=_catalog)
+
+    if args.validate:
+        print(f"配置校验通过 ✓")
+        print(f"  监听: {_config.settings.host}:{_config.settings.port}")
+        providers = {n for n, p in _config.config.providers.items() if p.enabled}
+        models = _config.get_enabled_models()
+        print(f"  已启用厂商: {', '.join(sorted(providers)) or '无'}")
+        print(f"  已启用模型: {len(models)} 个")
+        if _config.settings.proxy_api_key:
+            print(f"  /v1 认证: 已启用")
+        if _config.settings.admin_token:
+            print(f"  管理面板认证: 已启用")
+        sys.exit(0)
+
     uvicorn.run(
         "main:app",
         host=_config.settings.host,

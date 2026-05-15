@@ -59,7 +59,21 @@ async def _stream_generator(model: str, content_iterator: AsyncIterator[str]) ->
             yield f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
     except Exception as e:
         has_error = True
-        logger.error("流式生成异常 (已发送%d chunks): %s", chunk_count, e)
+        import httpx as _httpx
+        error_type = "stream_error"
+        error_msg = "流式响应中断"
+        if isinstance(e, _httpx.HTTPStatusError):
+            status = e.response.status_code
+            if status == 429:
+                error_type = "rate_limit"
+                error_msg = "厂商限流 (429)，请稍后重试"
+            elif status >= 500:
+                error_type = "server_error"
+                error_msg = f"厂商服务异常 ({status})"
+            else:
+                error_type = "client_error"
+                error_msg = f"请求错误 ({status})"
+        logger.error("流式生成异常 (已发送%d chunks, type=%s): %s", chunk_count, error_type, e)
         error_data = {
             "id": chat_id, "object": "chat.completion.chunk", "created": created,
             "model": model,
@@ -68,7 +82,7 @@ async def _stream_generator(model: str, content_iterator: AsyncIterator[str]) ->
                 "delta": {},
                 "finish_reason": "error",
             }],
-            "error": {"message": "流式响应中断"},
+            "error": {"message": error_msg, "type": error_type},
         }
         yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
 

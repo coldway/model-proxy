@@ -459,19 +459,20 @@ class Dispatcher:
     def _get_cached_route(self, feature_hash: str) -> str | None:
         """查找路由缓存"""
         if feature_hash in self._route_cache:
-            model_name, ts = self._route_cache[feature_hash]
-            if time.time() - ts < self._route_cache_ttl:
+            model_name, ts, ttl = self._route_cache[feature_hash]
+            if time.time() - ts < ttl:
                 logger.info("路由缓存命中: %s → %s", feature_hash, model_name)
                 return model_name
             del self._route_cache[feature_hash]
         return None
 
-    def _set_cached_route(self, feature_hash: str, model_name: str) -> None:
-        """写入路由缓存"""
+    def _set_cached_route(self, feature_hash: str, model_name: str, ttl: int | None = None) -> None:
+        """写入路由缓存（支持自定义 TTL，默认使用全局设置）"""
         if len(self._route_cache) >= ROUTE_CACHE_MAX:
             oldest_key = min(self._route_cache, key=lambda k: self._route_cache[k][1])
             del self._route_cache[oldest_key]
-        self._route_cache[feature_hash] = (model_name, time.time())
+        effective_ttl = ttl if ttl is not None else self._route_cache_ttl
+        self._route_cache[feature_hash] = (model_name, time.time(), effective_ttl)
 
     async def _route_with_llm(
         self,

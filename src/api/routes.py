@@ -236,6 +236,34 @@ def init_routes(config_manager, dispatcher, rate_limiter, history=None, catalog=
     _deps.session_mgr = SessionManager()
 
 
+@router.get("/health")
+async def health_check():
+    """健康检查端点（k8s liveness/readiness probe）"""
+    provider_count = len(_deps.dispatcher.get_all_providers()) if _deps.dispatcher else 0
+    model_count = len(_deps.config_manager.get_enabled_models()) if _deps.config_manager else 0
+    breaker_count = len(_deps.dispatcher.get_breaker_status()) if _deps.dispatcher else 0
+    return {
+        "status": "ok",
+        "providers": provider_count,
+        "enabled_models": model_count,
+        "broken_providers": breaker_count,
+    }
+
+
+@router.get("/health/ready")
+async def readiness_check():
+    """就绪检查：至少有一个可用的 Provider 和模型"""
+    from fastapi.responses import JSONResponse as _JSONResp
+    provider_count = len(_deps.dispatcher.get_all_providers()) if _deps.dispatcher else 0
+    model_count = len(_deps.config_manager.get_enabled_models()) if _deps.config_manager else 0
+    ready = provider_count > 0 and model_count > 0
+    status_code = 200 if ready else 503
+    return _JSONResp(
+        status_code=status_code,
+        content={"ready": ready, "providers": provider_count, "enabled_models": model_count},
+    )
+
+
 @router.post("/v1/chat/completions")
 async def chat_completions(request: ChatCompletionRequest):
     """聊天补全接口（支持流式和非流式）"""
@@ -271,7 +299,9 @@ async def chat_completions(request: ChatCompletionRequest):
                 route_strategy=_deps.dispatcher.last_route_strategy,
             )
         logger.info("[API] trace=%s 完成 | provider=%s model=%s 耗时=%.0fms", trace_id, provider_name, model_name, latency)
-        return result
+        from fastapi.responses import JSONResponse as _JSONResp
+        resp_data = result.model_dump()
+        return _JSONResp(content=resp_data, headers={"X-Trace-Id": trace_id})
     except RateLimitExceeded as e:
         _record_failure(start_time, str(e))
         logger.warning("[API] trace=%s 限流: %s", trace_id, e)
@@ -446,8 +476,9 @@ async def get_config():
             "models": [m.model_dump() for m in prov.models],
         }
     safe_settings = _deps.config_manager.settings.model_dump()
-    if "admin_token" in safe_settings:
-        safe_settings["admin_token"] = "***" if safe_settings["admin_token"] else ""
+    for secret_key in ("admin_token", "proxy_api_key"):
+        if secret_key in safe_settings:
+            safe_settings[secret_key] = "***" if safe_settings[secret_key] else ""
     return {"providers": result, "settings": safe_settings}
 
 

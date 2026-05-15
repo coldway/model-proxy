@@ -35,7 +35,7 @@ class HuggingFaceProvider(BaseProvider):
 
     def __init__(self, api_key: str):
         super().__init__(api_key)
-        self._client = httpx.AsyncClient(timeout=120.0)
+        self._client = self._create_client(timeout=120.0)
 
     async def close(self) -> None:
         await self._client.aclose()

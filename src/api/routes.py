@@ -243,8 +243,10 @@ async def chat_completions(request: ChatCompletionRequest):
 
     trace_id = uuid.uuid4().hex[:12]
     logger.info(
-        "[API] trace=%s /v1/chat/completions | model=%s stream=%s 消息数=%d",
+        "[API] trace=%s /v1/chat/completions | model=%s stream=%s 消息数=%d temp=%s max_tokens=%s tools=%d",
         trace_id, request.model, request.stream, len(request.messages),
+        request.temperature, request.max_tokens,
+        len(request.tools) if request.tools else 0,
     )
 
     enabled_models = _deps.config_manager.get_enabled_models()
@@ -443,7 +445,10 @@ async def get_config():
             "priority": prov.priority,
             "models": [m.model_dump() for m in prov.models],
         }
-    return {"providers": result, "settings": _deps.config_manager.settings.model_dump()}
+    safe_settings = _deps.config_manager.settings.model_dump()
+    if "admin_token" in safe_settings:
+        safe_settings["admin_token"] = "***" if safe_settings["admin_token"] else ""
+    return {"providers": result, "settings": safe_settings}
 
 
 class ApiKeyUpdateRequest(BaseModel):

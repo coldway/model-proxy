@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 import logging
+import logging.handlers
 import sys
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI, Request
@@ -29,10 +31,26 @@ from src.scheduler.rate_limiter import RateLimiter
 
 from src.api.log_buffer import install as install_log_buffer
 
+_LOG_DIR = Path(__file__).parent / "logs"
+_LOG_DIR.mkdir(exist_ok=True)
+_LOG_FMT = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+
+_console_handler = logging.StreamHandler(sys.stdout)
+_console_handler.setLevel(logging.INFO)
+_console_handler.setFormatter(_LOG_FMT)
+
+_file_handler = logging.handlers.RotatingFileHandler(
+    _LOG_DIR / "model-proxy.log",
+    maxBytes=50 * 1024 * 1024,  # 50MB
+    backupCount=5,
+    encoding="utf-8",
+)
+_file_handler.setLevel(logging.INFO)
+_file_handler.setFormatter(_LOG_FMT)
+
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)],
+    handlers=[_console_handler, _file_handler],
 )
 logger = logging.getLogger(__name__)
 

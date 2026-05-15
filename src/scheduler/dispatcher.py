@@ -86,12 +86,16 @@ class Dispatcher:
         fails.append(now)
         self._provider_failures[provider_name] = [t for t in fails if now - t < 120]
 
-        if len(self._provider_failures[provider_name]) >= self._breaker_threshold:
+        fail_count = len(self._provider_failures[provider_name])
+        logger.info("厂商 %s 失败计数: %d/%d（120s窗口内）", provider_name, fail_count, self._breaker_threshold)
+
+        if fail_count >= self._breaker_threshold:
             self._provider_breaker[provider_name] = now + self._breaker_cooldown
             self._provider_failures[provider_name] = []
             logger.warning(
-                "厂商 %s 连续失败 %d 次，触发熔断 %d 秒",
+                "⚠ 厂商 %s 连续失败 %d 次，触发熔断 %d 秒，恢复时间: %s",
                 provider_name, self._breaker_threshold, self._breaker_cooldown,
+                time.strftime("%H:%M:%S", time.localtime(now + self._breaker_cooldown)),
             )
 
     def _record_provider_success(self, provider_name: str) -> None:
@@ -102,10 +106,12 @@ class Dispatcher:
         """检查厂商是否处于熔断状态"""
         if provider_name not in self._provider_breaker:
             return False
-        if time.time() > self._provider_breaker[provider_name]:
+        remaining = self._provider_breaker[provider_name] - time.time()
+        if remaining <= 0:
             del self._provider_breaker[provider_name]
-            logger.info("厂商 %s 熔断已恢复", provider_name)
+            logger.info("厂商 %s 熔断已自动恢复", provider_name)
             return False
+        logger.warning("厂商 %s 处于熔断状态，剩余 %ds", provider_name, int(remaining))
         return True
 
     def get_breaker_status(self) -> dict[str, Any]:
@@ -766,10 +772,12 @@ class Dispatcher:
                     trace_id, prov_name, model_cfg.name,
                     elapsed_ms, len(chunks_collected), len(full_text),
                 )
-                logger.debug(
-                    "[流式] trace=%s 完整响应内容:\n%s",
-                    trace_id, full_text,
-                )
+                _MAX_STREAM_LOG = 2000
+                if full_text:
+                    preview = full_text[:_MAX_STREAM_LOG]
+                    if len(full_text) > _MAX_STREAM_LOG:
+                        preview += f"...(截断, 共{len(full_text)}字符)"
+                    logger.info("[流式] trace=%s 响应内容:\n%s", trace_id, preview)
             except httpx.HTTPStatusError as e:
                 elapsed_ms = (time.monotonic_ns() - stream_start) / 1_000_000
                 status = e.response.status_code
@@ -888,10 +896,12 @@ class Dispatcher:
                 usage.total_tokens if usage else 0,
                 reply_len,
             )
-            logger.debug(
-                "[%s] trace=%s 完整响应内容:\n%s",
-                tag, trace_id, reply_content,
-            )
+            _MAX_REPLY_LOG = 2000
+            if reply_content:
+                preview = reply_content[:_MAX_REPLY_LOG]
+                if len(reply_content) > _MAX_REPLY_LOG:
+                    preview += f"...(截断, 共{len(reply_content)}字符)"
+                logger.info("[%s] trace=%s 响应内容:\n%s", tag, trace_id, preview)
             return result
         except asyncio.TimeoutError:
             elapsed_ms = (time.monotonic_ns() - start_ns) / 1_000_000

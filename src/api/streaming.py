@@ -34,8 +34,17 @@ async def _stream_generator(model: str, content_iterator: AsyncIterator[str]) ->
     created = int(time.time())
 
     has_error = False
+    chunk_count = 0
+    total_chars = 0
+    stream_start = time.monotonic()
+    first_chunk_ms = None
+
     try:
         async for chunk in content_iterator:
+            chunk_count += 1
+            total_chars += len(chunk)
+            if first_chunk_ms is None:
+                first_chunk_ms = (time.monotonic() - stream_start) * 1000
             data = {
                 "id": chat_id,
                 "object": "chat.completion.chunk",
@@ -50,7 +59,7 @@ async def _stream_generator(model: str, content_iterator: AsyncIterator[str]) ->
             yield f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
     except Exception as e:
         has_error = True
-        logger.error(f"流式生成异常: {e}")
+        logger.error("流式生成异常 (已发送%d chunks): %s", chunk_count, e)
         error_data = {
             "id": chat_id, "object": "chat.completion.chunk", "created": created,
             "model": model,
@@ -63,7 +72,13 @@ async def _stream_generator(model: str, content_iterator: AsyncIterator[str]) ->
         }
         yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
 
+    elapsed_ms = (time.monotonic() - stream_start) * 1000
     if not has_error:
+        logger.info(
+            "[SSE] id=%s model=%s 流式完成 | chunks=%d 总字符=%d TTFC=%.0fms 总耗时=%.0fms",
+            chat_id, model, chunk_count, total_chars,
+            first_chunk_ms or 0, elapsed_ms,
+        )
         end_data = {
             "id": chat_id,
             "object": "chat.completion.chunk",
@@ -76,4 +91,9 @@ async def _stream_generator(model: str, content_iterator: AsyncIterator[str]) ->
             }],
         }
         yield f"data: {json.dumps(end_data, ensure_ascii=False)}\n\n"
+    else:
+        logger.warning(
+            "[SSE] id=%s model=%s 流式中断 | chunks=%d 总字符=%d 总耗时=%.0fms",
+            chat_id, model, chunk_count, total_chars, elapsed_ms,
+        )
     yield "data: [DONE]\n\n"

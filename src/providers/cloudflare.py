@@ -56,7 +56,11 @@ class CloudflareProvider(BaseProvider):
             "messages": [msg_to_dict(m) for m in request.messages],
         }
 
+        logger.info("[cloudflare] 非流式请求 model=%s msgs=%d", model, len(request.messages))
+        t0 = time.monotonic()
         resp = await self._client.post(url, headers=headers, json=payload)
+        http_ms = (time.monotonic() - t0) * 1000
+        logger.info("[cloudflare] HTTP响应 status=%d 耗时=%.0fms body_len=%d", resp.status_code, http_ms, len(resp.content))
         resp.raise_for_status()
         data = resp.json()
 

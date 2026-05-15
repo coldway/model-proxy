@@ -96,8 +96,10 @@ class ConfigManager:
                         rl = None
                         rpd = m.get("default_rpd", 0)
                         rpm = m.get("default_rpm", 0)
-                        if rpd or rpm:
-                            rl = RateLimit(rpd=rpd, rpm=rpm)
+                        tpm = m.get("default_tpm", 0)
+                        tpd = m.get("default_tpd", 0)
+                        if rpd or rpm or tpm or tpd:
+                            rl = RateLimit(rpd=rpd, rpm=rpm, tpm=tpm, tpd=tpd)
                         models.append(ModelConfig(
                             name=m["id"],
                             enabled=True,
@@ -122,8 +124,10 @@ class ConfigManager:
             rl = None
             rpd = model_data.get("default_rpd", 0)
             rpm = model_data.get("default_rpm", 0)
-            if rpd or rpm:
-                rl = RateLimit(rpd=rpd, rpm=rpm)
+            tpm = model_data.get("default_tpm", 0)
+            tpd = model_data.get("default_tpd", 0)
+            if rpd or rpm or tpm or tpd:
+                rl = RateLimit(rpd=rpd, rpm=rpm, tpm=tpm, tpd=tpd)
             mc = ModelConfig(
                 name=model_data["id"],
                 enabled=True,
@@ -146,8 +150,10 @@ class ConfigManager:
                     rl = None
                     rpd = m.get("default_rpd", 0)
                     rpm = m.get("default_rpm", 0)
-                    if rpd or rpm:
-                        rl = RateLimit(rpd=rpd, rpm=rpm)
+                    tpm = m.get("default_tpm", 0)
+                    tpd = m.get("default_tpd", 0)
+                    if rpd or rpm or tpm or tpd:
+                        rl = RateLimit(rpd=rpd, rpm=rpm, tpm=tpm, tpd=tpd)
                     models.append(ModelConfig(
                         name=m["id"],
                         enabled=True,

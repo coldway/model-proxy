@@ -29,11 +29,13 @@ class TestRateLimiter:
         assert self.limiter.can_request("google", "gemini-2.5-flash", rpd=500, rpm=10)
 
     def test_get_usage(self):
-        self.limiter.record_request("groq", "llama-3", )
-        self.limiter.record_request("groq", "llama-3")
-        daily, minute = self.limiter.get_usage("groq", "llama-3")
+        self.limiter.record_request("groq", "llama-3", tokens=100)
+        self.limiter.record_request("groq", "llama-3", tokens=200)
+        daily, minute, daily_tok, minute_tok = self.limiter.get_usage("groq", "llama-3")
         assert daily == 2
         assert minute == 2
+        assert daily_tok == 300
+        assert minute_tok == 300
 
     def test_is_exhausted(self):
         for _ in range(10):

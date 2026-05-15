@@ -411,15 +411,21 @@ async def get_usage():
                 continue
             rpd = m.rate_limit.rpd if m.rate_limit else 0
             rpm = m.rate_limit.rpm if m.rate_limit else 0
-            daily, minute = _deps.rate_limiter.get_usage(prov_name, m.name)
+            tpm = getattr(m.rate_limit, "tpm", 0) if m.rate_limit else 0
+            tpd = getattr(m.rate_limit, "tpd", 0) if m.rate_limit else 0
+            daily, minute, daily_tok, minute_tok = _deps.rate_limiter.get_usage(prov_name, m.name)
             stats.append(UsageStats(
                 provider=prov_name,
                 model=m.name,
                 today_requests=daily,
                 minute_requests=minute,
+                today_tokens=daily_tok,
+                minute_tokens=minute_tok,
                 rpd_limit=rpd,
                 rpm_limit=rpm,
-                available=_deps.rate_limiter.can_request(prov_name, m.name, rpd, rpm),
+                tpm_limit=tpm,
+                tpd_limit=tpd,
+                available=_deps.rate_limiter.can_request(prov_name, m.name, rpd, rpm, tpm, tpd),
             ))
     return UsageResponse(stats=stats)
 
@@ -864,6 +870,15 @@ async def get_routing_log():
 async def get_breaker_status():
     """获取厂商熔断状态"""
     return {"breakers": _deps.dispatcher.get_breaker_status() if _deps.dispatcher else {}}
+
+
+@router.post("/api/breaker/reset")
+async def reset_breaker(provider: str = ""):
+    """手动重置熔断状态。不传 provider 则清除全部；传 provider=xxx 则只清除指定厂商。"""
+    if not _deps.dispatcher:
+        return {"status": "error", "message": "dispatcher 未初始化"}
+    count = _deps.dispatcher.clear_breaker(provider)
+    return {"status": "ok", "cleared": count}
 
 
 @router.get("/api/blacklist")

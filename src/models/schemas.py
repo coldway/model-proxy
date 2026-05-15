@@ -19,6 +19,8 @@ class ProviderName(str, Enum):
 class RateLimit(BaseModel):
     rpd: int = Field(description="每日请求数上限")
     rpm: int = Field(default=0, description="每分钟请求数上限")
+    tpm: int = Field(default=0, description="每分钟 token 数上限")
+    tpd: int = Field(default=0, description="每日 token 数上限")
 
 
 class ModelConfig(BaseModel):
@@ -155,8 +157,12 @@ class UsageStats(BaseModel):
     model: str
     today_requests: int = 0
     minute_requests: int = 0
+    today_tokens: int = 0
+    minute_tokens: int = 0
     rpd_limit: int = 0
     rpm_limit: int = 0
+    tpm_limit: int = 0
+    tpd_limit: int = 0
     available: bool = True
 
 

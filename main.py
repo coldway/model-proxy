@@ -48,6 +48,7 @@ logging.basicConfig(
     format=_LOG_FMT,
     handlers=[logging.StreamHandler(sys.stdout), _file_handler],
 )
+logging.getLogger("watchfiles").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 install_log_buffer(max_records=2000)

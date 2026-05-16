@@ -26,6 +26,7 @@
 ### 修复
 
 - **UI 限流误报**：清除 `model_capabilities.yaml` 中残留的 5/13 旧 429/503 错误缓存，解决 UI 模型卡片显示错误的"限流"徽标
+- **watchfiles 日志刷屏**：将 `watchfiles` logger 级别从 INFO 调至 WARNING，抑制高频 `change detected` 通知，保持 reload 热重载正常工作
 
 ---
 

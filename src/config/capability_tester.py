@@ -474,6 +474,15 @@ class CapabilityTester:
             logger.info("测试 %s/%s: 阶段1失败 - %s", provider_name, model_id, result["error"])
             return {**result, "cached": False}
 
+        if tc_result.get("probe_response") == "empty response":
+            result["error"] = "empty_response (模型返回 200 但无内容，可能是软限流)"
+            logger.warning(
+                "测试 %s/%s: 模型返回空内容，跳过后续能力检测",
+                provider_name, model_id,
+            )
+            self._cache.set(provider_name, model_id, result)
+            return {**result, "cached": False}
+
         # ── 阶段 2：多轮 tool calling（仅当单轮通过时） ──
         if result["tool_calling"]:
             try:

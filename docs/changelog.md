@@ -4,6 +4,31 @@
 
 ---
 
+## [Unreleased]
+
+### 新增
+
+- **单模型能力测试 API**：`POST /api/capabilities/test?provider=xxx&model=yyy&force=true`，支持精准测试单个模型（约 15-30 秒），避免全量测试阻塞
+- **UI 测试能力按钮**：模型管理页面每个模型卡片新增「🔍 测试能力」按钮，一键检测 7 项能力（工具调用、多轮对话、中文、视觉、JSON、流式、推理）
+- **空内容检测**：能力测试器新增对 Google API "200 OK 但无内容"（软限流）的检测，标记 `error: empty_response` 并跳过后续能力检测，避免误判为"可用但无能力"
+- **持久 Toast**：长耗时操作（如能力测试）的 Toast 提示持续显示直到操作完成，不再 3 秒自动消失
+- **5 层保护机制文档**：`SERVICE.md` 新增完整的模型可用性保护机制说明（能力缓存、429 黑名单、RPD/RPM 配额、厂商熔断、Payload 上限）
+- **路由排序日志**：每次自动路由输出前 5 名模型及其能力组合分值（如 `TC+MT+R`），便于调试路由决策
+
+### 优化
+
+- **路由排序策略重构**：`_sort_by_capability` 新增 5 级排序维度
+  - 健康度 > 流式匹配 > 能力组合 > 中文匹配 > 延迟
+  - 能力组合评分：TC+MT+R(6) > TC+MT(5) > TC+R(4) > MT+R(3) > TC(2) > MT|R(1) > 无(0)
+  - 流式请求（`stream=True`）自动优先选择支持流式的模型
+- **`providers_catalog.yaml` 更新**：`gemini-2.5-flash-lite` 和 `gemini-flash-lite-latest` 的 `tool_calling` 从 `false` 改为 `true`（实测验证）
+
+### 修复
+
+- **UI 限流误报**：清除 `model_capabilities.yaml` 中残留的 5/13 旧 429/503 错误缓存，解决 UI 模型卡片显示错误的"限流"徽标
+
+---
+
 ## [0.3.0] - 2026-05-11
 
 ### 新增

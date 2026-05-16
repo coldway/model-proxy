@@ -789,9 +789,10 @@ def _apply_capabilities_to_catalog(provider_name: str, test_results: list[dict])
 # --- 模型能力测试 ---
 
 @router.post("/api/capabilities/test")
-async def test_capabilities(provider: str = "", force: bool = False):
+async def test_capabilities(provider: str = "", model: str = "", force: bool = False):
     """测试模型能力
 
+    - 指定 provider + model: 只测试该厂商的指定模型（最快）
     - 指定 provider: 只测试该厂商的所有模型
     - 不指定 provider: 测试所有已注册厂商
     - force=true: 强制重新测试已缓存的模型
@@ -803,10 +804,14 @@ async def test_capabilities(provider: str = "", force: bool = False):
         if not _deps.dispatcher.has_provider(provider):
             raise HTTPException(status_code=404, detail=f"厂商 {provider} 未注册")
         prov_inst = _deps.dispatcher.get_provider(provider)
-        try:
-            models = await prov_inst.list_models()
-        except Exception as e:
-            raise HTTPException(status_code=502, detail=f"拉取模型列表失败: {e}")
+
+        if model:
+            models = [model]
+        else:
+            try:
+                models = await prov_inst.list_models()
+            except Exception as e:
+                raise HTTPException(status_code=502, detail=f"拉取模型列表失败: {e}")
 
         results = await _deps.capability_tester.test_provider_models(
             prov_inst, provider, models, force=force,

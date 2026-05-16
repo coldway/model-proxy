@@ -6,13 +6,15 @@ from __future__ import annotations
 import logging
 import sys
 from contextlib import asynccontextmanager
+from logging.handlers import TimedRotatingFileHandler
+from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from src.api.routes import init_routes, router
-from src.api.ui import UI_HTML
+from src.api.ui import get_ui_html
 from src.config.capability_tester import CapabilityCache, CapabilityTester
 from src.config.catalog import CatalogManager
 from src.config.manager import ConfigManager
@@ -29,10 +31,22 @@ from src.scheduler.rate_limiter import RateLimiter
 
 from src.api.log_buffer import install as install_log_buffer
 
+_LOG_DIR = Path("logs")
+_LOG_DIR.mkdir(exist_ok=True)
+_LOG_FMT = "%(asctime)s [%(levelname)-7s] %(name)s: %(message)s"
+
+_file_handler = TimedRotatingFileHandler(
+    _LOG_DIR / "app.log",
+    when="midnight",
+    backupCount=30,
+    encoding="utf-8",
+)
+_file_handler.setFormatter(logging.Formatter(_LOG_FMT))
+
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)],
+    format=_LOG_FMT,
+    handlers=[logging.StreamHandler(sys.stdout), _file_handler],
 )
 logger = logging.getLogger(__name__)
 
@@ -123,7 +137,7 @@ def create_app() -> FastAPI:
 
     @app.get("/ui", response_class=HTMLResponse)
     async def ui_panel():
-        return UI_HTML
+        return get_ui_html()
 
     @app.get("/", response_class=HTMLResponse)
     async def root():

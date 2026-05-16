@@ -163,23 +163,27 @@ class GoogleProvider(BaseProvider):
             return False
 
     def _convert_messages(self, messages: list[ChatMessage]) -> list[dict]:
-        """将 OpenAI 格式消息转换为 Gemini 格式（含 tool 消息）"""
+        """将 OpenAI 格式消息转换为 Gemini 格式。
+
+        对于 tool_call 历史：由于 Gemini 3+ 要求 functionCall 必须携带
+        thought_signature（仅 Gemini 自身产生），而跨模型路由时 tool_call
+        来自其他厂商无此签名，因此将 tool_call 历史降级为文本描述，
+        避免 400 Bad Request。
+        """
         contents = []
         for msg in messages:
             if msg.role == "tool":
+                tool_name = msg.name or "unknown"
+                result_text = msg.content or ""
                 contents.append({
                     "role": "user",
-                    "parts": [{
-                        "functionResponse": {
-                            "name": msg.name or "unknown",
-                            "response": {"result": msg.content or ""},
-                        }
-                    }],
+                    "parts": [{"text": f"[工具 {tool_name} 返回结果]\n{result_text}"}],
                 })
             elif msg.role == "assistant" and msg.tool_calls:
                 parts = []
                 if msg.content:
                     parts.append({"text": msg.content})
+                call_descs = []
                 for tc in msg.tool_calls:
                     raw_args = tc.function.arguments
                     if isinstance(raw_args, str):
@@ -189,12 +193,8 @@ class GoogleProvider(BaseProvider):
                             args = {"raw": raw_args}
                     else:
                         args = raw_args or {}
-                    parts.append({
-                        "functionCall": {
-                            "name": tc.function.name,
-                            "args": args,
-                        }
-                    })
+                    call_descs.append(f"调用工具 {tc.function.name}({json.dumps(args, ensure_ascii=False)})")
+                parts.append({"text": "\n".join(call_descs)})
                 contents.append({"role": "model", "parts": parts})
             else:
                 role = "user" if msg.role in ("user", "system") else "model"

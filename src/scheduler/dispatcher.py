@@ -480,8 +480,16 @@ class Dispatcher:
         models: list[tuple[str, ModelConfig]],
         request: ChatCompletionRequest,
     ) -> list[tuple[str, ModelConfig]]:
-        """根据请求特征、模型能力和运行时健康状况综合排序"""
-        needs_tc = bool(request.tools)
+        """根据请求特征、模型能力和运行时健康状况综合排序
+
+        排序优先级（从高到低）：
+        1. 健康度：成功率 ≥80% > ≥50% > <50%
+        2. 流式匹配：当 request.stream=True 时，支持流式的模型优先
+        3. 能力组合：TC+MT+R(6) > TC+MT(5) > TC+R(4) > MT+R(3) > TC(2) > MT|R(1) > 无(0)
+        4. 中文匹配：请求含中文时，支持中文的模型优先
+        5. 延迟：低延迟优先
+        """
+        needs_stream = bool(request.stream)
         has_chinese = self._detect_chinese(request)
 
         health_map = {}
@@ -491,8 +499,28 @@ class Dispatcher:
         def score(item: tuple[str, ModelConfig]) -> tuple:
             prov_name, m = item
             caps = self._get_caps(prov_name, m.name)
-            tc = 1 if (caps.get("tool_calling") or m.tool_calling) and needs_tc else 0
-            mt = 1 if caps.get("multi_turn_tc") else 0
+
+            stream_ok = 1 if not needs_stream or caps.get("streaming") else 0
+
+            has_tc = bool(caps.get("tool_calling") or m.tool_calling)
+            has_mt = bool(caps.get("multi_turn_tc"))
+            has_reason = bool(caps.get("reasoning"))
+
+            if has_tc and has_mt and has_reason:
+                cap_combo = 6
+            elif has_tc and has_mt:
+                cap_combo = 5
+            elif has_tc and has_reason:
+                cap_combo = 4
+            elif has_mt and has_reason:
+                cap_combo = 3
+            elif has_tc:
+                cap_combo = 2
+            elif has_mt or has_reason:
+                cap_combo = 1
+            else:
+                cap_combo = 0
+
             cn = 1 if caps.get("chinese") and has_chinese else 0
             latency = caps.get("latency_ms", 99999)
 
@@ -501,9 +529,19 @@ class Dispatcher:
             success_rate = health.get("success_rate", 1.0)
             health_penalty = 0 if success_rate >= 0.8 else (-1 if success_rate >= 0.5 else -2)
 
-            return (health_penalty, tc, mt, cn, max(0, 30000 - latency))
+            return (health_penalty, stream_ok, cap_combo, cn, max(0, 30000 - latency))
 
-        return sorted(models, key=score, reverse=True)
+        _CAP_LABELS = {6: "TC+MT+R", 5: "TC+MT", 4: "TC+R", 3: "MT+R", 2: "TC", 1: "MT|R", 0: "-"}
+        result = sorted(models, key=score, reverse=True)
+        if len(result) > 1:
+            ranking = ", ".join(
+                f"{m.name}({_CAP_LABELS.get(score((p, m))[2], '?')})" for p, m in result[:5]
+            )
+            logger.info(
+                "[排序] stream=%s cn=%s | 前5: %s",
+                needs_stream, has_chinese, ranking,
+            )
+        return result
 
     def _get_caps(self, provider: str, model: str) -> dict[str, Any]:
         """从缓存获取模型能力"""
@@ -848,16 +886,29 @@ class Dispatcher:
             import httpx as _httpx
             elapsed_ms = (time.monotonic_ns() - stream_start) / 1_000_000
             if isinstance(e, _httpx.HTTPStatusError) and not self._should_trigger_breaker(e.response.status_code):
-                logger.warning(
-                    "[流式] trace=%s %s:%s HTTP %d 客户端错误（不计入熔断, %.0fms）: %s",
-                    trace_id, prov_name, model_cfg.name, e.response.status_code, elapsed_ms, e,
-                )
+                if e.response.status_code == 413:
+                    _pb = estimate_payload_bytes(request)
+                    _kl = self._payload_tracker.get_limit(prov_name, model_cfg.name)
+                    _kl_str = f"{_kl} bytes ({_kl/1024:.1f} KB)" if _kl else "未知"
+                    logger.warning(
+                        "[流式] trace=%s %s:%s 413 Payload Too Large (%.0fms) | "
+                        "请求 payload=%d bytes (%.1f KB) | 模型已知上限=%s",
+                        trace_id, prov_name, model_cfg.name, elapsed_ms,
+                        _pb, _pb / 1024, _kl_str,
+                    )
+                    self._payload_tracker.record_413(prov_name, model_cfg.name, _pb)
+                else:
+                    logger.warning(
+                        "[流式] trace=%s %s:%s HTTP %d 客户端错误（不计入熔断, %.0fms）: %s",
+                        trace_id, prov_name, model_cfg.name, e.response.status_code, elapsed_ms, e,
+                    )
             else:
                 self._record_provider_failure(prov_name)
                 logger.error("[流式] trace=%s %s:%s 连接建立失败（%.0fms）: %s", trace_id, prov_name, model_cfg.name, elapsed_ms, e)
             raise ProviderCallError(f"流式连接失败: {e}") from e
 
         rate_limiter = self._rate_limiter
+        payload_tracker = self._payload_tracker
         record_failure = self._record_provider_failure
         record_success = self._record_provider_success
 
@@ -894,6 +945,17 @@ class Dispatcher:
                 if status == 429:
                     rate_limiter.mark_429(prov_name, model_cfg.name)
                     logger.warning("[流式] trace=%s %s:%s 收到 429（%.0fms），已加入黑名单", trace_id, prov_name, model_cfg.name, elapsed_ms)
+                elif status == 413:
+                    _pb = estimate_payload_bytes(request)
+                    _kl = payload_tracker.get_limit(prov_name, model_cfg.name)
+                    _kl_str = f"{_kl} bytes ({_kl/1024:.1f} KB)" if _kl else "未知"
+                    logger.warning(
+                        "[流式] trace=%s %s:%s 413 Payload Too Large (%.0fms) | "
+                        "请求 payload=%d bytes (%.1f KB) | 模型已知上限=%s",
+                        trace_id, prov_name, model_cfg.name, elapsed_ms,
+                        _pb, _pb / 1024, _kl_str,
+                    )
+                    payload_tracker.record_413(prov_name, model_cfg.name, _pb)
                 elif status in Dispatcher._CLIENT_ERROR_NO_BREAKER:
                     logger.warning("[流式] trace=%s %s:%s HTTP %d 客户端错误（不计入熔断, %.0fms）", trace_id, prov_name, model_cfg.name, status, elapsed_ms)
                 else:
@@ -1046,6 +1108,14 @@ class Dispatcher:
                 ) from e
             if status == 413:
                 payload_bytes = estimate_payload_bytes(request)
+                known_limit = self._payload_tracker.get_limit(provider_name, model_name)
+                limit_str = f"{known_limit} bytes ({known_limit/1024:.1f} KB)" if known_limit else "未知"
+                logger.warning(
+                    "[%s] trace=%s %s:%s 413 Payload Too Large | "
+                    "请求 payload=%d bytes (%.1f KB) | 模型已知上限=%s",
+                    tag, trace_id, provider_name, model_name,
+                    payload_bytes, payload_bytes / 1024, limit_str,
+                )
                 self._payload_tracker.record_413(provider_name, model_name, payload_bytes)
                 raise PayloadTooLarge(
                     f"{provider_name}:{model_name} 返回 413，payload {payload_bytes} bytes "

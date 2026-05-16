@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 HISTORY_FILE = Path("data/request_history.jsonl")
 MAX_MEMORY_RECORDS = 500
 FLUSH_INTERVAL_SECONDS = 5
+RETENTION_DAYS = 30
 
 
 @dataclass
@@ -46,6 +47,8 @@ class RequestHistory:
         self._flush_timer: threading.Timer | None = None
         if persist:
             HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
+            self._load_from_file()
+            self._cleanup_old_records()
 
     def record(
         self,
@@ -175,6 +178,71 @@ class RequestHistory:
                 "last_error": d["last_error"],
             }
         return result
+
+    def _load_from_file(self) -> None:
+        """启动时从 JSONL 文件加载历史记录到内存"""
+        if not HISTORY_FILE.exists():
+            return
+        loaded = 0
+        cutoff = time.time() - RETENTION_DAYS * 86400
+        try:
+            with open(HISTORY_FILE, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        data = json.loads(line)
+                        if data.get("timestamp", 0) < cutoff:
+                            continue
+                        rec = RequestRecord(
+                            timestamp=data["timestamp"],
+                            provider=data["provider"],
+                            model=data["model"],
+                            success=data["success"],
+                            latency_ms=data["latency_ms"],
+                            error=data.get("error", ""),
+                            prompt_tokens=data.get("prompt_tokens", 0),
+                            completion_tokens=data.get("completion_tokens", 0),
+                            route_strategy=data.get("route_strategy", ""),
+                        )
+                        self._records.append(rec)
+                        loaded += 1
+                    except (json.JSONDecodeError, KeyError):
+                        continue
+            if loaded:
+                logger.info("已从历史文件加载 %d 条路由决策记录", loaded)
+        except Exception as e:
+            logger.warning("加载路由决策历史失败: %s", e)
+
+    def _cleanup_old_records(self) -> None:
+        """清理超过 RETENTION_DAYS 的历史记录"""
+        if not HISTORY_FILE.exists():
+            return
+        cutoff = time.time() - RETENTION_DAYS * 86400
+        kept = []
+        removed = 0
+        try:
+            with open(HISTORY_FILE, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        data = json.loads(line)
+                        if data.get("timestamp", 0) >= cutoff:
+                            kept.append(line)
+                        else:
+                            removed += 1
+                    except json.JSONDecodeError:
+                        continue
+            if removed:
+                with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+                    for line in kept:
+                        f.write(line + "\n")
+                logger.info("已清理 %d 条超过 %d 天的路由决策记录", removed, RETENTION_DAYS)
+        except Exception as e:
+            logger.warning("清理路由决策历史失败: %s", e)
 
     def _schedule_flush(self) -> None:
         if self._flush_timer is None or not self._flush_timer.is_alive():

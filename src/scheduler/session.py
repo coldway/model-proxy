@@ -22,7 +22,7 @@ SESSION_FILE = DATA_DIR / "chat_sessions.yaml"
 CHARS_PER_TOKEN = 2
 MAX_CONTEXT_TOKENS = 32_000
 RESERVED_SYSTEM_TOKENS = 500
-MAX_SESSIONS = 50
+MAX_SESSIONS = 0
 
 SYSTEM_PROMPT = (
     "你是 Model Proxy 的内置 AI 助手，帮助用户完成文本分析、编程、翻译、写作等任务。"
@@ -128,16 +128,14 @@ class ChatSession:
 class SessionManager:
     """管理所有聊天会话"""
 
-    def __init__(self, *, max_sessions: int = MAX_SESSIONS, max_context_tokens: int = MAX_CONTEXT_TOKENS):
+    def __init__(self, *, max_context_tokens: int = MAX_CONTEXT_TOKENS):
         self._sessions: dict[str, ChatSession] = {}
-        self._max_sessions = max_sessions
         self._max_context_tokens = max_context_tokens
         self._load()
 
     def create(self, model: str = "auto", title: str = "新对话") -> ChatSession:
         session = ChatSession(title=title, model=model)
         self._sessions[session.id] = session
-        self._enforce_limit()
         self._save()
         return session
 
@@ -180,14 +178,6 @@ class SessionManager:
 
     def save(self) -> None:
         self._save()
-
-    def _enforce_limit(self) -> None:
-        if len(self._sessions) <= self._max_sessions:
-            return
-        oldest = sorted(self._sessions.values(), key=lambda s: s.updated_at)
-        while len(self._sessions) > self._max_sessions:
-            to_remove = oldest.pop(0)
-            del self._sessions[to_remove.id]
 
     def _save(self) -> None:
         DATA_DIR.mkdir(parents=True, exist_ok=True)

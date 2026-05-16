@@ -888,13 +888,14 @@
         }
 
         // --- Toast 通知 ---
-        function toast(msg, type = 'info') {
+        function toast(msg, type = 'info', persistent = false) {
             const container = document.getElementById('toast-container');
             const el = document.createElement('div');
             el.className = 'toast ' + type;
             el.textContent = msg;
             container.appendChild(el);
-            setTimeout(() => el.remove(), 3000);
+            if (!persistent) setTimeout(() => el.remove(), 3000);
+            return el;
         }
 
         // --- 弹窗 ---
@@ -989,6 +990,13 @@
                     breakerMap = bkData.breakers || {};
                 } catch(e) {}
 
+                let payloadLimits = {};
+                try {
+                    const plResp = await apiFetch(API + '/api/payload-limits');
+                    const plData = await plResp.json();
+                    payloadLimits = plData.limits || {};
+                } catch(e) {}
+
                 grid.innerHTML = data.stats.map(s => {
                     const pct = s.rpd_limit > 0 ? (s.today_requests / s.rpd_limit * 100) : 0;
                     const color = pct > 80 ? 'red' : pct > 50 ? 'yellow' : 'green';
@@ -1026,6 +1034,7 @@
                             <div class="stat-item"><span class="label">每日上限</span><span class="value">${s.rpd_limit || '无限制'}</span></div>
                             <div class="stat-item"><span class="label">本分钟</span><span class="value">${s.minute_requests}</span></div>
                             <div class="stat-item"><span class="label">RPM 上限</span><span class="value">${s.rpm_limit || '无限制'}</span></div>
+                            ${(() => { const plKey = s.provider + '/' + s.model; const pl = payloadLimits[plKey]; if (!pl) return ''; const kb = (pl.max_bytes / 1024).toFixed(1); return '<div class="stat-item"><span class="label">Payload 上限</span><span class="value" style="color:var(--accent-yellow)">⚠ ' + kb + ' KB</span></div>'; })()}
                         </div>
                     </div>`;
                 }).join('');
@@ -1247,9 +1256,10 @@
         }
 
         async function loadProviderModels(providerId) {
-            const [catalogResp, capResp] = await Promise.all([
+            const [catalogResp, capResp, plResp] = await Promise.all([
                 apiFetch(API + `/api/catalog/provider/${providerId}/models`),
                 apiFetch(API + `/api/capabilities`).catch(() => null),
+                apiFetch(API + `/api/payload-limits`).catch(() => null),
             ]);
             const data = await catalogResp.json();
             const allModels = data.models || [];
@@ -1265,6 +1275,12 @@
                         capMap[parts.slice(1).join('/')] = val;
                     }
                 }
+            }
+
+            let payloadLimits = {};
+            if (plResp && plResp.ok) {
+                const plData = await plResp.json();
+                payloadLimits = plData.limits || {};
             }
 
             if (allModels.length === 0) {
@@ -1296,10 +1312,11 @@
                             </div>
                             ${capBadgesHtml}
                             ${capSummaryHtml}
-                            <div style="font-size:0.7rem;color:var(--text-muted);margin-top:2px">RPD: ${m.default_rpd || '∞'} | RPM: ${m.default_rpm || '∞'}</div>
+                            <div style="font-size:0.7rem;color:var(--text-muted);margin-top:2px">RPD: ${m.default_rpd || '∞'} | RPM: ${m.default_rpm || '∞'}${(() => { const plKey = providerId + '/' + m.id; const pl = payloadLimits[plKey]; if (!pl) return ''; const kb = (pl.max_bytes / 1024).toFixed(1); return ' | <span style="color:var(--accent-yellow)" title="收到 413 后自动检测的上限（触发 ' + pl.hit_count + ' 次，' + pl.updated_at + '）">⚠ Payload 上限: ' + kb + ' KB</span>'; })()}</div>
                         </div>
                     </div>
                     <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
+                        <button class="btn btn-ghost btn-sm" style="font-size:0.6rem;padding:2px 6px" onclick="event.stopPropagation();testSingleModel('${providerId}','${m.id}')" title="检测此模型的 tool calling、中文、视觉等能力">🔍 测试能力</button>
                         <label class="toggle" onclick="event.stopPropagation()">
                             <input type="checkbox" ${isEnabled ? 'checked' : ''} onchange="toggleModelAndReload('${providerId}','${m.id}',this.checked)">
                             <span class="slider"></span>
@@ -1309,6 +1326,36 @@
             }).join('');
 
             initModelDragAndDrop();
+        }
+
+        async function testSingleModel(providerId, modelId) {
+            const loadingToast = toast(`正在测试 ${modelId} 的能力（约 15-30 秒）...`, 'info', true);
+            try {
+                const resp = await apiFetch(API + `/api/capabilities/test?provider=${providerId}&model=${encodeURIComponent(modelId)}&force=true`, {method: 'POST'});
+                const data = await resp.json();
+                const results = data.results || [];
+                if (results.length > 0) {
+                    const r = results[0];
+                    const caps = [];
+                    if (r.tool_calling) caps.push('工具调用');
+                    if (r.multi_turn_tc) caps.push('多轮对话');
+                    if (r.chinese) caps.push('中文');
+                    if (r.vision) caps.push('视觉');
+                    if (r.json_mode) caps.push('JSON');
+                    if (r.streaming) caps.push('流式');
+                    if (r.reasoning) caps.push('推理');
+                    const capStr = caps.length > 0 ? caps.join('、') : '无特殊能力';
+                    const latStr = r.latency_ms ? `${r.latency_ms}ms` : '-';
+                    toast(`${modelId} 测试完成: ${capStr} | 延迟 ${latStr}`, 'success');
+                } else {
+                    toast(`${modelId} 测试完成（无结果）`, 'info');
+                }
+                loadProviderModels(providerId);
+            } catch(e) {
+                toast(`测试失败: ${e.message}`, 'error');
+            } finally {
+                loadingToast.remove();
+            }
         }
 
         async function toggleModelAndReload(providerId, modelId, enabled) {

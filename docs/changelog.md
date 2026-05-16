@@ -14,6 +14,7 @@
 - **持久 Toast**：长耗时操作（如能力测试）的 Toast 提示持续显示直到操作完成，不再 3 秒自动消失
 - **5 层保护机制文档**：`SERVICE.md` 新增完整的模型可用性保护机制说明（能力缓存、429 黑名单、RPD/RPM 配额、厂商熔断、Payload 上限）
 - **路由排序日志**：每次自动路由输出前 5 名模型及其能力组合分值（如 `TC+MT+R`），便于调试路由决策
+- **`/v1/models` 能力字段增强**：返回每个模型的已探测能力（streaming/reasoning/multi_turn_tc/chinese/vision/json_mode/latency_ms），供上游服务（如 ai-assitance）动态选择模型
 
 ### 优化
 

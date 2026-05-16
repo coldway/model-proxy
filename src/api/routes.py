@@ -361,10 +361,25 @@ def _record_failure(start_time: float, error: str, provider: str = "unknown", mo
 
 @router.get("/v1/models", response_model=ModelListResponse)
 async def list_models():
-    """列出所有已配置模型"""
+    """列出所有已配置模型（含已探测的能力信息）"""
+    from src.models.schemas import ModelCapabilities
+
     models = []
     for prov_name, prov in _deps.config_manager.config.providers.items():
         for m in prov.models:
+            caps = ModelCapabilities()
+            if _deps.capability_tester:
+                cached = _deps.capability_tester._cache.get(prov_name, m.name)
+                if cached and not cached.get("error"):
+                    caps = ModelCapabilities(
+                        streaming=bool(cached.get("streaming")),
+                        reasoning=bool(cached.get("reasoning")),
+                        multi_turn_tc=bool(cached.get("multi_turn_tc")),
+                        chinese=bool(cached.get("chinese")),
+                        vision=bool(cached.get("vision")),
+                        json_mode=bool(cached.get("json_mode")),
+                        latency_ms=cached.get("latency_ms", 99999),
+                    )
             models.append(ModelInfo(
                 id=m.name,
                 provider=prov_name,
@@ -372,6 +387,7 @@ async def list_models():
                 priority=m.priority,
                 rate_limit=m.rate_limit,
                 tool_calling=m.tool_calling,
+                capabilities=caps,
             ))
     return ModelListResponse(models=models)
 

@@ -154,6 +154,17 @@ class ChatCompletionResponse(BaseModel):
     proxy_info: ProxyInfo | None = Field(default=None, description="model-proxy 路由元数据")
 
 
+class ModelCapabilities(BaseModel):
+    """已探测的模型能力"""
+    streaming: bool = False
+    reasoning: bool = False
+    multi_turn_tc: bool = False
+    chinese: bool = False
+    vision: bool = False
+    json_mode: bool = False
+    latency_ms: float = Field(default=99999, description="探测延迟（毫秒）")
+
+
 class ModelInfo(BaseModel):
     id: str
     provider: str
@@ -161,6 +172,7 @@ class ModelInfo(BaseModel):
     priority: int
     rate_limit: RateLimit | None = None
     tool_calling: bool = False
+    capabilities: ModelCapabilities = Field(default_factory=ModelCapabilities)
 
 
 class ModelListResponse(BaseModel):

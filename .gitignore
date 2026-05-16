@@ -36,6 +36,11 @@ desktop.ini
 logs/
 *.log
 
+# 服务管理
+.svc.pid
+SERVICE.md
+svc.ps1
+
 # UI 构建产物
 ui/node_modules/
 ui/dist/

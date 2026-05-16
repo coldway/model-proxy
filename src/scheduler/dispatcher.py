@@ -17,6 +17,7 @@ from src.models.schemas import (
     ChatMessage,
     ModelConfig,
 )
+from src.scheduler.payload_tracker import PayloadTracker, estimate_payload_bytes
 from src.scheduler.rate_limiter import RateLimiter
 
 if TYPE_CHECKING:
@@ -51,16 +52,19 @@ class Dispatcher:
         route_cache_ttl: int = _DEFAULT_ROUTE_CACHE_TTL,
         breaker_threshold: int = _DEFAULT_BREAKER_THRESHOLD,
         breaker_cooldown: int = _DEFAULT_BREAKER_COOLDOWN,
+        payload_tracker: PayloadTracker | None = None,
     ):
         self._rate_limiter = rate_limiter
         self._providers: dict[str, "BaseProvider"] = {}
         self._capability_cache: CapabilityCache | None = capability_cache
         self._history = history
+        self._payload_tracker = payload_tracker or PayloadTracker()
         self._route_cache: dict[str, tuple[str, float]] = {}
         self._route_log: list[dict[str, Any]] = []
         self._last_route_strategy: str = ""
         self._provider_failures: dict[str, list[float]] = {}
         self._provider_breaker: dict[str, float] = {}
+        self._session_bindings: dict[str, tuple[str, str, float]] = {}
         self._route_cache_ttl = route_cache_ttl
         self._breaker_threshold = breaker_threshold
         self._breaker_cooldown = breaker_cooldown
@@ -188,21 +192,95 @@ class Dispatcher:
     ) -> tuple[str, str, ChatCompletionResponse]:
         """
         调度请求到可用模型，返回 (provider_name, model_name, response) 三元组。
+        - session_id 有绑定时优先使用绑定的模型
         - model="auto" 时按优先级自动选择
         - 指定模型名时尝试直接路由
         - 失败时自动切换到下一优先级模型
         """
         if not trace_id:
             trace_id = self.generate_trace_id()
+
+        if request.session_id:
+            binding = self.get_session_binding(request.session_id)
+            if binding:
+                prov, model = binding
+                logger.info("会话绑定优先: session=%s → %s:%s", request.session_id, prov, model)
+                try:
+                    result = await self._call_provider(prov, model, request, trace_id=trace_id)
+                    self._last_route_strategy = "会话绑定"
+                    return prov, model, result
+                except Exception as e:
+                    logger.warning(
+                        "会话绑定模型 %s:%s 失败: %s，降级到正常路由",
+                        prov, model, e,
+                    )
+
         if request.model != "auto":
             self._last_route_strategy = "指定模型"
-            return await self._dispatch_specific(request, enabled_models, trace_id)
+            result = await self._dispatch_specific(request, enabled_models, trace_id)
+            if request.session_id:
+                self.bind_session(request.session_id, result[0], result[1])
+            return result
 
-        return await self._dispatch_auto(request, enabled_models, trace_id)
+        result = await self._dispatch_auto(request, enabled_models, trace_id)
+        if request.session_id:
+            self.bind_session(request.session_id, result[0], result[1])
+        return result
 
     @property
     def last_route_strategy(self) -> str:
         return self._last_route_strategy
+
+    @property
+    def payload_tracker(self) -> PayloadTracker:
+        return self._payload_tracker
+
+    # --- 会话模型绑定 ---
+
+    _SESSION_BIND_TTL = 3600  # 绑定默认 1 小时过期
+
+    def bind_session(self, session_id: str, provider: str, model: str) -> None:
+        """绑定 session_id 到指定的 provider/model"""
+        self._session_bindings[session_id] = (provider, model, time.time())
+        logger.info("会话绑定: %s → %s:%s", session_id, provider, model)
+
+    def get_session_binding(self, session_id: str) -> tuple[str, str] | None:
+        """获取 session_id 绑定的 (provider, model)，过期返回 None"""
+        if session_id not in self._session_bindings:
+            return None
+        provider, model, ts = self._session_bindings[session_id]
+        if time.time() - ts > self._SESSION_BIND_TTL:
+            del self._session_bindings[session_id]
+            logger.info("会话绑定过期: %s", session_id)
+            return None
+        return provider, model
+
+    def get_all_session_bindings(self) -> dict[str, dict[str, Any]]:
+        """获取所有有效的会话绑定"""
+        now = time.time()
+        result = {}
+        expired = []
+        for sid, (prov, model, ts) in self._session_bindings.items():
+            remaining = self._SESSION_BIND_TTL - (now - ts)
+            if remaining <= 0:
+                expired.append(sid)
+                continue
+            result[sid] = {
+                "provider": prov,
+                "model": model,
+                "remaining_seconds": round(remaining),
+            }
+        for sid in expired:
+            del self._session_bindings[sid]
+        return result
+
+    def clear_session_binding(self, session_id: str = "") -> int:
+        """清除会话绑定。返回清除数量。"""
+        if session_id:
+            return 1 if self._session_bindings.pop(session_id, None) else 0
+        count = len(self._session_bindings)
+        self._session_bindings.clear()
+        return count
 
     async def _dispatch_specific(
         self,
@@ -238,9 +316,10 @@ class Dispatcher:
         2. LLM 智能路由：用最快模型分析请求特征，推荐最佳模型（缓存 10 分钟）
         3. 规则遍历回退：LLM 路由失败时按能力评分遍历所有可用模型
         """
-        available = self._filter_available(enabled_models)
+        payload_bytes = estimate_payload_bytes(request)
+        available = self._filter_available(enabled_models, payload_bytes)
         if not available:
-            raise AllModelsUnavailable("所有模型均不可用（配额耗尽）")
+            raise AllModelsUnavailable("所有模型均不可用（配额耗尽或 payload 超出所有模型上限）")
 
         ordered = self._sort_by_capability(available, request)
         user_hint = self._get_user_hint(request)
@@ -261,7 +340,7 @@ class Dispatcher:
                     cached=False,
                 )
                 return prov_name, model_cfg.name, result
-            except (RateLimitExceeded, ProviderCallError) as e:
+            except (RateLimitExceeded, ProviderCallError, PayloadTooLarge) as e:
                 logger.warning("快速路径 %s 失败: %s，继续尝试", model_cfg.name, e)
                 ordered = ordered[1:]
 
@@ -286,7 +365,7 @@ class Dispatcher:
                                 cached=was_cached,
                             )
                             return prov_name, model_cfg.name, result
-                        except (RateLimitExceeded, ProviderCallError) as e:
+                        except (RateLimitExceeded, ProviderCallError, PayloadTooLarge) as e:
                             logger.warning("推荐模型 %s 失败: %s，回退遍历", recommended, e)
                             ordered = [x for j, x in enumerate(ordered) if j != i]
                             break
@@ -308,6 +387,9 @@ class Dispatcher:
             except RateLimitExceeded:
                 errors.append(f"{provider_name}:{model_cfg.name} 限流")
                 logger.warning("%s:%s 限流，切换下一模型", provider_name, model_cfg.name)
+            except PayloadTooLarge as e:
+                errors.append(f"{provider_name}:{model_cfg.name} payload 过大")
+                logger.warning("%s:%s payload 过大: %s，切换下一模型", provider_name, model_cfg.name, e)
             except ProviderCallError as e:
                 errors.append(f"{provider_name}:{model_cfg.name} 调用失败: {e}")
 
@@ -374,14 +456,23 @@ class Dispatcher:
         return rl.rpd, rl.rpm, getattr(rl, "tpm", 0), getattr(rl, "tpd", 0)
 
     def _filter_available(
-        self, models: list[tuple[str, ModelConfig]]
+        self, models: list[tuple[str, ModelConfig]],
+        payload_bytes: int = 0,
     ) -> list[tuple[str, ModelConfig]]:
-        """过滤出配额未耗尽的模型"""
+        """过滤出配额未耗尽且 payload 大小在限制内的模型"""
         result = []
         for prov_name, model_cfg in models:
             rpd, rpm, tpm, tpd = self._unpack_rate_limit(model_cfg)
-            if self._rate_limiter.can_request(prov_name, model_cfg.name, rpd, rpm, tpm, tpd):
-                result.append((prov_name, model_cfg))
+            if not self._rate_limiter.can_request(prov_name, model_cfg.name, rpd, rpm, tpm, tpd):
+                continue
+            if payload_bytes and not self._payload_tracker.can_accept(prov_name, model_cfg.name, payload_bytes):
+                limit = self._payload_tracker.get_limit(prov_name, model_cfg.name)
+                logger.info(
+                    "跳过 %s:%s — payload %d bytes ≥ 已知上限 %s bytes",
+                    prov_name, model_cfg.name, payload_bytes, limit,
+                )
+                continue
+            result.append((prov_name, model_cfg))
         return result
 
     def _sort_by_capability(
@@ -637,12 +728,27 @@ class Dispatcher:
     ):
         """流式调度：返回 (provider_name, model_name, async_iterator) 元组。
 
+        session_id 有绑定时优先使用绑定的模型。
         model=auto 时复用智能路由逻辑（规则快速路径 → LLM路由 → 规则遍历），
         但返回流式迭代器而非完整响应。
         失败时自动尝试下一候选模型，与非流式路径行为一致。
         """
         if not trace_id:
             trace_id = self.generate_trace_id()
+
+        if request.session_id:
+            binding = self.get_session_binding(request.session_id)
+            if binding:
+                prov, model = binding
+                logger.info("流式会话绑定优先: session=%s → %s:%s", request.session_id, prov, model)
+                candidates = [(p, m) for p, m in enabled_models if p == prov and m.name == model]
+                if candidates:
+                    try:
+                        result = await self._try_stream(candidates[0][0], candidates[0][1], request, trace_id=trace_id)
+                        self._last_route_strategy = "会话绑定"
+                        return result
+                    except ProviderCallError as e:
+                        logger.warning("流式会话绑定 %s:%s 失败: %s，降级到正常路由", prov, model, e)
 
         if request.model != "auto":
             candidates = [(p, m) for p, m in enabled_models if m.name == request.model]
@@ -652,18 +758,27 @@ class Dispatcher:
             rpd, rpm, tpm, tpd = self._unpack_rate_limit(model_cfg)
             if not self._rate_limiter.can_request(prov_name, model_cfg.name, rpd, rpm, tpm, tpd):
                 raise RateLimitExceeded(f"模型 {model_cfg.name} 已达速率限制")
-            return await self._try_stream(prov_name, model_cfg, request, trace_id=trace_id)
+            result = await self._try_stream(prov_name, model_cfg, request, trace_id=trace_id)
+            if request.session_id:
+                self.bind_session(request.session_id, result[0], result[1])
+            return result
 
-        available = self._filter_available(enabled_models)
+        payload_bytes = estimate_payload_bytes(request)
+        available = self._filter_available(enabled_models, payload_bytes)
         if not available:
-            raise AllModelsUnavailable("所有模型均不可用（配额耗尽）")
+            raise AllModelsUnavailable("所有模型均不可用（配额耗尽或 payload 超出所有模型上限）")
 
         ordered = self._sort_by_capability(available, request)
+
+        def _bind_on_success(result):
+            if request.session_id:
+                self.bind_session(request.session_id, result[0], result[1])
+            return result
 
         if self._can_skip_routing(ordered, request):
             prov_name, model_cfg = ordered[0]
             try:
-                return await self._try_stream(prov_name, model_cfg, request, trace_id=trace_id)
+                return _bind_on_success(await self._try_stream(prov_name, model_cfg, request, trace_id=trace_id))
             except ProviderCallError as e:
                 logger.warning("流式快速路径 %s 失败: %s，继续尝试", model_cfg.name, e)
                 ordered = ordered[1:]
@@ -674,7 +789,7 @@ class Dispatcher:
                 for i, (prov_name, model_cfg) in enumerate(ordered):
                     if model_cfg.name == recommended:
                         try:
-                            return await self._try_stream(prov_name, model_cfg, request, trace_id=trace_id)
+                            return _bind_on_success(await self._try_stream(prov_name, model_cfg, request, trace_id=trace_id))
                         except ProviderCallError as e:
                             logger.warning("流式推荐模型 %s 失败: %s，回退遍历", recommended, e)
                             ordered = [x for j, x in enumerate(ordered) if j != i]
@@ -683,7 +798,7 @@ class Dispatcher:
         errors: list[str] = []
         for prov_name, model_cfg in ordered:
             try:
-                return await self._try_stream(prov_name, model_cfg, request, trace_id=trace_id)
+                return _bind_on_success(await self._try_stream(prov_name, model_cfg, request, trace_id=trace_id))
             except ProviderCallError as e:
                 errors.append(f"{prov_name}:{model_cfg.name} {e}")
                 logger.warning("流式 %s:%s 失败: %s，切换下一模型", prov_name, model_cfg.name, e)
@@ -708,10 +823,11 @@ class Dispatcher:
             raise ProviderCallError(f"厂商 {prov_name} 未注册")
         self._rate_limiter.record_request(prov_name, model_cfg.name)
 
+        sid_tag = f" session={request.session_id}" if request.session_id else ""
         msg_summary = self._summarize_messages(request.messages)
         logger.info(
-            "[流式] trace=%s 请求 %s:%s | 消息数=%d %s",
-            trace_id, prov_name, model_cfg.name,
+            "[流式] trace=%s%s 请求 %s:%s | 消息数=%d %s",
+            trace_id, sid_tag, prov_name, model_cfg.name,
             len(request.messages), msg_summary,
         )
         logger.debug(
@@ -851,10 +967,11 @@ class Dispatcher:
             raise ProviderCallError(f"厂商 {provider_name} 未注册")
 
         tag = "路由" if is_routing else "推理"
+        sid_tag = f" session={request.session_id}" if request.session_id else ""
         msg_summary = self._summarize_messages(request.messages)
         logger.info(
-            "[%s] trace=%s %s请求 %s:%s | 消息数=%d %s",
-            tag, trace_id, tag, provider_name, model_name,
+            "[%s] trace=%s%s %s请求 %s:%s | 消息数=%d %s",
+            tag, trace_id, sid_tag, tag, provider_name, model_name,
             len(request.messages), msg_summary,
         )
         logger.debug(
@@ -874,14 +991,17 @@ class Dispatcher:
             if not is_routing:
                 self._rate_limiter.record_request(provider_name, model_name, tokens=total_tokens)
                 self._rate_limiter.clear_429_backoff(provider_name, model_name)
+                self._payload_tracker.record_success(
+                    provider_name, model_name, estimate_payload_bytes(request),
+                )
             self._record_provider_success(provider_name)
 
             reply_content = result.choices[0].message.content if result.choices else ""
             reply_len = len(reply_content) if reply_content else 0
             usage = result.usage
             logger.info(
-                "[%s] trace=%s %s响应 %s:%s | 耗时=%.0fms tokens(prompt=%d,completion=%d,total=%d) 响应长度=%d",
-                tag, trace_id, tag, provider_name, model_name,
+                "[%s] trace=%s%s %s响应 %s:%s | 耗时=%.0fms tokens(prompt=%d,completion=%d,total=%d) 响应长度=%d",
+                tag, trace_id, sid_tag, tag, provider_name, model_name,
                 elapsed_ms,
                 usage.prompt_tokens if usage else 0,
                 usage.completion_tokens if usage else 0,
@@ -924,6 +1044,13 @@ class Dispatcher:
                 raise RateLimitExceeded(
                     f"{provider_name}:{model_name} 厂商返回 429 限流，已加入黑名单（次日恢复）"
                 ) from e
+            if status == 413:
+                payload_bytes = estimate_payload_bytes(request)
+                self._payload_tracker.record_413(provider_name, model_name, payload_bytes)
+                raise PayloadTooLarge(
+                    f"{provider_name}:{model_name} 返回 413，payload {payload_bytes} bytes "
+                    f"超出模型限制，已记录上限"
+                ) from e
             raise ProviderCallError(str(e)) from e
         except Exception as e:
             elapsed_ms = (time.monotonic_ns() - start_ns) / 1_000_000
@@ -949,4 +1076,8 @@ class AllModelsUnavailable(DispatchError):
 
 
 class ProviderCallError(DispatchError):
+    pass
+
+
+class PayloadTooLarge(DispatchError):
     pass

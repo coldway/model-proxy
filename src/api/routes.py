@@ -10,6 +10,7 @@ import time
 import uuid
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from src.models.schemas import (
@@ -25,6 +26,7 @@ from src.models.schemas import (
     ProviderListResponse,
     ProviderModelsResponse,
     ProviderSummary,
+    ProxyInfo,
     RateLimit,
     UsageResponse,
     UsageStats,
@@ -239,12 +241,13 @@ def init_routes(config_manager, dispatcher, rate_limiter, history=None, catalog=
 @router.post("/v1/chat/completions")
 async def chat_completions(request: ChatCompletionRequest):
     """聊天补全接口（支持流式和非流式）"""
-    from src.scheduler.dispatcher import AllModelsUnavailable, ModelNotFound, RateLimitExceeded
+    from src.scheduler.dispatcher import AllModelsUnavailable, ModelNotFound, PayloadTooLarge, RateLimitExceeded
 
     trace_id = uuid.uuid4().hex[:12]
+    sid_tag = f" session={request.session_id}" if request.session_id else ""
     logger.info(
-        "[API] trace=%s /v1/chat/completions | model=%s stream=%s 消息数=%d",
-        trace_id, request.model, request.stream, len(request.messages),
+        "[API] trace=%s%s /v1/chat/completions | model=%s stream=%s 消息数=%d",
+        trace_id, sid_tag, request.model, request.stream, len(request.messages),
     )
 
     enabled_models = _deps.config_manager.get_enabled_models()
@@ -258,6 +261,7 @@ async def chat_completions(request: ChatCompletionRequest):
     try:
         provider_name, model_name, result = await _deps.dispatcher.dispatch(request, enabled_models, trace_id=trace_id)
         latency = (time.time() - start_time) * 1000
+        route_strategy = _deps.dispatcher.last_route_strategy or ""
         if _deps.history:
             _deps.history.record(
                 provider=provider_name,
@@ -266,10 +270,25 @@ async def chat_completions(request: ChatCompletionRequest):
                 latency_ms=latency,
                 prompt_tokens=result.usage.prompt_tokens,
                 completion_tokens=result.usage.completion_tokens,
-                route_strategy=_deps.dispatcher.last_route_strategy,
+                route_strategy=route_strategy,
             )
-        logger.info("[API] trace=%s 完成 | provider=%s model=%s 耗时=%.0fms", trace_id, provider_name, model_name, latency)
-        return result
+        bound = _deps.dispatcher.get_session_binding(request.session_id) if request.session_id else None
+        info = ProxyInfo(
+            provider=provider_name,
+            trace_id=trace_id,
+            latency_ms=round(latency, 1),
+            route_strategy=route_strategy,
+            session_id=request.session_id,
+            bound_model=f"{bound[0]}:{bound[1]}" if bound else None,
+        )
+        logger.info("[API] trace=%s%s 完成 | provider=%s model=%s 耗时=%.0fms", trace_id, sid_tag, provider_name, model_name, latency)
+        out = result.model_dump()
+        out["proxy_info"] = info.model_dump(exclude_none=True)
+        return JSONResponse(content=out)
+    except PayloadTooLarge as e:
+        _record_failure(start_time, str(e))
+        logger.warning("[API] trace=%s payload 过大: %s", trace_id, e)
+        raise HTTPException(status_code=413, detail=str(e))
     except RateLimitExceeded as e:
         _record_failure(start_time, str(e))
         logger.warning("[API] trace=%s 限流: %s", trace_id, e)
@@ -293,16 +312,17 @@ async def _handle_stream(request: ChatCompletionRequest, enabled_models, trace_i
     from src.api.streaming import create_stream_response
     from src.scheduler.dispatcher import AllModelsUnavailable, ModelNotFound, RateLimitExceeded
 
+    sid_tag = f" session={request.session_id}" if request.session_id else ""
     start_time = time.time()
     try:
         provider_name, model_name, content_iter = await _deps.dispatcher.dispatch_stream(request, enabled_models, trace_id=trace_id)
     except RateLimitExceeded as e:
         _record_failure(start_time, str(e))
-        logger.warning("[API] trace=%s 流式限流: %s", trace_id, e)
+        logger.warning("[API] trace=%s%s 流式限流: %s", trace_id, sid_tag, e)
         raise HTTPException(status_code=429, detail=str(e))
     except ModelNotFound as e:
         _record_failure(start_time, str(e))
-        logger.warning("[API] trace=%s 流式模型未找到: %s", trace_id, e)
+        logger.warning("[API] trace=%s%s 流式模型未找到: %s", trace_id, sid_tag, e)
         raise HTTPException(status_code=404, detail=str(e))
     except AllModelsUnavailable as e:
         _record_failure(start_time, str(e))
@@ -314,13 +334,23 @@ async def _handle_stream(request: ChatCompletionRequest, enabled_models, trace_i
         raise HTTPException(status_code=500, detail="推理服务内部错误，请稍后重试")
 
     latency = (time.time() - start_time) * 1000
+    route_strategy = _deps.dispatcher.last_route_strategy or ""
     if _deps.history:
         _deps.history.record(
             provider=provider_name, model=model_name,
             success=True, latency_ms=latency,
         )
-    logger.info("[API] trace=%s 流式连接建立 | provider=%s model=%s 耗时=%.0fms", trace_id, provider_name, model_name, latency)
-    return create_stream_response(model_name, content_iter)
+    logger.info("[API] trace=%s%s 流式连接建立 | provider=%s model=%s 耗时=%.0fms", trace_id, sid_tag, provider_name, model_name, latency)
+    bound = _deps.dispatcher.get_session_binding(request.session_id) if request.session_id else None
+    info = ProxyInfo(
+        provider=provider_name,
+        trace_id=trace_id,
+        latency_ms=round(latency, 1),
+        route_strategy=route_strategy,
+        session_id=request.session_id,
+        bound_model=f"{bound[0]}:{bound[1]}" if bound else None,
+    )
+    return create_stream_response(model_name, content_iter, proxy_info=info)
 
 
 def _record_failure(start_time: float, error: str, provider: str = "unknown", model: str = "unknown") -> None:
@@ -898,6 +928,41 @@ async def get_blacklist():
 async def clear_blacklist(provider: str = "", model: str = ""):
     """清除 429 黑名单（可指定模型或清除全部）"""
     count = _deps.rate_limiter.clear_blacklist(provider, model)
+    return {"status": "ok", "cleared": count}
+
+
+# --- 会话模型绑定 ---
+
+@router.get("/api/session-bindings")
+async def get_session_bindings():
+    """获取所有活跃的会话-模型绑定"""
+    bindings = _deps.dispatcher.get_all_session_bindings()
+    return {"bindings": bindings, "count": len(bindings)}
+
+
+@router.delete("/api/session-bindings/clear")
+async def clear_session_bindings(session_id: str = ""):
+    """清除会话绑定（可指定 session_id 或全部清除）"""
+    count = _deps.dispatcher.clear_session_binding(session_id)
+    return {"status": "ok", "cleared": count}
+
+
+# --- Payload 上限管理 ---
+
+@router.get("/api/payload-limits")
+async def get_payload_limits():
+    """获取所有模型的 payload 上限记录"""
+    limits = _deps.dispatcher.payload_tracker.get_all_limits()
+    return {
+        "limits": limits,
+        "count": len(limits),
+    }
+
+
+@router.delete("/api/payload-limits/clear")
+async def clear_payload_limits(provider: str = "", model: str = ""):
+    """清除 payload 上限记录（可指定厂商/模型或全部清除）"""
+    count = _deps.dispatcher.payload_tracker.clear(provider, model)
     return {"status": "ok", "cleared": count}
 
 

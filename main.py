@@ -142,15 +142,12 @@ def create_app() -> FastAPI:
 app = create_app()
 
 if __name__ == "__main__":
-    _dev = "--dev" in sys.argv
     _catalog = CatalogManager()
     _config = ConfigManager(catalog=_catalog)
-    if _dev:
-        logging.getLogger(__name__).warning("开发模式：reload=True，请勿通过 svc.ps1 启动")
     uvicorn.run(
         "main:app",
         host=_config.settings.host,
         port=_config.settings.port,
-        reload=_dev,
+        reload=True,
         workers=1,
     )

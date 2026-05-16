@@ -10,13 +10,17 @@ from typing import AsyncIterator
 
 from starlette.responses import StreamingResponse
 
-from src.models.schemas import ChatCompletionRequest, ChatMessage
+from src.models.schemas import ChatCompletionRequest, ChatMessage, ProxyInfo
 
 
-def create_stream_response(model: str, content_iterator: AsyncIterator[str]) -> StreamingResponse:
+def create_stream_response(
+    model: str,
+    content_iterator: AsyncIterator[str],
+    proxy_info: ProxyInfo | None = None,
+) -> StreamingResponse:
     """创建 SSE 流式响应"""
     return StreamingResponse(
-        _stream_generator(model, content_iterator),
+        _stream_generator(model, content_iterator, proxy_info),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -26,7 +30,11 @@ def create_stream_response(model: str, content_iterator: AsyncIterator[str]) -> 
     )
 
 
-async def _stream_generator(model: str, content_iterator: AsyncIterator[str]) -> AsyncIterator[str]:
+async def _stream_generator(
+    model: str,
+    content_iterator: AsyncIterator[str],
+    proxy_info: ProxyInfo | None = None,
+) -> AsyncIterator[str]:
     """生成 SSE 格式的流式数据"""
     import logging
     logger = logging.getLogger(__name__)
@@ -75,5 +83,7 @@ async def _stream_generator(model: str, content_iterator: AsyncIterator[str]) ->
                 "finish_reason": "stop",
             }],
         }
+        if proxy_info:
+            end_data["proxy_info"] = proxy_info.model_dump()
         yield f"data: {json.dumps(end_data, ensure_ascii=False)}\n\n"
     yield "data: [DONE]\n\n"

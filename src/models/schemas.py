@@ -116,6 +116,10 @@ class ChatCompletionRequest(BaseModel):
     stream: bool = False
     tools: list[ToolDefinition] | None = None
     tool_choice: str | dict | None = None
+    session_id: str | None = Field(
+        default=None,
+        description="会话标识：首次请求成功后自动绑定模型，后续携带相同 session_id 的请求将路由到同一模型",
+    )
 
 
 class Choice(BaseModel):
@@ -130,6 +134,16 @@ class UsageInfo(BaseModel):
     total_tokens: int = 0
 
 
+class ProxyInfo(BaseModel):
+    """model-proxy 附加路由信息，帮助上游服务追踪实际调用详情"""
+    provider: str = Field(description="实际处理请求的厂商 ID")
+    trace_id: str = Field(default="", description="请求追踪 ID，用于日志关联")
+    latency_ms: float = Field(default=0, description="端到端推理耗时（毫秒）")
+    route_strategy: str = Field(default="", description="路由策略：direct / priority / round_robin / fallback")
+    session_id: str | None = Field(default=None, description="会话绑定 ID（传入 session_id 时返回，确认绑定关系）")
+    bound_model: str | None = Field(default=None, description="当前 session_id 绑定的模型（仅会话绑定时返回）")
+
+
 class ChatCompletionResponse(BaseModel):
     id: str
     object: str = "chat.completion"
@@ -137,6 +151,7 @@ class ChatCompletionResponse(BaseModel):
     model: str
     choices: list[Choice]
     usage: UsageInfo = Field(default_factory=UsageInfo)
+    proxy_info: ProxyInfo | None = Field(default=None, description="model-proxy 路由元数据")
 
 
 class ModelInfo(BaseModel):

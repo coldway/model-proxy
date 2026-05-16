@@ -45,11 +45,13 @@ class ChatSession:
         title: str = "新对话",
         model: str = "auto",
         system_prompt: str = SYSTEM_PROMPT,
+        max_context_tokens: int = MAX_CONTEXT_TOKENS,
     ):
         self.id = session_id or uuid.uuid4().hex[:12]
         self.title = title
         self.model = model
         self.system_prompt = system_prompt
+        self._max_context_tokens = max_context_tokens
         self.messages: list[dict[str, str]] = []
         self.created_at: float = time.time()
         self.updated_at: float = time.time()
@@ -72,7 +74,7 @@ class ChatSession:
     def get_context_messages(self) -> list[dict[str, str]]:
         """获取用于 API 调用的消息列表（含系统提示、自动截断）"""
         result = [{"role": "system", "content": self.system_prompt}]
-        budget = MAX_CONTEXT_TOKENS - RESERVED_SYSTEM_TOKENS
+        budget = self._max_context_tokens - RESERVED_SYSTEM_TOKENS
         selected: list[dict[str, str]] = []
         consumed = 0
 
@@ -111,12 +113,13 @@ class ChatSession:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> ChatSession:
+    def from_dict(cls, data: dict, max_context_tokens: int = MAX_CONTEXT_TOKENS) -> ChatSession:
         s = cls(
             session_id=data["id"],
             title=data.get("title", "新对话"),
             model=data.get("model", "auto"),
             system_prompt=data.get("system_prompt", SYSTEM_PROMPT),
+            max_context_tokens=max_context_tokens,
         )
         s.messages = data.get("messages", [])
         s.created_at = data.get("created_at", time.time())
@@ -128,16 +131,40 @@ class ChatSession:
 class SessionManager:
     """管理所有聊天会话"""
 
-    def __init__(self, *, max_context_tokens: int = MAX_CONTEXT_TOKENS):
+    def __init__(
+        self,
+        *,
+        max_context_tokens: int = MAX_CONTEXT_TOKENS,
+        max_sessions: int = MAX_SESSIONS,
+    ):
         self._sessions: dict[str, ChatSession] = {}
         self._max_context_tokens = max_context_tokens
+        self._max_sessions = max_sessions
         self._load()
 
     def create(self, model: str = "auto", title: str = "新对话") -> ChatSession:
-        session = ChatSession(title=title, model=model)
+        if self._max_sessions > 0 and len(self._sessions) >= self._max_sessions:
+            self._evict_oldest()
+        session = ChatSession(
+            title=title, model=model,
+            max_context_tokens=self._max_context_tokens,
+        )
         self._sessions[session.id] = session
         self._save()
         return session
+
+    def _evict_oldest(self) -> None:
+        """淘汰最旧的会话直到腾出空间"""
+        sorted_sessions = sorted(
+            self._sessions.values(),
+            key=lambda s: s.updated_at,
+        )
+        while self._max_sessions > 0 and len(self._sessions) >= self._max_sessions:
+            if not sorted_sessions:
+                break
+            oldest = sorted_sessions.pop(0)
+            del self._sessions[oldest.id]
+            logger.info("会话数已达上限 %d，淘汰最旧会话: %s", self._max_sessions, oldest.id)
 
     def get(self, session_id: str) -> ChatSession | None:
         return self._sessions.get(session_id)
@@ -198,7 +225,7 @@ class SessionManager:
             if not isinstance(data, dict):
                 return
             for sid, sdata in data.items():
-                self._sessions[sid] = ChatSession.from_dict(sdata)
+                self._sessions[sid] = ChatSession.from_dict(sdata, max_context_tokens=self._max_context_tokens)
             logger.info("已加载 %d 个聊天会话", len(self._sessions))
         except Exception as e:
             logger.error("加载会话数据失败: %s", e)

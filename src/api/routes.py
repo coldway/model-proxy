@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import re
 import time
 import uuid
 
@@ -35,181 +34,11 @@ from src.config.catalog import CatalogManager
 from src.scheduler.history import RequestHistory
 from src.scheduler.session import SessionManager
 
+from src.api.thinking import strip_thinking as _strip_thinking
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-_THINK_TAG_RE = re.compile(r"<think(?:ing)?>(.*?)</think(?:ing)?>", re.DOTALL)
-
-_THINKING_LINE_PATTERNS = [
-    re.compile(r"^\s*[*•]\s"),
-    re.compile(r"^\s{4,}\S"),
-    re.compile(r"^\s*\("),
-    re.compile(r"^Final\s+(Polish|Answer|Response|Draft)\s*:", re.I),
-    re.compile(
-        r"^\s*(Wait|Hmm|Let me|I should|I need to|I will|Since the|However,|Actually,|"
-        r"The user|User input|Task:|Constraints?:|Draft|Revised|Refinement)",
-        re.I,
-    ),
-]
-
-
-def _is_thinking_line(line: str) -> bool:
-    stripped = line.strip()
-    if not stripped:
-        return False
-    return any(p.match(line) for p in _THINKING_LINE_PATTERNS)
-
-
-def _strip_thinking(text: str) -> tuple[str, str]:
-    """从模型回复中分离思考过程和最终回复。
-
-    返回 (clean_reply, thinking_content)。
-    支持：
-    1. <think>/<thinking> 标签
-    2. Gemma 式 bullet-point 推理 + 末尾回复
-    3. 元认知文本（Final Polish/Wait/Since the user 等）+ 末尾回复
-    """
-    thinking_parts = _THINK_TAG_RE.findall(text)
-    if thinking_parts:
-        clean = _THINK_TAG_RE.sub("", text).strip()
-        thinking = "\n---\n".join(p.strip() for p in thinking_parts if p.strip())
-        return clean, thinking
-
-    lines = text.strip().split("\n")
-    if len(lines) < 3:
-        return text, ""
-
-    non_empty = [(i, lines[i]) for i in range(len(lines)) if lines[i].strip()]
-    if len(non_empty) < 3:
-        return text, ""
-
-    thinking_count = sum(1 for _, l in non_empty if _is_thinking_line(l))
-
-    if thinking_count < 2 or thinking_count < len(non_empty) * 0.5:
-        return text, ""
-
-    last_clean_start = -1
-    for i in range(len(lines) - 1, -1, -1):
-        stripped = lines[i].strip()
-        if not stripped:
-            continue
-        if _is_thinking_line(lines[i]):
-            break
-        last_clean_start = i
-
-    if last_clean_start > 0:
-        clean = "\n".join(lines[last_clean_start:]).strip()
-        thinking = "\n".join(lines[:last_clean_start]).strip()
-        if clean:
-            return _dedup_answer(clean), thinking
-
-    paragraphs = re.split(r"\n\s*\n", text.strip())
-    if len(paragraphs) >= 2:
-        last_para = paragraphs[-1].strip()
-        if last_para and not _is_thinking_line(last_para.split("\n")[0]):
-            thinking_text = "\n\n".join(paragraphs[:-1]).strip()
-            return _dedup_answer(last_para), thinking_text
-
-    cn_answer = _extract_chinese_answer(text)
-    if cn_answer:
-        thinking_text = text[:text.rfind(cn_answer)].strip()
-        return _dedup_answer(cn_answer), thinking_text
-
-    trailing = _extract_trailing_answer(text)
-    if trailing:
-        thinking_text = text[:text.rfind(trailing)].strip()
-        return _dedup_answer(trailing), thinking_text
-
-    return text, ""
-
-
-def _dedup_answer(text: str) -> str:
-    """去除 Gemma 模型常见的答案重复（先引号内草稿，后直接输出）。
-
-    例如: '"我是AI助手。"我是AI助手。' → '我是AI助手。'
-    """
-    stripped = text.strip()
-    for q_open, q_close in [('"', '"'), ('\u201c', '\u201d'), ("'", "'"), ('\u2018', '\u2019')]:
-        if stripped.startswith(q_open) and q_close in stripped[1:]:
-            end_idx = stripped.index(q_close, 1) + len(q_close)
-            quoted = stripped[len(q_open):end_idx - len(q_close)].strip()
-            rest = stripped[end_idx:].strip()
-            if rest and _similar(quoted, rest):
-                return rest
-    half = len(stripped) // 2
-    if half > 2:
-        first_half = stripped[:half].strip()
-        second_half = stripped[half:].strip()
-        if _similar(first_half, second_half):
-            return second_half
-    return stripped
-
-
-def _similar(a: str, b: str) -> bool:
-    a_clean = re.sub(r"[\s，。！？、""''\"'\.\,]", "", a)
-    b_clean = re.sub(r"[\s，。！？、""''\"'\.\,]", "", b)
-    if not a_clean or not b_clean:
-        return False
-    shorter = min(len(a_clean), len(b_clean))
-    longer = max(len(a_clean), len(b_clean))
-    if shorter < 3:
-        return a_clean == b_clean
-    common = sum(1 for ca, cb in zip(a_clean, b_clean) if ca == cb)
-    return common / longer > 0.8
-
-
-_CHINESE_SENTENCE_RE = re.compile(
-    r"([\u4e00-\u9fff][\u4e00-\u9fff\s，。！？、（）""''：；…·\w A-Za-z0-9\-_.]{2,}[。！？\u201d]?)$"
-)
-
-
-def _extract_chinese_answer(text: str) -> str:
-    """提取文本末尾的中文句子作为最终答案。"""
-    m = _CHINESE_SENTENCE_RE.search(text.strip())
-    if m:
-        candidate = m.group(1).strip()
-        if candidate and len(candidate) < len(text) * 0.5:
-            return candidate
-    return ""
-
-
-def _extract_trailing_answer(text: str) -> str:
-    """从全是思考内容的文本末尾提取被拼接的最终答案。
-
-    Gemma 模型常见模式：思考过程以 bullet-point 输出，最终答案
-    无换行直接拼接在最后一行末尾或最后一个 bullet 内容之后。
-    """
-    lines = text.strip().split("\n")
-    last_line = ""
-    for line in reversed(lines):
-        if line.strip():
-            last_line = line
-            break
-    if not last_line:
-        return ""
-
-    content = re.sub(r"^\s*[*•]\s+", "", last_line).strip()
-    if not content:
-        return ""
-
-    for pattern in [
-        re.compile(r'[.。!！?？)\）"\u201d]\s*(.+)$'),
-        re.compile(r'(?:best|better|correct|answer|回复|答案|直接)[.。"\u201d)）]*\s*(.+)$', re.I),
-    ]:
-        m = pattern.search(content)
-        if m:
-            candidate = m.group(1).strip()
-            if candidate and 0 < len(candidate) < len(content):
-                return candidate
-
-    all_thinking = all(
-        _is_thinking_line(l) for l in lines if l.strip()
-    )
-    if all_thinking and len(content) < 200:
-        return content
-
-    return ""
 
 
 class _RouteDeps:
@@ -235,7 +64,11 @@ def init_routes(config_manager, dispatcher, rate_limiter, history=None, catalog=
     _deps.catalog = catalog
     _deps.provider_factories = provider_factories or {}
     _deps.capability_tester = capability_tester
-    _deps.session_mgr = SessionManager()
+    settings = config_manager.settings
+    _deps.session_mgr = SessionManager(
+        max_context_tokens=settings.max_context_tokens,
+        max_sessions=settings.max_sessions,
+    )
 
 
 @router.post("/v1/chat/completions")
@@ -369,7 +202,7 @@ async def list_models():
         for m in prov.models:
             caps = ModelCapabilities()
             if _deps.capability_tester:
-                cached = _deps.capability_tester._cache.get(prov_name, m.name)
+                cached = _deps.capability_tester.cache.get(prov_name, m.name)
                 if cached and not cached.get("error"):
                     caps = ModelCapabilities(
                         streaming=bool(cached.get("streaming")),
@@ -638,83 +471,37 @@ async def update_settings(
 
 # --- 模型发现 ---
 
+_DISCOVERY_FALLBACK: dict[str, dict[str, str]] = {
+    "google": {"url": "https://aistudio.google.com/", "guide": "获取 API Key: https://aistudio.google.com/apikey"},
+    "groq": {"url": "https://console.groq.com/", "guide": "注册后在 https://console.groq.com/keys 获取 API Key"},
+    "github": {"url": "https://github.com/marketplace/models", "guide": "使用 GitHub Personal Access Token"},
+    "cerebras": {"url": "https://cloud.cerebras.ai/", "guide": "注册后在 Dashboard 获取 API Key，base_url=https://api.cerebras.ai/v1"},
+    "sambanova": {"url": "https://cloud.sambanova.ai/", "guide": "注册后在 API 页面获取 Key，base_url=https://api.sambanova.ai/v1"},
+    "openrouter": {"url": "https://openrouter.ai/", "guide": "https://openrouter.ai/keys 获取 Key，base_url=https://openrouter.ai/api/v1"},
+    "cloudflare": {"url": "https://ai.cloudflare.com/", "guide": "Dashboard > AI > Workers AI，获取 Account ID 和 API Token"},
+    "huggingface": {"url": "https://huggingface.co/inference-api", "guide": "https://huggingface.co/settings/tokens 创建 Token"},
+    "mistral": {"url": "https://console.mistral.ai/", "guide": "https://console.mistral.ai/api-keys/ 获取 Key，base_url=https://api.mistral.ai/v1"},
+    "cursor": {"url": "https://www.cursor.com/", "guide": "通过 Cursor IDE 登录即可使用"},
+}
+
+
 @router.get("/api/discovery", response_model=list[ProviderDiscovery])
 async def discover_providers():
-    """查找可免费使用的大模型厂商"""
-    discoveries = [
-        ProviderDiscovery(
-            name="Google AI Studio",
-            url="https://aistudio.google.com/",
-            description="Google 提供的免费 Gemini 系列模型，有每日请求额度限制",
-            free_models=["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash", "gemma-4-27b"],
-            integration_guide="获取 API Key: https://aistudio.google.com/apikey",
+    """查找可免费使用的大模型厂商（从 catalog 动态生成）"""
+    if not _deps.catalog:
+        return []
+    discoveries = []
+    for prov_id, prov_data in _deps.catalog.get_all_providers().items():
+        fallback = _DISCOVERY_FALLBACK.get(prov_id, {})
+        model_ids = [m["id"] for m in prov_data.get("models", [])[:5]]
+        discoveries.append(ProviderDiscovery(
+            name=prov_data.get("name", prov_id),
+            url=prov_data.get("url", fallback.get("url", "")),
+            description=prov_data.get("description", f"{prov_data.get('name', prov_id)} 免费模型推理"),
+            free_models=model_ids,
+            integration_guide=fallback.get("guide", "请查看厂商官网获取 API Key"),
             new_user_only=False,
-        ),
-        ProviderDiscovery(
-            name="Groq",
-            url="https://console.groq.com/",
-            description="Groq 提供的高速推理服务，支持多种开源模型免费调用",
-            free_models=["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768"],
-            integration_guide="注册后在 https://console.groq.com/keys 获取 API Key",
-            new_user_only=False,
-        ),
-        ProviderDiscovery(
-            name="GitHub Models",
-            url="https://github.com/marketplace/models",
-            description="GitHub 提供的模型市场，使用 GitHub Token 即可免费调用",
-            free_models=["gpt-4o-mini", "meta-llama-3.1-405b-instruct", "mistral-large"],
-            integration_guide="使用 GitHub Personal Access Token，在 Settings > Developer settings 中生成",
-            new_user_only=False,
-        ),
-        ProviderDiscovery(
-            name="Cerebras",
-            url="https://cloud.cerebras.ai/",
-            description="Cerebras 提供极速推理（~2000 tokens/s），免费层每日 1000 次请求",
-            free_models=["llama-3.3-70b", "llama-3.1-8b", "llama-3.1-70b"],
-            integration_guide="注册后在 Dashboard 获取 API Key，兼容 OpenAI SDK，base_url=https://api.cerebras.ai/v1",
-            new_user_only=False,
-        ),
-        ProviderDiscovery(
-            name="SambaNova",
-            url="https://cloud.sambanova.ai/",
-            description="SambaNova Cloud 免费推理，速度极快，支持 405B 大模型和 DeepSeek",
-            free_models=["Meta-Llama-3.3-70B-Instruct", "Meta-Llama-3.1-405B-Instruct", "DeepSeek-R1", "DeepSeek-V3-0324"],
-            integration_guide="注册后在 API 页面获取 Key，接口兼容 OpenAI 格式，base_url=https://api.sambanova.ai/v1",
-            new_user_only=False,
-        ),
-        ProviderDiscovery(
-            name="OpenRouter",
-            url="https://openrouter.ai/",
-            description="聚合平台，标注 :free 后缀的模型完全免费，每日约 200 次请求",
-            free_models=["meta-llama/llama-3.1-8b-instruct:free", "mistralai/mistral-7b-instruct:free", "qwen/qwen-2.5-72b-instruct:free", "google/gemma-2-9b-it:free"],
-            integration_guide="https://openrouter.ai/keys 获取 Key，兼容 OpenAI SDK，base_url=https://openrouter.ai/api/v1",
-            new_user_only=False,
-        ),
-        ProviderDiscovery(
-            name="Cloudflare Workers AI",
-            url="https://ai.cloudflare.com/",
-            description="Cloudflare 免费 AI 推理，每日 10,000 neurons（约数千次小请求），无需信用卡",
-            free_models=["@cf/meta/llama-3.1-8b-instruct", "@cf/mistral/mistral-7b-instruct-v0.2-lora", "@cf/qwen/qwen1.5-14b-chat-awq"],
-            integration_guide="Dashboard > AI > Workers AI，获取 Account ID 和 API Token，接口 REST 格式",
-            new_user_only=False,
-        ),
-        ProviderDiscovery(
-            name="HuggingFace Inference API",
-            url="https://huggingface.co/inference-api",
-            description="HuggingFace 免费推理 API，支持数千个开源模型，有速率限制但完全免费",
-            free_models=["meta-llama/Llama-3.1-8B-Instruct", "mistralai/Mistral-7B-Instruct-v0.3", "Qwen/Qwen2.5-72B-Instruct", "google/gemma-2-27b-it"],
-            integration_guide="https://huggingface.co/settings/tokens 创建 Token，使用 InferenceClient 或 OpenAI 兼容接口",
-            new_user_only=False,
-        ),
-        ProviderDiscovery(
-            name="Mistral AI (La Plateforme)",
-            url="https://console.mistral.ai/",
-            description="Mistral 官方平台免费层，支持 Mistral Small/Nemo/Codestral 等模型",
-            free_models=["mistral-small-latest", "open-mistral-nemo", "codestral-latest"],
-            integration_guide="https://console.mistral.ai/api-keys/ 获取 Key，兼容 OpenAI SDK，base_url=https://api.mistral.ai/v1",
-            new_user_only=False,
-        ),
-    ]
+        ))
     return discoveries
 
 

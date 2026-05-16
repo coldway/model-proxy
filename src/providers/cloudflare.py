@@ -23,10 +23,13 @@ logger = logging.getLogger(__name__)
 
 
 class CloudflareProvider(BaseProvider):
-    """
-    Cloudflare Workers AI 适配器。
+    """Cloudflare Workers AI 适配器。
+
     API 格式与 OpenAI 不同，需要 account_id。
     api_key 格式："{account_id}:{api_token}"
+
+    注意：Cloudflare Workers AI REST API 不支持标准 SSE 流式输出，
+    因此 stream_chat_completion 回退到 BaseProvider 的假流式（一次缓冲 yield）。
     """
 
     def __init__(self, api_key: str):

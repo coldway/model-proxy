@@ -17,6 +17,7 @@ from src.models.schemas import (
     ChatMessage,
     ModelConfig,
 )
+from src.scheduler.circuit_breaker import CircuitBreaker, should_trigger_breaker
 from src.scheduler.payload_tracker import PayloadTracker, estimate_payload_bytes
 from src.scheduler.rate_limiter import RateLimiter
 
@@ -59,91 +60,27 @@ class Dispatcher:
         self._capability_cache: CapabilityCache | None = capability_cache
         self._history = history
         self._payload_tracker = payload_tracker or PayloadTracker()
+        self._breaker = CircuitBreaker(threshold=breaker_threshold, cooldown=breaker_cooldown)
         self._route_cache: dict[str, tuple[str, float]] = {}
         self._route_log: list[dict[str, Any]] = []
         self._last_route_strategy: str = ""
-        self._provider_failures: dict[str, list[float]] = {}
-        self._provider_breaker: dict[str, float] = {}
         self._session_bindings: dict[str, tuple[str, str, float]] = {}
         self._route_cache_ttl = route_cache_ttl
-        self._breaker_threshold = breaker_threshold
-        self._breaker_cooldown = breaker_cooldown
-
-    # 不应触发熔断的 HTTP 状态码（客户端请求自身问题，非厂商故障）
-    _CLIENT_ERROR_NO_BREAKER = {400, 404, 413, 414, 415, 422}
-
-    @staticmethod
-    def _should_trigger_breaker(status_code: int) -> bool:
-        """判断 HTTP 状态码是否应触发熔断计数。
-        5xx/429/401/403 视为厂商故障；400/404/413 等客户端错误不触发。
-        """
-        if status_code in Dispatcher._CLIENT_ERROR_NO_BREAKER:
-            return False
-        return True
 
     def _record_provider_failure(self, provider_name: str) -> None:
-        """记录厂商失败，达到阈值时触发熔断"""
-        now = time.time()
-        if provider_name not in self._provider_failures:
-            self._provider_failures[provider_name] = []
-        fails = self._provider_failures[provider_name]
-        fails.append(now)
-        self._provider_failures[provider_name] = [t for t in fails if now - t < 120]
-
-        if len(self._provider_failures[provider_name]) >= self._breaker_threshold:
-            self._provider_breaker[provider_name] = now + self._breaker_cooldown
-            self._provider_failures[provider_name] = []
-            logger.warning(
-                "厂商 %s 连续失败 %d 次，触发熔断 %d 秒",
-                provider_name, self._breaker_threshold, self._breaker_cooldown,
-            )
+        self._breaker.record_failure(provider_name)
 
     def _record_provider_success(self, provider_name: str) -> None:
-        """记录厂商成功，清除失败计数"""
-        self._provider_failures.pop(provider_name, None)
+        self._breaker.record_success(provider_name)
 
     def is_provider_broken(self, provider_name: str) -> bool:
-        """检查厂商是否处于熔断状态"""
-        if provider_name not in self._provider_breaker:
-            return False
-        if time.time() > self._provider_breaker[provider_name]:
-            del self._provider_breaker[provider_name]
-            logger.info("厂商 %s 熔断已恢复", provider_name)
-            return False
-        return True
+        return self._breaker.is_open(provider_name)
 
     def get_breaker_status(self) -> dict[str, Any]:
-        """获取所有厂商的熔断状态"""
-        now = time.time()
-        result = {}
-        for prov, expire in list(self._provider_breaker.items()):
-            if now > expire:
-                del self._provider_breaker[prov]
-                continue
-            result[prov] = {
-                "broken": True,
-                "remaining_seconds": round(expire - now),
-                "failures": len(self._provider_failures.get(prov, [])),
-            }
-        return result
+        return self._breaker.get_status()
 
     def clear_breaker(self, provider_name: str = "") -> int:
-        """手动清除熔断状态并重置失败计数。返回清除的厂商数量。"""
-        if provider_name:
-            count = 0
-            if provider_name in self._provider_breaker:
-                del self._provider_breaker[provider_name]
-                count += 1
-            self._provider_failures.pop(provider_name, None)
-            if count:
-                logger.info("手动清除厂商 %s 的熔断状态", provider_name)
-            return count
-        count = len(self._provider_breaker)
-        self._provider_breaker.clear()
-        self._provider_failures.clear()
-        if count:
-            logger.info("手动清除全部 %d 个厂商的熔断状态", count)
-        return count
+        return self._breaker.clear(provider_name)
 
     def get_route_log(self) -> list[dict[str, Any]]:
         """获取最近的路由决策记录"""
@@ -564,7 +501,11 @@ class Dispatcher:
         request: ChatCompletionRequest,
         available: list[tuple[str, ModelConfig]],
     ) -> str:
-        """将请求特征和可用模型列表哈希化，用于路由缓存 key"""
+        """将请求特征和可用模型列表哈希化，用于路由缓存 key。
+
+        特征维度：工具集、语言、图像、流式、消息长度桶、可用模型列表。
+        消息长度使用对数桶（<1K/1K-4K/4K-16K/16K+）减少 cache miss。
+        """
         has_tools = bool(request.tools)
         tool_names = sorted(t.function.name for t in request.tools) if request.tools else []
         has_chinese = self._detect_chinese(request)
@@ -574,9 +515,22 @@ class Dispatcher:
             )
             for m in request.messages
         )
+        total_len = sum(len(m.content) for m in request.messages if isinstance(m.content, str))
+        if total_len < 1000:
+            len_bucket = "S"
+        elif total_len < 4000:
+            len_bucket = "M"
+        elif total_len < 16000:
+            len_bucket = "L"
+        else:
+            len_bucket = "XL"
         model_set = sorted(m.name for _, m in available)
 
-        feature_str = f"tc={has_tools}|tools={','.join(tool_names[:5])}|cn={has_chinese}|img={has_image}|models={','.join(model_set)}"
+        feature_str = (
+            f"tc={has_tools}|tools={','.join(tool_names[:5])}|cn={has_chinese}"
+            f"|img={has_image}|stream={request.stream}|len={len_bucket}"
+            f"|models={','.join(model_set)}"
+        )
         return hashlib.md5(feature_str.encode()).hexdigest()[:12]
 
     def _get_cached_route(self, feature_hash: str) -> str | None:
@@ -885,7 +839,7 @@ class Dispatcher:
         except Exception as e:
             import httpx as _httpx
             elapsed_ms = (time.monotonic_ns() - stream_start) / 1_000_000
-            if isinstance(e, _httpx.HTTPStatusError) and not self._should_trigger_breaker(e.response.status_code):
+            if isinstance(e, _httpx.HTTPStatusError) and not should_trigger_breaker(e.response.status_code):
                 if e.response.status_code == 413:
                     _pb = estimate_payload_bytes(request)
                     _kl = self._payload_tracker.get_limit(prov_name, model_cfg.name)
@@ -940,7 +894,7 @@ class Dispatcher:
             except httpx.HTTPStatusError as e:
                 elapsed_ms = (time.monotonic_ns() - stream_start) / 1_000_000
                 status = e.response.status_code
-                if Dispatcher._should_trigger_breaker(status):
+                if should_trigger_breaker(status):
                     record_failure(prov_name)
                 if status == 429:
                     rate_limiter.mark_429(prov_name, model_cfg.name)
@@ -956,7 +910,7 @@ class Dispatcher:
                         _pb, _pb / 1024, _kl_str,
                     )
                     payload_tracker.record_413(prov_name, model_cfg.name, _pb)
-                elif status in Dispatcher._CLIENT_ERROR_NO_BREAKER:
+                elif not should_trigger_breaker(status):
                     logger.warning("[流式] trace=%s %s:%s HTTP %d 客户端错误（不计入熔断, %.0fms）", trace_id, prov_name, model_cfg.name, status, elapsed_ms)
                 else:
                     logger.error("[流式] trace=%s %s:%s HTTP %d（%.0fms）", trace_id, prov_name, model_cfg.name, status, elapsed_ms)
@@ -1022,7 +976,7 @@ class Dispatcher:
             trace_id = self.generate_trace_id()
 
         if self.is_provider_broken(provider_name):
-            raise ProviderCallError(f"厂商 {provider_name} 处于熔断状态，{self._breaker_cooldown}秒后自动恢复")
+            raise ProviderCallError(f"厂商 {provider_name} 处于熔断状态，{self._breaker.cooldown}秒后自动恢复")
 
         provider = self._providers.get(provider_name)
         if not provider:
@@ -1088,7 +1042,7 @@ class Dispatcher:
                 resp_body = e.response.text[:500]
             except Exception:
                 pass
-            if self._should_trigger_breaker(status):
+            if should_trigger_breaker(status):
                 self._record_provider_failure(provider_name)
                 logger.error(
                     "[%s] trace=%s %s:%s HTTP %d (%.0fms) 响应: %s",
@@ -1104,7 +1058,7 @@ class Dispatcher:
             if status == 429:
                 self._rate_limiter.mark_429(provider_name, model_name)
                 raise RateLimitExceeded(
-                    f"{provider_name}:{model_name} 厂商返回 429 限流，已加入黑名单（次日恢复）"
+                    f"{provider_name}:{model_name} 厂商返回 429 限流，已加入黑名单（指数退避后自动恢复）"
                 ) from e
             if status == 413:
                 payload_bytes = estimate_payload_bytes(request)

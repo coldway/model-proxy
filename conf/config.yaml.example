@@ -33,3 +33,10 @@ settings:
   default_provider: "google"
   auto_switch: true
   log_level: "info"
+  admin_token: ""              # 管理面板认证令牌，为空则不启用认证
+  route_cache_ttl: 600         # LLM 路由缓存有效期（秒）
+  breaker_threshold: 3         # 连续失败 N 次触发厂商熔断
+  breaker_cooldown: 300        # 熔断冷却时间（秒）
+  max_context_tokens: 8000     # 聊天会话上下文最大 token 数
+  max_sessions: 50             # 最大聊天会话数
+  probe_interval: 5            # 能力探测间隔（秒）

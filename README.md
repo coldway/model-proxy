@@ -282,10 +282,14 @@ python -m pytest tests/test_api.py -v
 
 | 模块 | 测试数 | 覆盖内容 |
 |------|:---:|------|
-| rate_limiter | 7 | RPD/RPM 限制、滑动窗口、模型独立性 |
+| rate_limiter | 7 | RPD/RPM 限制、滑动窗口、模型独立性、零限制无限调用 |
 | config | 6 | 加载/保存/更新配置、默认值、模型管理 |
-| dispatcher | 6 | 自动选择、指定路由、失败切换、全部不可用 |
-| api | 7 | 所有 HTTP 端点响应正确性 |
+| dispatcher | 6 | 自动选择、指定路由、失败切换、全部不可用、限流跳过 |
+| api | 7 | HTTP 端点响应、自动调度、UI 面板、根路由重定向 |
+| blacklist | 9 | 429 黑名单增删查、指数退避、剩余秒数、拦截验证 |
+| streaming | 3 | SSE 流式生成、正常/错误/空流处理 |
+| utils | 6 | 消息序列化、tool_calls 解析、多模态内容、容错处理 |
+| admin_auth | 4 | 管理令牌认证、UI/v1 免认证、API 路由拦截 |
 
 ## 项目结构
 
@@ -293,17 +297,21 @@ python -m pytest tests/test_api.py -v
 model-proxy/
 ├── main.py                       # 服务入口
 ├── conf/
-│   ├── config.yaml               # 运行配置（不提交，仅 API Key）
+│   ├── config.yaml               # 运行配置（不提交，仅 API Key + settings）
 │   ├── config.yaml.example       # 配置模板
-│   └── providers_catalog.yaml    # 厂商模型目录（可提交）
+│   ├── providers_catalog.yaml    # 厂商模型目录（可提交）
+│   └── model_capabilities.yaml   # 模型能力探测缓存（运行时生成）
 ├── requirements.txt              # Python 依赖
 ├── prompt.md                     # 项目需求文档
 ├── README.md
+├── SERVICE.md                    # 5 层可用性保护机制文档
+├── svc.ps1                       # Windows 后台服务管理脚本
 ├── .gitignore
 ├── src/
 │   ├── api/
-│   │   ├── routes.py             # API 路由（推理、配置、目录、历史）
+│   │   ├── routes.py             # API 路由（推理、配置、目录、历史、会话）
 │   │   ├── streaming.py          # SSE 流式输出
+│   │   ├── log_buffer.py         # 实时日志环形缓冲与脱敏
 │   │   └── ui.py                 # 内嵌 Web 管理面板
 │   ├── providers/
 │   │   ├── base.py               # 厂商抽象基类（含流式接口）
@@ -313,21 +321,31 @@ model-proxy/
 │   │   ├── cursor.py             # Cursor Agent CLI
 │   │   ├── openai_compat.py      # OpenAI 兼容通用适配器（支持流式）
 │   │   ├── cloudflare.py         # Cloudflare Workers AI
-│   │   └── huggingface.py        # HuggingFace Inference API
+│   │   ├── huggingface.py        # HuggingFace Inference API
+│   │   └── utils.py              # 消息序列化工具
 │   ├── scheduler/
-│   │   ├── dispatcher.py         # 模型调度器（优先级 + 自动切换 + 流式调度）
-│   │   ├── rate_limiter.py       # 滑动窗口限速器
-│   │   └── history.py            # 请求历史记录与持久化
+│   │   ├── dispatcher.py         # 模型调度器（优先级 + 熔断 + 会话绑定 + 流式调度）
+│   │   ├── rate_limiter.py       # 滑动窗口限速器（RPD/RPM/TPM/TPD + 429 黑名单）
+│   │   ├── history.py            # 请求历史记录与持久化
+│   │   ├── session.py            # 聊天会话管理（上下文窗口 + 持久化）
+│   │   └── payload_tracker.py    # Payload 大小上限学习器
 │   ├── config/
 │   │   ├── manager.py            # conf/config.yaml 配置管理
-│   │   └── catalog.py            # conf/providers_catalog.yaml 目录管理
+│   │   ├── catalog.py            # conf/providers_catalog.yaml 目录管理
+│   │   └── capability_tester.py  # 模型能力自动探测（7 维度）
 │   └── models/
 │       └── schemas.py            # Pydantic 数据模型
-├── tests/
-│   ├── test_api.py
-│   ├── test_config.py
-│   ├── test_dispatcher.py
-│   └── test_rate_limiter.py
+├── tests/                        # 52 项单元测试
+│   ├── test_api.py               # HTTP 端点与自动调度
+│   ├── test_config.py            # 配置加载与管理
+│   ├── test_dispatcher.py        # 调度器核心逻辑
+│   ├── test_rate_limiter.py      # 限速器与滑动窗口
+│   ├── test_blacklist.py         # 429 黑名单管理
+│   ├── test_streaming.py         # SSE 流式输出
+│   ├── test_utils.py             # 消息序列化与工具解析
+│   └── test_admin_auth.py        # 管理令牌认证
+├── static/
+│   └── ui.html                   # Web 管理面板单文件 UI
 ├── docs/                         # 项目文档
 │   ├── architecture.md           # 架构概览
 │   ├── api-reference.md          # API 接口参考
@@ -341,7 +359,11 @@ model-proxy/
 │   ├── contributing.md           # 贡献指南
 │   └── testing.md                # 测试文档
 └── data/                         # 运行时数据（自动创建，不提交）
-    └── request_history.jsonl
+    ├── request_history.jsonl      # 请求历史 JSONL
+    ├── usage_daily.yaml           # 每日使用量统计
+    ├── model_blacklist.yaml       # 429 黑名单状态
+    ├── payload_limits.yaml        # Payload 上限学习记录
+    └── chat_sessions.yaml         # 聊天会话数据
 ```
 
 ## 文档
@@ -360,7 +382,7 @@ model-proxy/
 | [常见问题](docs/faq.md) | 安装、配置、调度、UI、流式输出相关 FAQ |
 | [更新日志](docs/changelog.md) | 版本历史与功能变更记录 |
 | [贡献指南](docs/contributing.md) | 开发环境、代码规范、新增厂商步骤、提交规范 |
-| [测试文档](docs/testing.md) | 测试策略、26 项用例详解、Mock 说明 |
+| [测试文档](docs/testing.md) | 测试策略、52 项用例详解、Mock 说明 |
 
 ## 安全注意事项
 

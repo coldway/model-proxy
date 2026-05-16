@@ -89,6 +89,7 @@ class RateLimiter:
                 usage = ModelUsage(
                     daily_count=data.get("daily_count", 0),
                     last_reset_day=stored_day,
+                    daily_tokens=data.get("daily_tokens", 0),
                 )
                 self._usage[key] = usage
             loaded = sum(1 for u in self._usage.values() if u.daily_count > 0)
@@ -134,6 +135,7 @@ class RateLimiter:
                     continue
                 snapshot[key] = {
                     "daily_count": usage.daily_count,
+                    "daily_tokens": usage.daily_tokens,
                     "last_reset_day": usage.last_reset_day,
                 }
             USAGE_FILE.write_text(

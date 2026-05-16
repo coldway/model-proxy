@@ -15,6 +15,9 @@
 - **5 层保护机制文档**：`SERVICE.md` 新增完整的模型可用性保护机制说明（能力缓存、429 黑名单、RPD/RPM 配额、厂商熔断、Payload 上限）
 - **路由排序日志**：每次自动路由输出前 5 名模型及其能力组合分值（如 `TC+MT+R`），便于调试路由决策
 - **`/v1/models` 能力字段增强**：返回每个模型的已探测能力（streaming/reasoning/multi_turn_tc/chinese/vision/json_mode/latency_ms），供上游服务（如 ai-assitance）动态选择模型
+- **CircuitBreaker 独立模块**：熔断器从 Dispatcher 中抽取为 `src/scheduler/circuit_breaker.py`，含 13 项单元测试
+- **SessionManager 测试**：新增 13 项会话管理测试，覆盖创建/删除/上下文截断/会话淘汰/序列化往返
+- **HuggingFace 真流式**：`HuggingFaceProvider.stream_chat_completion` 使用 SSE 逐块输出（失败回退到非流式）
 
 ### 优化
 
@@ -23,11 +26,29 @@
   - 能力组合评分：TC+MT+R(6) > TC+MT(5) > TC+R(4) > MT+R(3) > TC(2) > MT|R(1) > 无(0)
   - 流式请求（`stream=True`）自动优先选择支持流式的模型
 - **`providers_catalog.yaml` 更新**：`gemini-2.5-flash-lite` 和 `gemini-flash-lite-latest` 的 `tool_calling` 从 `false` 改为 `true`（实测验证）
+- **thinking 逻辑抽取**：`routes.py` 中 200+ 行的 thinking 剥离/去重逻辑移至独立模块 `src/api/thinking.py`，`routes.py` 减重 ~200 行
+- **Dispatcher 职责拆分**：熔断器独立为 `CircuitBreaker` 类，Dispatcher 通过委托调用
+- **CapabilityTester 并行探测**：阶段 3-7（中文/视觉/JSON/流式/推理）从串行改为 `asyncio.gather` 并行执行，单模型测试速度提升约 4 倍
+- **路由缓存优化**：`_compute_feature_hash` 新增消息长度桶（S/M/L/XL）和 stream 标记，减少无效 cache miss
+- **RateLimiter 持久化**：补充 `daily_tokens` 的磁盘持久化，重启后 TPD 计数不丢失
+- **SessionManager 配置接线**：`max_context_tokens` 和 `max_sessions` 从 `AppSettings` 传入并实际生效
+  - `max_sessions` 达到上限时自动淘汰最旧会话
+  - `max_context_tokens` 控制每个会话的上下文窗口大小
+- **`/api/discovery` 动态化**：从 catalog 动态生成厂商发现列表，不再硬编码静态数据
+- **CursorProvider 模型参数**：响应中的 model 字段现使用请求中传入的模型名，不再固定为 `cursor-agent`
+- **依赖精简**：移除未使用的 `apscheduler`、`pydantic-settings`、`aiofiles` 三个依赖
+- **test_admin_auth 修复**：测试路由从不存在的 `/api/models` 改为真实的 `/api/config`，并增加编码兼容（UTF-8）
 
 ### 修复
 
 - **UI 限流误报**：清除 `model_capabilities.yaml` 中残留的 5/13 旧 429/503 错误缓存，解决 UI 模型卡片显示错误的"限流"徽标
 - **watchfiles 日志刷屏**：将 `watchfiles` logger 级别从 INFO 调至 WARNING，抑制高频 `change detected` 通知，保持 reload 热重载正常工作
+- **版本号对齐**：`FastAPI(version=...)` 从 `0.1.0` 更正为 `0.3.0`
+- **config.yaml.example 补全**：补充 `admin_token`、`route_cache_ttl`、`breaker_threshold`、`breaker_cooldown`、`max_context_tokens`、`max_sessions`、`probe_interval` 等缺失字段
+- **429 描述统一**：Dispatcher 中 429 黑名单描述从"次日恢复"改为准确的"指数退避后自动恢复"
+- **能力缓存 .gitignore**：`conf/model_capabilities.yaml` 加入 gitignore 防止运行时缓存误提交
+- **私有成员越界**：`list_models` 端点从 `capability_tester._cache` 改为公开 API `capability_tester.cache`
+- **README/测试文档**：测试数据从 26 项更新为 78 项，项目结构补全 14 个缺失文件
 
 ---
 
@@ -122,5 +143,5 @@
 
 - **开发工具**
   - Uvicorn 热重载（`reload=True`）
-  - 26 项单元测试覆盖核心模块（rate_limiter / config / dispatcher / api）
+  - 52 项单元测试覆盖核心模块（rate_limiter / config / dispatcher / api / blacklist / streaming / utils / admin_auth）
   - 完整的项目文档（`docs/` 目录下 8 个模块文档）

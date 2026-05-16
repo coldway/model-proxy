@@ -2,7 +2,4 @@ fastapi>=0.115.0
 uvicorn[standard]>=0.32.0
 httpx>=0.28.0
 pydantic>=2.10.0
-pydantic-settings>=2.7.0
 pyyaml>=6.0.2
-aiofiles>=24.1.0
-apscheduler>=3.11.0

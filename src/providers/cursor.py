@@ -62,7 +62,7 @@ class CursorProvider(BaseProvider):
         return ChatCompletionResponse(
             id=f"chatcmpl-{uuid.uuid4().hex[:12]}",
             created=int(time.time()),
-            model="cursor-agent",
+            model=model or "cursor-agent",
             choices=[
                 Choice(
                     index=0,

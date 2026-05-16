@@ -1,0 +1,28 @@
+refactor: 18项全面优化 — 架构拆分/性能提升/测试覆盖/依赖精简
+
+代码质量:
+- thinking 逻辑抽取为独立模块 src/api/thinking.py (routes.py 减重200行)
+- Dispatcher 熔断器独立为 CircuitBreaker 类 (src/scheduler/circuit_breaker.py)
+- list_models 端点改用公开 API 替代私有成员访问
+- 移除未使用依赖 apscheduler/pydantic-settings/aiofiles
+- FastAPI 版本号对齐 0.1.0→0.3.0, config.example 补全7字段
+
+配置与状态:
+- SessionManager max_context_tokens/max_sessions 从 AppSettings 接线
+- max_sessions 达上限自动淘汰最旧会话
+- 429描述统一为"指数退避后自动恢复"
+- model_capabilities.yaml 加入 gitignore
+
+测试 (52→78项):
+- 新增 CircuitBreaker 13项 + SessionManager 13项测试
+- test_admin_auth 改用真实路由(/api/config) + UTF-8编码修复
+
+性能:
+- CapabilityTester 阶段3-7 并行探测 (asyncio.gather)
+- 路由缓存特征哈希增加消息长度桶+stream标记
+- RateLimiter 补充 daily_tokens 持久化
+
+功能:
+- HuggingFace 真流式 SSE 输出 (失败回退非流式)
+- CursorProvider 响应使用请求中的 model 参数
+- /api/discovery 从 catalog 动态生成

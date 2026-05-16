@@ -118,7 +118,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="Model Proxy",
         description="免费大模型推理代理服务",
-        version="0.1.0",
+        version="0.3.0",
         lifespan=lifespan,
     )
 

@@ -493,45 +493,25 @@ class CapabilityTester:
                 result["multi_turn_tc"] = False
                 result["mt_issue"] = f"error: {str(e)[:60]}"
 
-        # ── 阶段 3：中文能力 ──
-        try:
-            await asyncio.sleep(self._probe_interval)
-            cn_result = await self._test_chinese(provider, model_id)
-            result.update(cn_result)
-        except Exception as e:
-            result["chinese"] = False
+        # ── 阶段 3-7：独立能力并行探测 ──
+        async def _safe_probe(name: str, coro):
+            """安全执行单个探测，失败返回空 dict"""
+            try:
+                await asyncio.sleep(self._probe_interval)
+                return await coro
+            except Exception:
+                return {name: False}
 
-        # ── 阶段 4：视觉/图像理解 ──
-        try:
-            await asyncio.sleep(self._probe_interval)
-            vis_result = await self._test_vision(provider, model_id)
-            result.update(vis_result)
-        except Exception as e:
-            result["vision"] = False
-
-        # ── 阶段 5：结构化 JSON 输出 ──
-        try:
-            await asyncio.sleep(self._probe_interval)
-            json_result = await self._test_json_mode(provider, model_id)
-            result.update(json_result)
-        except Exception as e:
-            result["json_mode"] = False
-
-        # ── 阶段 6：流式输出 ──
-        try:
-            await asyncio.sleep(self._probe_interval)
-            stream_result = await self._test_streaming(provider, model_id)
-            result.update(stream_result)
-        except Exception as e:
-            result["streaming"] = False
-
-        # ── 阶段 7：推理能力 ──
-        try:
-            await asyncio.sleep(self._probe_interval)
-            reason_result = await self._test_reasoning(provider, model_id)
-            result.update(reason_result)
-        except Exception as e:
-            result["reasoning"] = False
+        parallel_tasks = [
+            _safe_probe("chinese", self._test_chinese(provider, model_id)),
+            _safe_probe("vision", self._test_vision(provider, model_id)),
+            _safe_probe("json_mode", self._test_json_mode(provider, model_id)),
+            _safe_probe("streaming", self._test_streaming(provider, model_id)),
+            _safe_probe("reasoning", self._test_reasoning(provider, model_id)),
+        ]
+        parallel_results = await asyncio.gather(*parallel_tasks)
+        for pr in parallel_results:
+            result.update(pr)
 
         self._cache.set(provider_name, model_id, result)
         logger.info(

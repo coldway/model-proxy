@@ -2146,6 +2146,7 @@
         async function _loadMoreHistory() {
             if (_historyLoading || _historyExhausted) return;
             _historyLoading = true;
+            _preserveScroll = true;
             renderLogEntries();
             const statusEl = document.getElementById('log-status');
             statusEl.textContent = '加载历史日志...';
@@ -2169,6 +2170,7 @@
                     if (_historyDateIdx >= _historyDates.length) {
                         _historyExhausted = true;
                         _historyLoading = false;
+                        _preserveScroll = true;
                         renderLogEntries();
                         statusEl.textContent = `共 ${_logEntries.length} 条 | 历史已全部加载`;
                         return;

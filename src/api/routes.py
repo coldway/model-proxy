@@ -74,7 +74,7 @@ def init_routes(config_manager, dispatcher, rate_limiter, history=None, catalog=
 @router.post("/v1/chat/completions")
 async def chat_completions(request: ChatCompletionRequest):
     """聊天补全接口（支持流式和非流式）"""
-    from src.scheduler.dispatcher import AllModelsUnavailable, ModelNotFound, PayloadTooLarge, RateLimitExceeded
+    from src.scheduler.dispatcher import AllModelsUnavailable, ModelNotFound, PayloadTooLarge, ProviderCallError, RateLimitExceeded
 
     trace_id = uuid.uuid4().hex[:12]
     sid_tag = f" session={request.session_id}" if request.session_id else ""
@@ -134,6 +134,10 @@ async def chat_completions(request: ChatCompletionRequest):
         _record_failure(start_time, str(e))
         logger.error("[API] trace=%s 所有模型不可用: %s", trace_id, e)
         raise HTTPException(status_code=503, detail=str(e))
+    except ProviderCallError as e:
+        _record_failure(start_time, str(e))
+        logger.warning("[API] trace=%s 厂商调用失败（可恢复）: %s", trace_id, e)
+        raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
         _record_failure(start_time, str(e))
         logger.error("[API] trace=%s 推理请求异常: %s", trace_id, e, exc_info=True)
@@ -143,7 +147,7 @@ async def chat_completions(request: ChatCompletionRequest):
 async def _handle_stream(request: ChatCompletionRequest, enabled_models, trace_id: str = ""):
     """处理流式请求，返回 SSE StreamingResponse"""
     from src.api.streaming import create_stream_response
-    from src.scheduler.dispatcher import AllModelsUnavailable, ModelNotFound, RateLimitExceeded
+    from src.scheduler.dispatcher import AllModelsUnavailable, ModelNotFound, ProviderCallError, RateLimitExceeded
 
     sid_tag = f" session={request.session_id}" if request.session_id else ""
     start_time = time.time()
@@ -160,6 +164,10 @@ async def _handle_stream(request: ChatCompletionRequest, enabled_models, trace_i
     except AllModelsUnavailable as e:
         _record_failure(start_time, str(e))
         logger.error("[API] trace=%s 流式所有模型不可用: %s", trace_id, e)
+        raise HTTPException(status_code=503, detail=str(e))
+    except ProviderCallError as e:
+        _record_failure(start_time, str(e))
+        logger.warning("[API] trace=%s 流式厂商调用失败（可恢复）: %s", trace_id, e)
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
         _record_failure(start_time, str(e))
@@ -920,7 +928,7 @@ async def rename_chat_session(session_id: str, title: str):
 @router.post("/api/chat/sessions/{session_id}/send")
 async def send_chat_message(session_id: str, request: ChatCompletionRequest):
     """向指定会话发送消息并获取回复（自动管理上下文）"""
-    from src.scheduler.dispatcher import AllModelsUnavailable, ModelNotFound, RateLimitExceeded
+    from src.scheduler.dispatcher import AllModelsUnavailable, ModelNotFound, ProviderCallError, RateLimitExceeded
 
     trace_id = uuid.uuid4().hex[:12]
 
@@ -1004,6 +1012,11 @@ async def send_chat_message(session_id: str, request: ChatCompletionRequest):
         logger.warning("[会话] trace=%s session=%s 失败: %s", trace_id, session_id, e)
         status = 429 if isinstance(e, RateLimitExceeded) else (404 if isinstance(e, ModelNotFound) else 503)
         raise HTTPException(status_code=status, detail=str(e))
+    except ProviderCallError as e:
+        _record_failure(start_time, str(e))
+        await asyncio.to_thread(_deps.session_mgr.save)
+        logger.warning("[会话] trace=%s session=%s 厂商调用失败（可恢复）: %s", trace_id, session_id, e)
+        raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
         _record_failure(start_time, str(e))
         logger.error("[会话] trace=%s session=%s 异常: %s", trace_id, session_id, e, exc_info=True)
@@ -1015,7 +1028,7 @@ async def send_chat_message(session_id: str, request: ChatCompletionRequest):
 async def stream_chat_message(session_id: str, request: ChatCompletionRequest):
     """向指定会话发送消息（流式 SSE 响应 + 自动上下文管理）"""
     from src.api.streaming import create_stream_response
-    from src.scheduler.dispatcher import AllModelsUnavailable, ModelNotFound, RateLimitExceeded
+    from src.scheduler.dispatcher import AllModelsUnavailable, ModelNotFound, ProviderCallError, RateLimitExceeded
 
     trace_id = uuid.uuid4().hex[:12]
 
@@ -1057,6 +1070,10 @@ async def stream_chat_message(session_id: str, request: ChatCompletionRequest):
         logger.warning("[流式会话] trace=%s session=%s 失败: %s", trace_id, session_id, e)
         status = 429 if isinstance(e, RateLimitExceeded) else (404 if isinstance(e, ModelNotFound) else 503)
         raise HTTPException(status_code=status, detail=str(e))
+    except ProviderCallError as e:
+        _record_failure(start_time, str(e))
+        logger.warning("[流式会话] trace=%s session=%s 厂商调用失败（可恢复）: %s", trace_id, session_id, e)
+        raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
         _record_failure(start_time, str(e))
         logger.error("[流式会话] trace=%s session=%s 异常: %s", trace_id, session_id, e, exc_info=True)

@@ -6,6 +6,11 @@
 
 ## [Unreleased]
 
+### 修复
+
+- **Groq boolean 参数兼容**：`GroqProvider._relax_bool_props()` 递归放宽 tool schema 中 `type: boolean` 为 `anyOf[boolean, string("true"/"false")]`，避免模型输出字符串 `"true"` 被 Groq 严格校验拒绝（HTTP 400 `tool_use_failed`）
+- **熔断状态日志降级**：`ProviderCallError`（含熔断状态）从通用 `except Exception`（ERROR+堆栈）中分离为独立 catch（WARNING 无堆栈），涉及 4 处路由端点（非流式/流式/会话/流式会话），减少熔断期间日志刷屏
+
 ### 新增
 
 - **单模型能力测试 API**：`POST /api/capabilities/test?provider=xxx&model=yyy&force=true`，支持精准测试单个模型（约 15-30 秒），避免全量测试阻塞

@@ -42,6 +42,21 @@ class GroqProvider(BaseProvider):
             "Content-Type": "application/json",
         }
 
+    @staticmethod
+    def _relax_bool_props(schema: dict) -> dict:
+        """递归将 JSON Schema 中 boolean 属性放宽为同时接受 string，
+        避免模型输出 "true"/"false" 被 Groq 严格校验拒绝。"""
+        if not isinstance(schema, dict):
+            return schema
+        if schema.get("type") == "boolean":
+            return {"anyOf": [{"type": "boolean"}, {"type": "string", "enum": ["true", "false"]}]}
+        if "properties" in schema and isinstance(schema["properties"], dict):
+            schema = dict(schema)
+            schema["properties"] = {
+                k: GroqProvider._relax_bool_props(v) for k, v in schema["properties"].items()
+            }
+        return schema
+
     def _build_payload(self, model: str, request: ChatCompletionRequest, stream: bool = False) -> dict:
         payload: dict = {
             "model": model,
@@ -52,7 +67,13 @@ class GroqProvider(BaseProvider):
         if request.max_tokens:
             payload["max_tokens"] = request.max_tokens
         if request.tools:
-            payload["tools"] = [t.model_dump() for t in request.tools]
+            relaxed = []
+            for t in request.tools:
+                td = t.model_dump()
+                if "function" in td and "parameters" in td["function"]:
+                    td["function"]["parameters"] = self._relax_bool_props(td["function"]["parameters"])
+                relaxed.append(td)
+            payload["tools"] = relaxed
         if request.tool_choice is not None:
             payload["tool_choice"] = request.tool_choice
         return payload

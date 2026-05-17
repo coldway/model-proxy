@@ -349,17 +349,20 @@ google/gemini-3.1-pro-preview-customtools:
 google/gemini-flash-latest:
   provider: google
   model: gemini-flash-latest
-  available: false
-  tool_calling: false
+  available: true
+  tool_calling: true
   multi_turn_tc: false
   chinese: false
   vision: false
   json_mode: false
   streaming: false
   reasoning: false
-  latency_ms: 0
-  error: rate_limited (429)
-  tested_at: '2026-05-17 02:47:18'
+  latency_ms: 4125
+  error: null
+  probe_response: 'get_current_time({"city": "北京"})'
+  mt_issue: 'error: Client error ''429 Too Many Requests'' for url ''https://genera'
+  stream_error: Google API 429
+  tested_at: '2026-05-17 04:07:21'
 google/gemini-flash-lite-latest:
   available: true
   chinese: false

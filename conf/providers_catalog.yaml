@@ -94,7 +94,7 @@ providers:
       category: 通用
       enabled: true
       priority: 1
-      tool_calling: false
+      tool_calling: true
     - id: gemini-flash-lite-latest
       name: Gemini Flash Lite Latest
       description: 自动指向最新 Flash Lite 版本，高额度，支持 tool calling

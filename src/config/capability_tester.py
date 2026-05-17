@@ -22,6 +22,26 @@ logger = logging.getLogger(__name__)
 
 CAPABILITIES_FILE = Path("conf/model_capabilities.yaml")
 
+# catalog（providers_catalog）中可手动标注的能力字段；与探测缓存合并时以此为准
+_CATALOG_CAP_OVERRIDE_KEYS = frozenset({
+    "tool_calling", "streaming", "multi_turn_tc", "chinese", "vision",
+    "json_mode", "reasoning", "latency_ms",
+})
+
+
+def merge_catalog_capabilities(
+    cached: dict[str, Any] | None,
+    catalog_model: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """合并能力缓存与目录：目录中显式声明的字段覆盖自动探测结果。"""
+    out = dict(cached or {})
+    if not catalog_model:
+        return out
+    for k in _CATALOG_CAP_OVERRIDE_KEYS:
+        if k in catalog_model:
+            out[k] = catalog_model[k]
+    return out
+
 TOOL_CALLING_PROBE = {
     "messages": [{"role": "user", "content": "北京现在几点？"}],
     "tools": [{

@@ -40,3 +40,4 @@ settings:
   max_context_tokens: 8000     # 聊天会话上下文最大 token 数
   max_sessions: 50             # 最大聊天会话数
   probe_interval: 5            # 能力探测间隔（秒）
+  cors_origins: ""             # CORS：逗号分隔 Origin；空=不启用跨域；*=任意来源

@@ -28,9 +28,12 @@ logger = logging.getLogger(__name__)
 _DATA_DIR = Path("data")
 _LIMITS_FILE = _DATA_DIR / "payload_limits.yaml"
 
+# 客户端估算与网关实际限制可能有偏差，比较与 413 记录统一使用加缓冲后的估算值
+_PAYLOAD_ESTIMATE_BUFFER = 1.1
 
-def estimate_payload_bytes(request: ChatCompletionRequest) -> int:
-    """估算请求 payload 的字节大小（序列化 messages + tools 为 JSON）"""
+
+def estimate_payload_bytes_raw(request: ChatCompletionRequest) -> int:
+    """原始 payload 字节估算（无安全余量）"""
     parts: list[Any] = []
     for msg in request.messages:
         if hasattr(msg, "model_dump"):
@@ -41,6 +44,14 @@ def estimate_payload_bytes(request: ChatCompletionRequest) -> int:
     if request.tools:
         payload["tools"] = [t.model_dump() for t in request.tools]
     return len(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
+
+
+def estimate_payload_bytes(request: ChatCompletionRequest) -> int:
+    """估算请求 payload 字节大小，返回含 10% 安全余量（与网关判定对齐更保守）"""
+    raw = estimate_payload_bytes_raw(request)
+    if raw <= 0:
+        return 0
+    return max(1, int(raw * _PAYLOAD_ESTIMATE_BUFFER))
 
 
 class PayloadTracker:
@@ -83,20 +94,28 @@ class PayloadTracker:
         return f"{provider}/{model}"
 
     def record_413(self, provider: str, model: str, payload_bytes: int) -> None:
-        """收到 413 时，将 payload_bytes 设为上限（取更小值以逐步收敛）"""
+        """收到 413 时，将 payload_bytes（已含估算缓冲）设为上限（取更小值以逐步收敛）
+
+        同时记录 raw_estimate_bytes（倒推的原始估算）与 adjusted_limit_bytes（实际采用的
+        比较上限），便于与网关行为对照。
+        """
         key = self._key(provider, model)
+        raw_est = max(0, int(round(payload_bytes / _PAYLOAD_ESTIMATE_BUFFER))) if payload_bytes else 0
+        adjusted = payload_bytes
         with self._lock:
             current = self._limits.get(key)
             if current and current["max_bytes"] <= payload_bytes:
                 return
             self._limits[key] = {
-                "max_bytes": payload_bytes,
+                "max_bytes": adjusted,
+                "raw_estimate_bytes": raw_est,
+                "adjusted_limit_bytes": adjusted,
                 "updated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
                 "hit_count": (current["hit_count"] + 1) if current else 1,
             }
             logger.warning(
-                "模型 %s payload 上限更新为 %d bytes (%.1f KB)",
-                key, payload_bytes, payload_bytes / 1024,
+                "模型 %s payload 上限更新: 原始估算=%d bytes | 调整后限制=%d bytes (%.1f KB)",
+                key, raw_est, adjusted, adjusted / 1024,
             )
             self._save()
 

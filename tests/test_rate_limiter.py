@@ -1,8 +1,6 @@
 # Created by model-proxy on 2026/05/11
 # Copyright © 2026
 
-import time
-
 from src.scheduler.rate_limiter import RateLimiter
 
 
@@ -47,3 +45,12 @@ class TestRateLimiter:
         for _ in range(1000):
             self.limiter.record_request("test", "unlimited")
         assert self.limiter.can_request("test", "unlimited", rpd=0, rpm=0)
+
+    def test_try_record_request_atomic(self):
+        lim = RateLimiter(persist=False)
+        for _ in range(4):
+            assert lim.try_record_request("x", "m", rpd=100, rpm=5, tokens=0) is True
+        assert lim.try_record_request("x", "m", rpd=100, rpm=5, tokens=0) is True
+        assert lim.try_record_request("x", "m", rpd=100, rpm=5, tokens=0) is False
+        daily, minute, _, _ = lim.get_usage("x", "m")
+        assert daily == 5 and minute == 5

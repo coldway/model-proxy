@@ -6,8 +6,14 @@
 
 ## [Unreleased]
 
+### 优化
+
+- **P2 批量（MP-10～MP-18）**：路由缓存哈希纳入 tools 体积/摘要与多模态图像段尺度；可配置 CORS（`cors_origins`）；能力缓存与 `providers_catalog` 合并且目录优先；会话 YAML 读写加进程内锁；DEBUG 请求体改为脱敏摘要；熔断键细化为 `provider:model`（兼容旧厂商级键）；Payload 估算 +10% 余量且 413 记录原始/调整后限制；`routes.py` / `dispatcher.py` / 管理 UI 增加 region 注释分段
+
 ### 修复
 
+- **SSE 流式错误帧（MP-09）**：异常时 `finish_reason` 改为 `stop`，顶层增加 `error: {message, type: server_error, code: null}`，与 OpenAI API 错误结构对齐
+- **流式会话残缺写入（MP-08）**：`/api/chat/sessions/{id}/stream` 在传输异常或 strip 后正文少于 10 字时不写入助手消息，避免污染会话历史
 - **Groq tool_use_failed 智能恢复**：当 Groq 模型在多轮 tool calling 后想输出文本但被严格模式拒绝时（HTTP 400 `tool_use_failed`），`GroqProvider` 自动从 `failed_generation` 字段提取文本作为有效响应返回（非流式 + 流式均支持）。新增 `_is_tool_call_json` 检测：当 `failed_generation` 内容为工具调用 JSON（模型试图调用工具但格式不被接受）时不恢复，正确降级到其他模型
 - **Groq schema 通用放宽**：`GroqProvider._relax_schema()` 递归放宽 tool schema：(1) `type: boolean` → `anyOf[boolean, string("true"/"false")]`；(2) `items: {type: "string"}` → `anyOf[string, object]`，修复模型将 `candidates` 输出为对象数组（`[{name: ...}]`）而非字符串数组时被 Groq 严格校验拒绝的问题
 - **熔断状态日志降级**：`ProviderCallError`（含熔断状态）从通用 `except Exception`（ERROR+堆栈）中分离为独立 catch（WARNING 无堆栈），涉及 4 处路由端点（非流式/流式/会话/流式会话），减少熔断期间日志刷屏
@@ -15,6 +21,8 @@
 
 ### 新增
 
+- **健康探针（MP-06）**：`GET /health` 返回 `{"status":"ok"}`；`GET /ready` 校验至少一个厂商在配置中填写了 API Key；两路径加入 `OPEN_PATHS` 免 Bearer 校验
+- **请求历史容量可配置（MP-07）**：`AppSettings.request_history_max_records`（默认 2000），`RequestHistory` 内存窗口与 `/api/history` 的 limit 上限与之对齐
 - **单模型能力测试 API**：`POST /api/capabilities/test?provider=xxx&model=yyy&force=true`，支持精准测试单个模型（约 15-30 秒），避免全量测试阻塞
 - **UI 测试能力按钮**：模型管理页面每个模型卡片新增「🔍 测试能力」按钮，一键检测 7 项能力（工具调用、多轮对话、中文、视觉、JSON、流式、推理）
 - **空内容检测**：能力测试器新增对 Google API "200 OK 但无内容"（软限流）的检测，标记 `error: empty_response` 并跳过后续能力检测，避免误判为"可用但无能力"
@@ -28,6 +36,9 @@
 
 ### 优化
 
+- **流式配额记账时点（MP-03）**：移除连接建立时的 `record_request`，改为流正常结束后再 `try_record_request`
+- **流式首包超时 per-model（MP-04）**：等待首块使用 `ModelConfig.timeout`（Schema 默认 60s）
+- **RateLimiter 并发一致性（MP-05）**：使用 `threading.Lock` 保护读改写；新增原子方法 `try_record_request`；`_call_provider` 成功路径改为原子登记（竞争失败时打日志仍返回结果）
 - **路由排序策略重构**：`_sort_by_capability` 新增 5 级排序维度
   - 健康度 > 流式匹配 > 能力组合 > 中文匹配 > 延迟
   - 能力组合评分：TC+MT+R(6) > TC+MT(5) > TC+R(4) > MT+R(3) > TC(2) > MT|R(1) > 无(0)

@@ -17,12 +17,14 @@ from src.models.schemas import (
     ChatMessage,
     ModelConfig,
 )
+from src.config.capability_tester import merge_catalog_capabilities
 from src.scheduler.circuit_breaker import CircuitBreaker, should_trigger_breaker
 from src.scheduler.payload_tracker import PayloadTracker, estimate_payload_bytes
 from src.scheduler.rate_limiter import RateLimiter
 
 if TYPE_CHECKING:
     from src.config.capability_tester import CapabilityCache
+    from src.config.catalog import CatalogManager
     from src.providers.base import BaseProvider
 
 logger = logging.getLogger(__name__)
@@ -44,11 +46,14 @@ class Dispatcher:
     支持路由缓存和规则快速路径以减少额外 LLM 调用开销。
     """
 
+    # region 初始化与 Provider 注册
+
     def __init__(
         self,
         rate_limiter: RateLimiter,
         capability_cache: "CapabilityCache | None" = None,
         history: Any = None,
+        catalog: "CatalogManager | None" = None,
         *,
         route_cache_ttl: int = _DEFAULT_ROUTE_CACHE_TTL,
         breaker_threshold: int = _DEFAULT_BREAKER_THRESHOLD,
@@ -58,6 +63,7 @@ class Dispatcher:
         self._rate_limiter = rate_limiter
         self._providers: dict[str, "BaseProvider"] = {}
         self._capability_cache: CapabilityCache | None = capability_cache
+        self._catalog: CatalogManager | None = catalog
         self._history = history
         self._payload_tracker = payload_tracker or PayloadTracker()
         self._breaker = CircuitBreaker(threshold=breaker_threshold, cooldown=breaker_cooldown)
@@ -67,14 +73,14 @@ class Dispatcher:
         self._session_bindings: dict[str, tuple[str, str, float]] = {}
         self._route_cache_ttl = route_cache_ttl
 
-    def _record_provider_failure(self, provider_name: str) -> None:
-        self._breaker.record_failure(provider_name)
+    def _record_provider_failure(self, provider_name: str, model_name: str | None = None) -> None:
+        self._breaker.record_failure(provider_name, model_name)
 
-    def _record_provider_success(self, provider_name: str) -> None:
-        self._breaker.record_success(provider_name)
+    def _record_provider_success(self, provider_name: str, model_name: str | None = None) -> None:
+        self._breaker.record_success(provider_name, model_name)
 
-    def is_provider_broken(self, provider_name: str) -> bool:
-        return self._breaker.is_open(provider_name)
+    def is_provider_broken(self, provider_name: str, model_name: str | None = None) -> bool:
+        return self._breaker.is_open(provider_name, model_name)
 
     def get_breaker_status(self) -> dict[str, Any]:
         return self._breaker.get_status()
@@ -121,6 +127,10 @@ class Dispatcher:
     def provider_names(self) -> list[str]:
         return list(self._providers.keys())
 
+    # endregion
+
+    # region 调度入口与非流式
+
     async def dispatch(
         self,
         request: ChatCompletionRequest,
@@ -143,7 +153,10 @@ class Dispatcher:
                 prov, model = binding
                 logger.info("会话绑定优先: session=%s → %s:%s", request.session_id, prov, model)
                 try:
-                    result = await self._call_provider(prov, model, request, trace_id=trace_id)
+                    rlim = self._rate_limits_for(enabled_models, prov, model)
+                    result = await self._call_provider(
+                        prov, model, request, trace_id=trace_id, rate_limits=rlim,
+                    )
                     self._last_route_strategy = "会话绑定"
                     return prov, model, result
                 except Exception as e:
@@ -172,7 +185,9 @@ class Dispatcher:
     def payload_tracker(self) -> PayloadTracker:
         return self._payload_tracker
 
-    # --- 会话模型绑定 ---
+    # endregion
+
+    # region 会话模型绑定
 
     _SESSION_BIND_TTL = 3600  # 绑定默认 1 小时过期
 
@@ -219,6 +234,10 @@ class Dispatcher:
         self._session_bindings.clear()
         return count
 
+    # endregion
+
+    # region 按模型路由与遍历
+
     async def _dispatch_specific(
         self,
         request: ChatCompletionRequest,
@@ -235,7 +254,10 @@ class Dispatcher:
                         f"模型 {model_cfg.name} 已达速率限制，请稍后重试或切换模型"
                     )
 
-                result = await self._call_provider(provider_name, model_cfg.name, request, trace_id=trace_id)
+                rlim = self._unpack_rate_limit(model_cfg)
+                result = await self._call_provider(
+                    provider_name, model_cfg.name, request, trace_id=trace_id, rate_limits=rlim,
+                )
                 return provider_name, model_cfg.name, result
 
         raise ModelNotFound(f"模型 {request.model} 未找到或未启用")
@@ -266,7 +288,10 @@ class Dispatcher:
         if self._can_skip_routing(ordered, request):
             prov_name, model_cfg = ordered[0]
             try:
-                result = await self._call_provider(prov_name, model_cfg.name, request, trace_id=trace_id)
+                rlim = self._unpack_rate_limit(model_cfg)
+                result = await self._call_provider(
+                    prov_name, model_cfg.name, request, trace_id=trace_id, rate_limits=rlim,
+                )
                 self._last_route_strategy = "规则快速路径"
                 logger.info("规则快速路径: %s:%s", prov_name, model_cfg.name)
                 self._log_route_decision(
@@ -290,7 +315,10 @@ class Dispatcher:
                 for i, (prov_name, model_cfg) in enumerate(ordered):
                     if model_cfg.name == recommended:
                         try:
-                            result = await self._call_provider(prov_name, model_cfg.name, request, trace_id=trace_id)
+                            rlim = self._unpack_rate_limit(model_cfg)
+                            result = await self._call_provider(
+                                prov_name, model_cfg.name, request, trace_id=trace_id, rate_limits=rlim,
+                            )
                             strategy_name = "LLM 智能路由" + ("（缓存）" if was_cached else "")
                             self._last_route_strategy = strategy_name
                             logger.info("LLM 路由选择 %s:%s 成功", prov_name, model_cfg.name)
@@ -311,7 +339,10 @@ class Dispatcher:
         errors: list[str] = []
         for provider_name, model_cfg in ordered:
             try:
-                result = await self._call_provider(provider_name, model_cfg.name, request, trace_id=trace_id)
+                rlim = self._unpack_rate_limit(model_cfg)
+                result = await self._call_provider(
+                    provider_name, model_cfg.name, request, trace_id=trace_id, rate_limits=rlim,
+                )
                 self._last_route_strategy = "规则遍历回退"
                 self._log_route_decision(
                     strategy="规则遍历回退",
@@ -331,6 +362,10 @@ class Dispatcher:
                 errors.append(f"{provider_name}:{model_cfg.name} 调用失败: {e}")
 
         raise AllModelsUnavailable(f"所有模型均不可用: {'; '.join(errors)}")
+
+    # endregion
+
+    # region 能力排序与可用性过滤
 
     @staticmethod
     def _get_user_hint(request: ChatCompletionRequest) -> str:
@@ -371,7 +406,6 @@ class Dispatcher:
 
         sec_tc = second_caps.get("tool_calling") or second_model.tool_calling
         sec_mt = second_caps.get("multi_turn_tc", False)
-        sec_cn = second_caps.get("chinese", False)
 
         if needs_tc and top_tc and top_mt and (not has_chinese or top_cn):
             if not sec_tc or not sec_mt:
@@ -391,6 +425,17 @@ class Dispatcher:
         if not rl:
             return 0, 0, 0, 0
         return rl.rpd, rl.rpm, getattr(rl, "tpm", 0), getattr(rl, "tpd", 0)
+
+    @staticmethod
+    def _rate_limits_for(
+        enabled_models: list[tuple[str, ModelConfig]],
+        provider: str,
+        model: str,
+    ) -> tuple[int, int, int, int]:
+        for p, m in enabled_models:
+            if p == provider and m.name == model:
+                return Dispatcher._unpack_rate_limit(m)
+        return 0, 0, 0, 0
 
     def _filter_available(
         self, models: list[tuple[str, ModelConfig]],
@@ -481,10 +526,14 @@ class Dispatcher:
         return result
 
     def _get_caps(self, provider: str, model: str) -> dict[str, Any]:
-        """从缓存获取模型能力"""
+        """从能力缓存读取并与目录（人工标注）合并，目录优先。"""
+        cached: dict[str, Any] = {}
         if self._capability_cache:
-            return self._capability_cache.get(provider, model) or {}
-        return {}
+            entry = self._capability_cache.get(provider, model)
+            if entry:
+                cached = dict(entry)
+        catalog_model = self._catalog.get_model(provider, model) if self._catalog else None
+        return merge_catalog_capabilities(cached, catalog_model)
 
     @staticmethod
     def _detect_chinese(request: ChatCompletionRequest) -> bool:
@@ -503,18 +552,39 @@ class Dispatcher:
     ) -> str:
         """将请求特征和可用模型列表哈希化，用于路由缓存 key。
 
-        特征维度：工具集、语言、图像、流式、消息长度桶、可用模型列表。
+        特征维度：工具集（数量+摘要哈希+schema 体积）、语言、多模态（图像段数与 URL 总长）、
+        流式、消息长度桶、可用模型列表。
         消息长度使用对数桶（<1K/1K-4K/4K-16K/16K+）减少 cache miss。
         """
         has_tools = bool(request.tools)
         tool_names = sorted(t.function.name for t in request.tools) if request.tools else []
-        has_chinese = self._detect_chinese(request)
-        has_image = any(
-            isinstance(m.content, list) and any(
-                isinstance(p, dict) and p.get("type") == "image_url" for p in m.content
+        if request.tools:
+            tools_dump = json.dumps(
+                [t.model_dump() for t in request.tools],
+                ensure_ascii=False, sort_keys=True,
             )
-            for m in request.messages
-        )
+            tools_sig = (
+                f"n={len(request.tools)}|h={hashlib.md5(tools_dump.encode()).hexdigest()[:10]}"
+                f"|b={len(tools_dump.encode())}"
+            )
+        else:
+            tools_sig = "n=0"
+        has_chinese = self._detect_chinese(request)
+        img_parts = 0
+        img_url_len = 0
+        has_image = False
+        for m in request.messages:
+            if isinstance(m.content, list):
+                for p in m.content:
+                    if isinstance(p, dict) and p.get("type") == "image_url":
+                        has_image = True
+                        img_parts += 1
+                        iu = p.get("image_url")
+                        if isinstance(iu, dict):
+                            url = str(iu.get("url") or "")
+                        else:
+                            url = str(iu or "")
+                        img_url_len += len(url)
         total_len = sum(len(m.content) for m in request.messages if isinstance(m.content, str))
         if total_len < 1000:
             len_bucket = "S"
@@ -527,11 +597,14 @@ class Dispatcher:
         model_set = sorted(m.name for _, m in available)
 
         feature_str = (
-            f"tc={has_tools}|tools={','.join(tool_names[:5])}|cn={has_chinese}"
-            f"|img={has_image}|stream={request.stream}|len={len_bucket}"
+            f"tc={has_tools}|tools={','.join(tool_names[:5])}|tss={tools_sig}"
+            f"|cn={has_chinese}|img={has_image}|imgn={img_parts}|imgul={img_url_len}"
+            f"|stream={request.stream}|len={len_bucket}"
             f"|models={','.join(model_set)}"
         )
         return hashlib.md5(feature_str.encode()).hexdigest()[:12]
+
+    # region 路由缓存与 LLM 路由
 
     def _get_cached_route(self, feature_hash: str) -> str | None:
         """查找路由缓存"""
@@ -712,6 +785,10 @@ class Dispatcher:
 
         return "\n".join(f"- {f}" for f in features)
 
+    # endregion
+
+    # region 流式调度
+
     async def dispatch_stream(
         self,
         request: ChatCompletionRequest,
@@ -798,23 +875,23 @@ class Dispatcher:
         raise AllModelsUnavailable(f"所有模型均不可用: {'; '.join(errors)}")
 
     async def _try_stream(self, prov_name: str, model_cfg: ModelConfig, request: ChatCompletionRequest, trace_id: str = ""):
-        """创建流式迭代器并立即记录使用量（连接建立即计数）
+        """创建流式迭代器；仅当流成功结束后才登记 RPD/RPM（与 ``_call_provider`` 一致）
 
         提前获取第一个 chunk 验证连接是否成功，若连接建立阶段失败
         （如 Google 500）则抛出 ProviderCallError，由 dispatch_stream 重试其他模型。
+        首包等待时间取自 ``model_cfg.timeout``（默认 60s）。
         返回的迭代器会捕获流中途的 429 并标记黑名单，
-        流式结束后记录完整响应内容。
+        流式正常结束后原子登记请求与 token 用量。
         """
         if not trace_id:
             trace_id = self.generate_trace_id()
 
-        if self.is_provider_broken(prov_name):
-            raise ProviderCallError(f"厂商 {prov_name} 处于熔断状态")
+        if self.is_provider_broken(prov_name, model_cfg.name):
+            raise ProviderCallError(f"厂商 {prov_name} 模型 {model_cfg.name} 处于熔断状态")
         provider = self._providers.get(prov_name)
         if not provider:
             raise ProviderCallError(f"厂商 {prov_name} 未注册")
-        self._rate_limiter.record_request(prov_name, model_cfg.name)
-
+        stream_timeout = max(1, int(getattr(model_cfg, "timeout", 60) or 60))
         sid_tag = f" session={request.session_id}" if request.session_id else ""
         msg_summary = self._summarize_messages(request.messages)
         logger.info(
@@ -823,9 +900,12 @@ class Dispatcher:
             len(request.messages), msg_summary,
         )
         logger.debug(
-            "[流式] trace=%s 完整请求体: %s",
+            "[流式] trace=%s 请求体摘要: %s",
             trace_id,
-            json.dumps(self._messages_to_dicts(request.messages), ensure_ascii=False, default=str),
+            json.dumps(
+                self._messages_to_dicts_redacted(request.messages),
+                ensure_ascii=False, default=str,
+            ),
         )
 
         raw_iter = provider.stream_chat_completion(model_cfg.name, request)
@@ -833,7 +913,15 @@ class Dispatcher:
 
         first_chunk = None
         try:
-            first_chunk = await raw_iter.__anext__()
+            first_chunk = await asyncio.wait_for(raw_iter.__anext__(), timeout=stream_timeout)
+        except asyncio.TimeoutError:
+            elapsed_ms = (time.monotonic_ns() - stream_start) / 1_000_000
+            self._record_provider_failure(prov_name, model_cfg.name)
+            logger.error(
+                "[流式] trace=%s %s:%s 等待首包超时（%ds, %.0fms）",
+                trace_id, prov_name, model_cfg.name, stream_timeout, elapsed_ms,
+            )
+            raise ProviderCallError(f"流式等待首包超时（{stream_timeout}s）") from None
         except StopAsyncIteration:
             pass
         except Exception as e:
@@ -857,18 +945,22 @@ class Dispatcher:
                         trace_id, prov_name, model_cfg.name, e.response.status_code, elapsed_ms, e,
                     )
             else:
-                self._record_provider_failure(prov_name)
+                self._record_provider_failure(prov_name, model_cfg.name)
                 logger.error("[流式] trace=%s %s:%s 连接建立失败（%.0fms）: %s", trace_id, prov_name, model_cfg.name, elapsed_ms, e)
             raise ProviderCallError(f"流式连接失败: {e}") from e
 
         rate_limiter = self._rate_limiter
         payload_tracker = self._payload_tracker
-        record_failure = self._record_provider_failure
-        record_success = self._record_provider_success
+        def record_failure(pn: str):
+            self._record_provider_failure(pn, model_cfg.name)
+
+        def record_success(pn: str):
+            self._record_provider_success(pn, model_cfg.name)
+        rpd, rpm, tpm, tpd = self._unpack_rate_limit(model_cfg)
 
         async def _guarded_stream():
             import httpx
-            chunks_collected: list[str] = []
+            chunks_collected: list[dict | str] = []
             try:
                 if first_chunk is not None:
                     chunks_collected.append(first_chunk)
@@ -878,14 +970,24 @@ class Dispatcher:
                     yield chunk
                 record_success(prov_name)
                 rate_limiter.clear_429_backoff(prov_name, model_cfg.name)
+                if not rate_limiter.try_record_request(
+                    prov_name, model_cfg.name, rpd, rpm, tpm, tpd, tokens=0,
+                ):
+                    logger.warning(
+                        "[流式] trace=%s 配额原子登记失败（流已成功完成）%s:%s",
+                        trace_id, prov_name, model_cfg.name,
+                    )
                 elapsed_ms = (time.monotonic_ns() - stream_start) / 1_000_000
-                full_text = "".join(chunks_collected)
+                full_text = "".join(
+                    (c.get("content", "") if isinstance(c, dict) else c) for c in chunks_collected
+                )
                 estimated_tokens = len(full_text) // 2
                 rate_limiter.record_tokens(prov_name, model_cfg.name, estimated_tokens)
+                has_tc = any(isinstance(c, dict) and "tool_calls" in c for c in chunks_collected)
                 logger.info(
-                    "[流式] trace=%s 响应完成 %s:%s | 耗时=%.0fms chunks=%d 响应长度=%d",
+                    "[流式] trace=%s 响应完成 %s:%s | 耗时=%.0fms chunks=%d 响应长度=%d tool_calls=%s",
                     trace_id, prov_name, model_cfg.name,
-                    elapsed_ms, len(chunks_collected), len(full_text),
+                    elapsed_ms, len(chunks_collected), len(full_text), has_tc,
                 )
                 logger.debug(
                     "[流式] trace=%s 完整响应内容:\n%s",
@@ -923,6 +1025,8 @@ class Dispatcher:
 
         return prov_name, model_cfg.name, _guarded_stream()
 
+    # endregion
+
     @staticmethod
     def _summarize_messages(messages: list) -> str:
         """生成消息摘要：角色分布 + 最后一条用户消息的前 200 字符"""
@@ -942,6 +1046,44 @@ class Dispatcher:
         return f"[{role_str}] 最新用户消息: {last_user!r}"
 
     @staticmethod
+    def _redact_content_for_log(content: Any, max_chars: int = 200) -> Any:
+        """脱敏/截断用于 DEBUG 日志的 content（多模态仅记录尺度信息）"""
+        if isinstance(content, str):
+            if len(content) <= max_chars:
+                return content
+            return content[:max_chars] + f"…(截断,共{len(content)}字符)"
+        if isinstance(content, list):
+            parts: list[Any] = []
+            for part in content:
+                if not isinstance(part, dict):
+                    parts.append(part)
+                    continue
+                p = dict(part)
+                if p.get("type") == "image_url":
+                    iu = p.get("image_url")
+                    if isinstance(iu, dict) and isinstance(iu.get("url"), str):
+                        u = iu["url"]
+                        p["image_url"] = {**iu, "url": f"<image_url len={len(u)}>"}
+                elif p.get("type") == "text" and isinstance(p.get("text"), str):
+                    t = p["text"]
+                    if len(t) > max_chars:
+                        p["text"] = t[:max_chars] + f"…(截断,共{len(t)}字符)"
+                parts.append(p)
+            return parts
+        return content
+
+    @staticmethod
+    def _messages_to_dicts_redacted(messages: list, max_chars: int = 200) -> list[dict]:
+        """与 _messages_to_dicts 相同结构，每条 content 最多记录 max_chars（隐私合规）"""
+        raw = Dispatcher._messages_to_dicts(messages)
+        out: list[dict] = []
+        for d in raw:
+            d2 = dict(d)
+            d2["content"] = Dispatcher._redact_content_for_log(d2.get("content"), max_chars)
+            out.append(d2)
+        return out
+
+    @staticmethod
     def _messages_to_dicts(messages: list) -> list[dict]:
         """将 messages 转为可序列化的 dict 列表"""
         result = []
@@ -957,6 +1099,8 @@ class Dispatcher:
     def generate_trace_id(self) -> str:
         return uuid.uuid4().hex[:12]
 
+    # region Provider 调用（非流式）
+
     async def _call_provider(
         self,
         provider_name: str,
@@ -965,8 +1109,10 @@ class Dispatcher:
         timeout: int = 60,
         is_routing: bool = False,
         trace_id: str = "",
+        *,
+        rate_limits: tuple[int, int, int, int] | None = None,
     ) -> ChatCompletionResponse:
-        """调用具体厂商（含熔断检查 + 超时控制，成功后才计入使用量）
+        """调用具体厂商（含熔断检查 + 超时控制，成功后才原子登记使用量）
 
         is_routing=True 时为内部路由调用，不消耗正式配额。
         """
@@ -975,8 +1121,8 @@ class Dispatcher:
         if not trace_id:
             trace_id = self.generate_trace_id()
 
-        if self.is_provider_broken(provider_name):
-            raise ProviderCallError(f"厂商 {provider_name} 处于熔断状态，{self._breaker.cooldown}秒后自动恢复")
+        if self.is_provider_broken(provider_name, model_name):
+            raise ProviderCallError(f"厂商 {provider_name} 模型 {model_name} 处于熔断状态，{self._breaker.cooldown}秒后自动恢复")
 
         provider = self._providers.get(provider_name)
         if not provider:
@@ -991,9 +1137,12 @@ class Dispatcher:
             len(request.messages), msg_summary,
         )
         logger.debug(
-            "[%s] trace=%s 完整请求体: %s",
+            "[%s] trace=%s 请求体摘要: %s",
             tag, trace_id,
-            json.dumps(self._messages_to_dicts(request.messages), ensure_ascii=False, default=str),
+            json.dumps(
+                self._messages_to_dicts_redacted(request.messages),
+                ensure_ascii=False, default=str,
+            ),
         )
 
         start_ns = time.monotonic_ns()
@@ -1005,12 +1154,19 @@ class Dispatcher:
             elapsed_ms = (time.monotonic_ns() - start_ns) / 1_000_000
             total_tokens = result.usage.total_tokens if result.usage else 0
             if not is_routing:
-                self._rate_limiter.record_request(provider_name, model_name, tokens=total_tokens)
+                rpd, rpm, tpm, tpd = rate_limits if rate_limits is not None else (0, 0, 0, 0)
+                if not self._rate_limiter.try_record_request(
+                    provider_name, model_name, rpd, rpm, tpm, tpd, tokens=total_tokens,
+                ):
+                    logger.warning(
+                        "[%s] trace=%s 配额原子登记失败（仍返回推理结果）%s:%s",
+                        tag, trace_id, provider_name, model_name,
+                    )
                 self._rate_limiter.clear_429_backoff(provider_name, model_name)
                 self._payload_tracker.record_success(
                     provider_name, model_name, estimate_payload_bytes(request),
                 )
-            self._record_provider_success(provider_name)
+                self._record_provider_success(provider_name, model_name)
 
             reply_content = result.choices[0].message.content if result.choices else ""
             reply_len = len(reply_content) if reply_content else 0
@@ -1031,7 +1187,7 @@ class Dispatcher:
             return result
         except asyncio.TimeoutError:
             elapsed_ms = (time.monotonic_ns() - start_ns) / 1_000_000
-            self._record_provider_failure(provider_name)
+            self._record_provider_failure(provider_name, model_name)
             logger.error("[%s] trace=%s %s:%s 超时（%ds, 实际%.0fms）", tag, trace_id, provider_name, model_name, timeout, elapsed_ms)
             raise ProviderCallError(f"{provider_name}:{model_name} 请求超时（{timeout}s）")
         except httpx.HTTPStatusError as e:
@@ -1043,7 +1199,7 @@ class Dispatcher:
             except Exception:
                 pass
             if should_trigger_breaker(status):
-                self._record_provider_failure(provider_name)
+                self._record_provider_failure(provider_name, model_name)
                 logger.error(
                     "[%s] trace=%s %s:%s HTTP %d (%.0fms) 响应: %s",
                     tag, trace_id, provider_name, model_name,
@@ -1078,9 +1234,12 @@ class Dispatcher:
             raise ProviderCallError(str(e)) from e
         except Exception as e:
             elapsed_ms = (time.monotonic_ns() - start_ns) / 1_000_000
-            self._record_provider_failure(provider_name)
+            self._record_provider_failure(provider_name, model_name)
             logger.error("[%s] trace=%s %s:%s 异常(%.0fms): %s", tag, trace_id, provider_name, model_name, elapsed_ms, e)
             raise ProviderCallError(str(e)) from e
+
+
+    # endregion
 
 
 class DispatchError(Exception):

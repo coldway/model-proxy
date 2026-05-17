@@ -83,6 +83,28 @@ class TestCircuitBreaker:
         assert status["google"]["broken"] is True
         assert status["google"]["remaining_seconds"] > 0
 
+    def test_model_level_independent(self):
+        cb = CircuitBreaker(threshold=2, cooldown=60)
+        cb.record_failure("google", "m1")
+        cb.record_failure("google", "m2")
+        assert cb.is_open("google", "m1") is False
+        assert cb.is_open("google", "m2") is False
+        cb.record_failure("google", "m1")
+        assert cb.is_open("google", "m1") is True
+        assert cb.is_open("google", "m2") is False
+
+    def test_legacy_provider_blocks_all_models(self):
+        cb = CircuitBreaker(threshold=1, cooldown=300)
+        cb.record_failure("google")
+        assert cb.is_open("google", "any-model") is True
+
+    def test_clear_removes_model_and_legacy_keys(self):
+        cb = CircuitBreaker(threshold=1, cooldown=300)
+        cb.record_failure("google", "m1")
+        n = cb.clear("google")
+        assert n >= 1
+        assert cb.is_open("google", "m1") is False
+
     def test_different_providers_independent(self):
         cb = CircuitBreaker(threshold=2, cooldown=60)
         cb.record_failure("google")

@@ -14,23 +14,20 @@ from pydantic import BaseModel
 
 from src.models.schemas import (
     ChatCompletionRequest,
-    ChatCompletionResponse,
     ChatMessage,
-    ModelConfig,
     ModelDetail,
     ModelInfo,
     ModelListResponse,
-    ProviderConfig,
     ProviderDiscovery,
     ProviderListResponse,
     ProviderModelsResponse,
     ProviderSummary,
     ProxyInfo,
-    RateLimit,
     UsageResponse,
     UsageStats,
 )
 from src.config.catalog import CatalogManager
+from src.config.capability_tester import merge_catalog_capabilities
 from src.scheduler.history import RequestHistory
 from src.scheduler.session import SessionManager
 
@@ -56,6 +53,34 @@ class _RouteDeps:
 _deps = _RouteDeps()
 
 
+# region 健康探针
+
+@router.get("/health")
+async def health_probe():
+    """进程存活探针（负载均衡 / k8s liveness）"""
+    return {"status": "ok"}
+
+
+@router.get("/ready")
+async def ready_probe():
+    """就绪探针：配置中至少有一个 provider 填写了 API Key"""
+    if not _deps.config_manager:
+        return JSONResponse(status_code=503, content={"ready": False, "reason": "配置未初始化"})
+    configured = any(
+        bool(str(getattr(p, "api_key", "")).strip())
+        for p in _deps.config_manager.config.providers.values()
+    )
+    if not configured:
+        return JSONResponse(
+            status_code=503,
+            content={"ready": False, "reason": "未配置任何厂商 API Key"},
+        )
+    return {"ready": True}
+
+
+# endregion
+
+
 def init_routes(config_manager, dispatcher, rate_limiter, history=None, catalog=None, provider_factories=None, capability_tester=None):
     _deps.config_manager = config_manager
     _deps.dispatcher = dispatcher
@@ -70,6 +95,8 @@ def init_routes(config_manager, dispatcher, rate_limiter, history=None, catalog=
         max_sessions=settings.max_sessions,
     )
 
+
+# region 聊天（OpenAI 兼容 /v1/chat/completions）
 
 @router.post("/v1/chat/completions")
 async def chat_completions(request: ChatCompletionRequest):
@@ -194,11 +221,16 @@ async def _handle_stream(request: ChatCompletionRequest, enabled_models, trace_i
     return create_stream_response(model_name, content_iter, proxy_info=info)
 
 
+# endregion
+
+
 def _record_failure(start_time: float, error: str, provider: str = "unknown", model: str = "unknown") -> None:
     if _deps.history:
         latency = (time.time() - start_time) * 1000
         _deps.history.record(provider=provider, model=model, success=False, latency_ms=latency, error=error)
 
+
+# region 模型管理、厂商与用量
 
 @router.get("/v1/models", response_model=ModelListResponse)
 async def list_models():
@@ -209,25 +241,28 @@ async def list_models():
     for prov_name, prov in _deps.config_manager.config.providers.items():
         for m in prov.models:
             caps = ModelCapabilities()
+            cached_raw: dict | None = None
             if _deps.capability_tester:
-                cached = _deps.capability_tester.cache.get(prov_name, m.name)
-                if cached and not cached.get("error"):
-                    caps = ModelCapabilities(
-                        streaming=bool(cached.get("streaming")),
-                        reasoning=bool(cached.get("reasoning")),
-                        multi_turn_tc=bool(cached.get("multi_turn_tc")),
-                        chinese=bool(cached.get("chinese")),
-                        vision=bool(cached.get("vision")),
-                        json_mode=bool(cached.get("json_mode")),
-                        latency_ms=cached.get("latency_ms", 99999),
-                    )
+                cached_raw = _deps.capability_tester.cache.get(prov_name, m.name)
+            catalog_model = _deps.catalog.get_model(prov_name, m.name) if _deps.catalog else None
+            merged = merge_catalog_capabilities(cached_raw, catalog_model)
+            if merged and not merged.get("error"):
+                caps = ModelCapabilities(
+                    streaming=bool(merged.get("streaming")),
+                    reasoning=bool(merged.get("reasoning")),
+                    multi_turn_tc=bool(merged.get("multi_turn_tc")),
+                    chinese=bool(merged.get("chinese")),
+                    vision=bool(merged.get("vision")),
+                    json_mode=bool(merged.get("json_mode")),
+                    latency_ms=merged.get("latency_ms", 99999),
+                )
             models.append(ModelInfo(
                 id=m.name,
                 provider=prov_name,
                 enabled=m.enabled,
                 priority=m.priority,
                 rate_limit=m.rate_limit,
-                tool_calling=m.tool_calling,
+                tool_calling=bool(merged.get("tool_calling", m.tool_calling)),
                 capabilities=caps,
             ))
     return ModelListResponse(models=models)
@@ -272,13 +307,15 @@ async def list_provider_models(provider_id: str):
 
     models = []
     for m in prov.models:
-        cap = cap_cache.get(m.name, {})
+        cached_raw = cap_cache.get(m.name) or None
+        catalog_model = _deps.catalog.get_model(provider_id, m.name) if _deps.catalog else None
+        cap = merge_catalog_capabilities(cached_raw, catalog_model)
         models.append(ModelDetail(
             id=m.name,
             provider=provider_id,
             enabled=m.enabled,
             priority=m.priority,
-            tool_calling=m.tool_calling,
+            tool_calling=bool(cap.get("tool_calling", m.tool_calling)),
             rate_limit=m.rate_limit,
             capabilities=cap,
         ))
@@ -316,6 +353,10 @@ async def get_usage():
             ))
     return UsageResponse(stats=stats)
 
+
+# endregion
+
+# region 配置与发现
 
 # --- 配置管理 API ---
 
@@ -409,7 +450,7 @@ async def toggle_provider(provider: str, enabled: bool):
         if provider == "cursor":
             from src.providers.cursor import CursorProvider
             _deps.dispatcher.register_provider("cursor", CursorProvider())
-            logger.info(f"动态注册 Cursor 厂商")
+            logger.info("动态注册 Cursor 厂商")
             return {"status": "ok", "message": f"{provider} 已启用并加载"}
         elif provider in _deps.provider_factories:
             api_key = _deps.config_manager.get_api_key(provider) if _deps.config_manager else ""
@@ -687,12 +728,19 @@ async def clear_capabilities():
     return {"status": "ok", "message": "能力缓存已清除"}
 
 
+# endregion
+
+# region 历史、路由、黑名单、会话绑定与 Payload
+
 # --- 请求历史 ---
 
 @router.get("/api/history")
 async def get_history(limit: int = 50):
     """获取最近请求历史"""
-    limit = min(max(limit, 1), 500)
+    cap = 2000
+    if _deps.config_manager:
+        cap = max(1, int(getattr(_deps.config_manager.settings, "request_history_max_records", cap)))
+    limit = min(max(limit, 1), cap)
     if not _deps.history:
         return {"records": [], "stats": {}}
     return {"records": _deps.history.get_recent(limit), "stats": _deps.history.get_stats()}
@@ -781,6 +829,10 @@ async def clear_payload_limits(provider: str = "", model: str = ""):
     count = _deps.dispatcher.payload_tracker.clear(provider, model)
     return {"status": "ok", "cleared": count}
 
+
+# endregion
+
+# region 模型目录与内置聊天
 
 # --- 模型目录（可提交到 GitHub 的部分） ---
 
@@ -1027,7 +1079,6 @@ async def send_chat_message(session_id: str, request: ChatCompletionRequest):
 @router.post("/api/chat/sessions/{session_id}/stream")
 async def stream_chat_message(session_id: str, request: ChatCompletionRequest):
     """向指定会话发送消息（流式 SSE 响应 + 自动上下文管理）"""
-    from src.api.streaming import create_stream_response
     from src.scheduler.dispatcher import AllModelsUnavailable, ModelNotFound, ProviderCallError, RateLimitExceeded
 
     trace_id = uuid.uuid4().hex[:12]
@@ -1091,7 +1142,8 @@ async def stream_chat_message(session_id: str, request: ChatCompletionRequest):
 
         chat_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
         created = int(time.time())
-        full_reply = []
+        full_reply: list[str | dict] = []
+        stream_broken = False
 
         meta = {"model": model_name, "provider": provider_name, "title": session.title, "session_id": session.id}
         yield f"data: {_json.dumps({'meta': meta}, ensure_ascii=False)}\n\n"
@@ -1099,20 +1151,37 @@ async def stream_chat_message(session_id: str, request: ChatCompletionRequest):
         try:
             async for chunk in content_iter:
                 full_reply.append(chunk)
+                delta = chunk if isinstance(chunk, dict) else {"content": chunk}
                 data = {
                     "id": chat_id, "object": "chat.completion.chunk", "created": created,
                     "model": model_name,
-                    "choices": [{"index": 0, "delta": {"content": chunk}, "finish_reason": None}],
+                    "choices": [{"index": 0, "delta": delta, "finish_reason": None}],
                 }
                 yield f"data: {_json.dumps(data, ensure_ascii=False)}\n\n"
         except Exception as ex:
+            stream_broken = True
             logger.error("[流式会话] trace=%s 流式传输异常: %s", trace_id, ex)
 
-        raw_text = "".join(full_reply)
+        raw_text = "".join(
+            (c.get("content", "") if isinstance(c, dict) else str(c)) for c in full_reply
+        )
         reply_text, thinking = _strip_thinking(raw_text)
         if thinking:
             logger.info("[流式会话] trace=%s 模型 %s 思考过程:\n%s", trace_id, model_name, thinking[:500])
-        session.add_message("assistant", reply_text, model=model_name)
+
+        save_assistant = (not stream_broken) and len(reply_text.strip()) >= 10
+        if save_assistant:
+            session.add_message("assistant", reply_text, model=model_name)
+        elif stream_broken:
+            logger.info(
+                "[流式会话] trace=%s 流式中断，跳过写入助手消息（避免残缺上下文）",
+                trace_id,
+            )
+        else:
+            logger.info(
+                "[流式会话] trace=%s 输出过短（<%d 字符），跳过写入助手消息",
+                trace_id, 10,
+            )
         await asyncio.to_thread(_deps.session_mgr.save)
 
         logger.info(
@@ -1139,6 +1208,10 @@ async def stream_chat_message(session_id: str, request: ChatCompletionRequest):
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
     )
 
+
+# endregion
+
+# region 实时日志
 
 # --- 实时日志 ---
 
@@ -1185,3 +1258,6 @@ async def set_log_level(level: str):
     logging.getLogger().setLevel(numeric)
     logger.info("日志级别已切换为 %s", level_upper)
     return {"status": "ok", "level": level_upper}
+
+
+# endregion

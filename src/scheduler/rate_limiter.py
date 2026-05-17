@@ -63,6 +63,7 @@ class RateLimiter:
         self._save_timer: threading.Timer | None = None
         self._blacklist: dict[str, float] = {}
         self._blacklist_consecutive: dict[str, int] = {}
+        self._lock = threading.Lock()
         if persist:
             self._load()
             self._load_blacklist()
@@ -145,11 +146,11 @@ class RateLimiter:
         except Exception as e:
             logger.warning("保存使用量持久化文件失败: %s", e)
 
-    def can_request(
+    def _can_request_unlocked(
         self, provider: str, model: str,
         rpd: int, rpm: int, tpm: int = 0, tpd: int = 0,
     ) -> bool:
-        """检查当前模型是否可以发起请求（含 429 黑名单 + token 维度检查）"""
+        """在已持有 ``_lock`` 的前提下检查是否可再记一笔请求（含黑名单与额度）"""
         key = self._key(provider, model)
 
         if self.is_blacklisted(provider, model):
@@ -161,25 +162,33 @@ class RateLimiter:
         usage.clean_minute_window()
 
         if rpd > 0 and usage.daily_count >= rpd:
-            logger.warning(f"{key} 已达每日请求上限 ({rpd} RPD)")
+            logger.warning("%s 已达每日请求上限 (%s RPD)", key, rpd)
             return False
 
         if rpm > 0 and len(usage.minute_counts) >= rpm:
-            logger.warning(f"{key} 已达每分钟请求上限 ({rpm} RPM)")
+            logger.warning("%s 已达每分钟请求上限 (%s RPM)", key, rpm)
             return False
 
         if tpm > 0 and usage.minute_tokens >= tpm:
-            logger.warning(f"{key} 已达每分钟 token 上限 ({usage.minute_tokens}/{tpm} TPM)")
+            logger.warning("%s 已达每分钟 token 上限 (%s/%s TPM)", key, usage.minute_tokens, tpm)
             return False
 
         if tpd > 0 and usage.daily_tokens >= tpd:
-            logger.warning(f"{key} 已达每日 token 上限 ({tpd} TPD)")
+            logger.warning("%s 已达每日 token 上限 (%s TPD)", key, tpd)
             return False
 
         return True
 
-    def record_request(self, provider: str, model: str, tokens: int = 0) -> None:
-        """记录一次请求及其 token 用量，延迟批量持久化"""
+    def can_request(
+        self, provider: str, model: str,
+        rpd: int, rpm: int, tpm: int = 0, tpd: int = 0,
+    ) -> bool:
+        """检查当前模型是否可以发起请求（含 429 黑名单 + token 维度检查）"""
+        with self._lock:
+            return self._can_request_unlocked(provider, model, rpd, rpm, tpm, tpd)
+
+    def _record_request_unlocked(self, provider: str, model: str, tokens: int = 0) -> None:
+        """在已持有 ``_lock`` 的前提下增加请求计数与可选 token"""
         key = self._key(provider, model)
         usage = self._usage[key]
         today = self._today()
@@ -192,34 +201,60 @@ class RateLimiter:
             usage.minute_token_entries.append((now, tokens))
         self._schedule_save()
 
+    def try_record_request(
+        self,
+        provider: str,
+        model: str,
+        rpd: int,
+        rpm: int,
+        tpm: int = 0,
+        tpd: int = 0,
+        *,
+        tokens: int = 0,
+    ) -> bool:
+        """原子地「校验额度并记一笔请求」；未通过校验则不扣减。用于消除 check-then-act 竞态。"""
+        with self._lock:
+            if not self._can_request_unlocked(provider, model, rpd, rpm, tpm, tpd):
+                return False
+            self._record_request_unlocked(provider, model, tokens)
+            return True
+
+    def record_request(self, provider: str, model: str, tokens: int = 0) -> None:
+        """记录一次请求及其 token 用量，延迟批量持久化"""
+        with self._lock:
+            self._record_request_unlocked(provider, model, tokens)
+
     def record_tokens(self, provider: str, model: str, tokens: int) -> None:
         """补充记录 token 用量（用于流式响应完成后追加）"""
         if tokens <= 0:
             return
-        key = self._key(provider, model)
-        usage = self._usage[key]
-        today = self._today()
-        usage.reset_if_new_day(today)
-        usage.daily_tokens += tokens
-        usage.minute_token_entries.append((time.time(), tokens))
-        self._schedule_save()
+        with self._lock:
+            key = self._key(provider, model)
+            usage = self._usage[key]
+            today = self._today()
+            usage.reset_if_new_day(today)
+            usage.daily_tokens += tokens
+            usage.minute_token_entries.append((time.time(), tokens))
+            self._schedule_save()
 
     def get_usage(self, provider: str, model: str) -> tuple[int, int, int, int]:
         """返回 (今日请求数, 分钟请求数, 今日token数, 分钟token数)"""
-        key = self._key(provider, model)
-        usage = self._usage[key]
-        today = self._today()
-        usage.reset_if_new_day(today)
-        usage.clean_minute_window()
-        return usage.daily_count, len(usage.minute_counts), usage.daily_tokens, usage.minute_tokens
+        with self._lock:
+            key = self._key(provider, model)
+            usage = self._usage[key]
+            today = self._today()
+            usage.reset_if_new_day(today)
+            usage.clean_minute_window()
+            return usage.daily_count, len(usage.minute_counts), usage.daily_tokens, usage.minute_tokens
 
     def is_exhausted(self, provider: str, model: str, rpd: int) -> bool:
         """判断模型今日额度是否已用尽"""
-        key = self._key(provider, model)
-        usage = self._usage[key]
-        today = self._today()
-        usage.reset_if_new_day(today)
-        return rpd > 0 and usage.daily_count >= rpd
+        with self._lock:
+            key = self._key(provider, model)
+            usage = self._usage[key]
+            today = self._today()
+            usage.reset_if_new_day(today)
+            return rpd > 0 and usage.daily_count >= rpd
 
     # --- 429 黑名单管理（短期冷却 + 指数退避） ---
 

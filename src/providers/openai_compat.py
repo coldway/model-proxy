@@ -98,7 +98,7 @@ class OpenAICompatibleProvider(BaseProvider):
 
     async def stream_chat_completion(
         self, model: str, request: ChatCompletionRequest
-    ) -> AsyncIterator[str]:
+    ) -> AsyncIterator[dict]:
         url = f"{self._base_url}/chat/completions"
         async with self._client.stream(
             "POST", url,
@@ -117,9 +117,9 @@ class OpenAICompatibleProvider(BaseProvider):
                     choices = chunk.get("choices", [])
                     if not choices:
                         continue
-                    text = choices[0].get("delta", {}).get("content", "")
-                    if text:
-                        yield text
+                    delta = choices[0].get("delta", {})
+                    if delta:
+                        yield delta
                 except (json.JSONDecodeError, IndexError, KeyError):
                     continue
 

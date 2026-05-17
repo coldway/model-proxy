@@ -8,14 +8,14 @@ import logging
 import threading
 import time
 from collections import deque
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 HISTORY_FILE = Path("data/request_history.jsonl")
-MAX_MEMORY_RECORDS = 500
+DEFAULT_MAX_MEMORY_RECORDS = 2000
 FLUSH_INTERVAL_SECONDS = 5
 RETENTION_DAYS = 30
 
@@ -40,8 +40,10 @@ class RequestRecord:
 class RequestHistory:
     """请求历史记录器，支持内存队列 + 文件持久化"""
 
-    def __init__(self, persist: bool = True):
-        self._records: deque[RequestRecord] = deque(maxlen=MAX_MEMORY_RECORDS)
+    def __init__(self, persist: bool = True, *, max_memory_records: int | None = None):
+        cap = max_memory_records if max_memory_records is not None else DEFAULT_MAX_MEMORY_RECORDS
+        cap = max(1, int(cap))
+        self._records: deque[RequestRecord] = deque(maxlen=cap)
         self._persist = persist
         self._pending: list[RequestRecord] = []
         self._flush_timer: threading.Timer | None = None

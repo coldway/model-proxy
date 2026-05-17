@@ -12,6 +12,7 @@ from pathlib import Path
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
+from starlette.middleware.cors import CORSMiddleware
 
 from src.api.routes import init_routes, router
 from src.api.ui import get_ui_html
@@ -66,10 +67,14 @@ def create_app() -> FastAPI:
     logging.getLogger().setLevel(log_level)
 
     rate_limiter = RateLimiter()
-    history = RequestHistory(persist=True)
+    history = RequestHistory(
+        persist=True,
+        max_memory_records=settings.request_history_max_records,
+    )
     capability_cache = CapabilityCache()
     dispatcher = Dispatcher(
         rate_limiter, capability_cache=capability_cache, history=history,
+        catalog=catalog,
         route_cache_ttl=settings.route_cache_ttl,
         breaker_threshold=settings.breaker_threshold,
         breaker_cooldown=settings.breaker_cooldown,
@@ -116,7 +121,8 @@ def create_app() -> FastAPI:
         logger.info("所有资源已释放")
 
     admin_token = settings.admin_token.strip()
-    OPEN_PATHS = frozenset({"/", "/ui"})
+    api_token = settings.api_token.strip()
+    OPEN_PATHS = frozenset({"/", "/ui", "/health", "/ready"})
 
     app = FastAPI(
         title="Model Proxy",
@@ -125,17 +131,48 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    if admin_token:
+    _cors_origins = settings.cors_origins.strip()
+    if _cors_origins == "*":
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=["*"],
+            allow_credentials=False,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+        logger.info("CORS 已启用: 允许任意来源 (*)")
+    elif _cors_origins:
+        _allowed = [o.strip() for o in _cors_origins.split(",") if o.strip()]
+        if _allowed:
+            app.add_middleware(
+                CORSMiddleware,
+                allow_origins=_allowed,
+                allow_credentials=True,
+                allow_methods=["*"],
+                allow_headers=["*"],
+            )
+            logger.info("CORS 已启用: %s", _allowed)
+
+    if admin_token or api_token:
         @app.middleware("http")
-        async def admin_auth_middleware(request: Request, call_next):
+        async def auth_middleware(request: Request, call_next):
             path = request.url.path
-            if path in OPEN_PATHS or path.startswith("/v1/"):
+            if path in OPEN_PATHS:
                 return await call_next(request)
             auth = request.headers.get("Authorization", "")
-            if auth != f"Bearer {admin_token}":
+            if path.startswith("/v1/"):
+                if api_token and auth != f"Bearer {api_token}":
+                    return JSONResponse(status_code=401, content={"detail": "未授权，请在 api_key 中提供有效令牌"})
+                return await call_next(request)
+            if admin_token and auth != f"Bearer {admin_token}":
                 return JSONResponse(status_code=401, content={"detail": "未授权，请提供有效的管理令牌"})
             return await call_next(request)
-        logger.info("管理面板认证已启用（/api/* 路由需要 Bearer Token）")
+        _auth_parts = []
+        if admin_token:
+            _auth_parts.append("管理面板 /api/*")
+        if api_token:
+            _auth_parts.append("OpenAI API /v1/*")
+        logger.info("认证已启用: %s", " + ".join(_auth_parts))
 
     app.include_router(router)
 

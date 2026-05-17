@@ -159,9 +159,8 @@ class HuggingFaceProvider(BaseProvider):
                     try:
                         chunk = json.loads(data_str)
                         delta = chunk.get("choices", [{}])[0].get("delta", {})
-                        content = delta.get("content", "")
-                        if content:
-                            yield content
+                        if delta:
+                            yield delta
                     except (json.JSONDecodeError, IndexError, KeyError):
                         continue
         except httpx.HTTPStatusError:

@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -137,24 +138,26 @@ class SessionManager:
         max_context_tokens: int = MAX_CONTEXT_TOKENS,
         max_sessions: int = MAX_SESSIONS,
     ):
+        self._lock = threading.Lock()
         self._sessions: dict[str, ChatSession] = {}
         self._max_context_tokens = max_context_tokens
         self._max_sessions = max_sessions
         self._load()
 
     def create(self, model: str = "auto", title: str = "新对话") -> ChatSession:
-        if self._max_sessions > 0 and len(self._sessions) >= self._max_sessions:
-            self._evict_oldest()
-        session = ChatSession(
-            title=title, model=model,
-            max_context_tokens=self._max_context_tokens,
-        )
-        self._sessions[session.id] = session
-        self._save()
+        with self._lock:
+            if self._max_sessions > 0 and len(self._sessions) >= self._max_sessions:
+                self._evict_oldest()
+            session = ChatSession(
+                title=title, model=model,
+                max_context_tokens=self._max_context_tokens,
+            )
+            self._sessions[session.id] = session
+            self._save_unlocked()
         return session
 
     def _evict_oldest(self) -> None:
-        """淘汰最旧的会话直到腾出空间"""
+        """淘汰最旧的会话直到腾出空间（须在持有 self._lock 时调用)"""
         sorted_sessions = sorted(
             self._sessions.values(),
             key=lambda s: s.updated_at,
@@ -167,46 +170,51 @@ class SessionManager:
             logger.info("会话数已达上限 %d，淘汰最旧会话: %s", self._max_sessions, oldest.id)
 
     def get(self, session_id: str) -> ChatSession | None:
-        return self._sessions.get(session_id)
+        with self._lock:
+            return self._sessions.get(session_id)
 
     def delete(self, session_id: str) -> bool:
-        if session_id in self._sessions:
-            del self._sessions[session_id]
-            self._save()
-            return True
-        return False
+        with self._lock:
+            if session_id in self._sessions:
+                del self._sessions[session_id]
+                self._save_unlocked()
+                return True
+            return False
 
     def list_sessions(self) -> list[dict]:
-        sessions = sorted(
-            self._sessions.values(),
-            key=lambda s: s.updated_at,
-            reverse=True,
-        )
-        return [
-            {
-                "id": s.id,
-                "title": s.title,
-                "model": s.model,
-                "message_count": len(s.messages),
-                "tokens_est": s.total_tokens_est,
-                "created_at": s.created_at,
-                "updated_at": s.updated_at,
-            }
-            for s in sessions
-        ]
+        with self._lock:
+            sessions = sorted(
+                self._sessions.values(),
+                key=lambda s: s.updated_at,
+                reverse=True,
+            )
+            return [
+                {
+                    "id": s.id,
+                    "title": s.title,
+                    "model": s.model,
+                    "message_count": len(s.messages),
+                    "tokens_est": s.total_tokens_est,
+                    "created_at": s.created_at,
+                    "updated_at": s.updated_at,
+                }
+                for s in sessions
+            ]
 
     def rename(self, session_id: str, title: str) -> bool:
-        s = self._sessions.get(session_id)
-        if s:
-            s.title = title
-            self._save()
-            return True
-        return False
+        with self._lock:
+            s = self._sessions.get(session_id)
+            if s:
+                s.title = title
+                self._save_unlocked()
+                return True
+            return False
 
     def save(self) -> None:
-        self._save()
+        with self._lock:
+            self._save_unlocked()
 
-    def _save(self) -> None:
+    def _save_unlocked(self) -> None:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         data = {sid: s.to_dict() for sid, s in self._sessions.items()}
         try:
@@ -224,8 +232,12 @@ class SessionManager:
             data = yaml.safe_load(SESSION_FILE.read_text(encoding="utf-8"))
             if not isinstance(data, dict):
                 return
-            for sid, sdata in data.items():
-                self._sessions[sid] = ChatSession.from_dict(sdata, max_context_tokens=self._max_context_tokens)
-            logger.info("已加载 %d 个聊天会话", len(self._sessions))
+            with self._lock:
+                for sid, sdata in data.items():
+                    self._sessions[sid] = ChatSession.from_dict(
+                        sdata, max_context_tokens=self._max_context_tokens,
+                    )
+                n = len(self._sessions)
+            logger.info("已加载 %d 个聊天会话", n)
         except Exception as e:
             logger.error("加载会话数据失败: %s", e)

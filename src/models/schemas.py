@@ -46,12 +46,21 @@ class AppSettings(BaseModel):
     auto_switch: bool = True
     log_level: str = "info"
     admin_token: str = Field(default="", description="管理面板认证令牌，为空则不启用认证")
+    api_token: str = Field(default="", description="OpenAI 兼容 API (/v1/*) 认证令牌，为空则不启用；客户端通过 api_key 传入")
     route_cache_ttl: int = Field(default=600, description="路由缓存有效期（秒）")
     breaker_threshold: int = Field(default=3, description="连续失败 N 次触发厂商熔断")
     breaker_cooldown: int = Field(default=300, description="熔断冷却时间（秒）")
     max_context_tokens: int = Field(default=8000, description="会话上下文最大 token 数")
     max_sessions: int = Field(default=50, description="最大会话数")
     probe_interval: int = Field(default=5, description="能力探测间隔（秒）")
+    request_history_max_records: int = Field(
+        default=2000,
+        description="内存中保留的推理请求历史条数上限（影响 /api/history 与运维统计窗口）",
+    )
+    cors_origins: str = Field(
+        default="",
+        description="CORS 允许的 Origin，逗号分隔；空表示不启用跨域（仅同源）；* 表示允许任意来源",
+    )
 
 
 class AppConfig(BaseModel):

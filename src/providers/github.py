@@ -95,7 +95,7 @@ class GitHubProvider(BaseProvider):
 
     async def stream_chat_completion(
         self, model: str, request: ChatCompletionRequest
-    ) -> AsyncIterator[str]:
+    ) -> AsyncIterator[dict]:
         url = f"{GITHUB_MODELS_BASE}/chat/completions"
         async with self._client.stream(
             "POST", url,
@@ -114,9 +114,9 @@ class GitHubProvider(BaseProvider):
                     choices = chunk.get("choices", [])
                     if not choices:
                         continue
-                    text = choices[0].get("delta", {}).get("content", "")
-                    if text:
-                        yield text
+                    delta = choices[0].get("delta", {})
+                    if delta:
+                        yield delta
                 except (json.JSONDecodeError, IndexError, KeyError):
                     continue
 

@@ -113,7 +113,7 @@ class GoogleProvider(BaseProvider):
 
     async def stream_chat_completion(
         self, model: str, request: ChatCompletionRequest
-    ) -> AsyncIterator[str]:
+    ) -> AsyncIterator[dict]:
         url = f"{GOOGLE_API_BASE}/models/{model}:streamGenerateContent"
         params = {"key": self._api_key, "alt": "sse"}
 
@@ -135,7 +135,7 @@ class GoogleProvider(BaseProvider):
                     parts = candidates[0].get("content", {}).get("parts", [])
                     text = "".join(p.get("text", "") for p in parts)
                     if text:
-                        yield text
+                        yield {"content": text}
                 except (json.JSONDecodeError, IndexError, KeyError):
                     continue
 

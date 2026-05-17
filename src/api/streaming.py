@@ -10,12 +10,12 @@ from typing import AsyncIterator
 
 from starlette.responses import StreamingResponse
 
-from src.models.schemas import ChatCompletionRequest, ChatMessage, ProxyInfo
+from src.models.schemas import ProxyInfo
 
 
 def create_stream_response(
     model: str,
-    content_iterator: AsyncIterator[str],
+    content_iterator: AsyncIterator[dict | str],
     proxy_info: ProxyInfo | None = None,
 ) -> StreamingResponse:
     """创建 SSE 流式响应"""
@@ -32,10 +32,10 @@ def create_stream_response(
 
 async def _stream_generator(
     model: str,
-    content_iterator: AsyncIterator[str],
+    content_iterator: AsyncIterator[dict | str],
     proxy_info: ProxyInfo | None = None,
 ) -> AsyncIterator[str]:
-    """生成 SSE 格式的流式数据"""
+    """生成 SSE 格式的流式数据。支持 dict delta（保留 tool_calls 等字段）和纯 str 兼容。"""
     import logging
     logger = logging.getLogger(__name__)
     chat_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
@@ -44,6 +44,7 @@ async def _stream_generator(
     has_error = False
     try:
         async for chunk in content_iterator:
+            delta = chunk if isinstance(chunk, dict) else {"content": chunk}
             data = {
                 "id": chat_id,
                 "object": "chat.completion.chunk",
@@ -51,7 +52,7 @@ async def _stream_generator(
                 "model": model,
                 "choices": [{
                     "index": 0,
-                    "delta": {"content": chunk},
+                    "delta": delta,
                     "finish_reason": None,
                 }],
             }
@@ -60,14 +61,20 @@ async def _stream_generator(
         has_error = True
         logger.error(f"流式生成异常: {e}")
         error_data = {
-            "id": chat_id, "object": "chat.completion.chunk", "created": created,
+            "error": {
+                "message": str(e) or "流式响应中断",
+                "type": "server_error",
+                "code": None,
+            },
+            "id": chat_id,
+            "object": "chat.completion.chunk",
+            "created": created,
             "model": model,
             "choices": [{
                 "index": 0,
                 "delta": {},
-                "finish_reason": "error",
+                "finish_reason": "stop",
             }],
-            "error": {"message": "流式响应中断"},
         }
         yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
 

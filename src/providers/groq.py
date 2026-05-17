@@ -178,7 +178,7 @@ class GroqProvider(BaseProvider):
 
     async def stream_chat_completion(
         self, model: str, request: ChatCompletionRequest
-    ) -> AsyncIterator[str]:
+    ) -> AsyncIterator[dict]:
         url = f"{GROQ_API_BASE}/chat/completions"
         async with self._client.stream(
             "POST", url,
@@ -197,7 +197,7 @@ class GroqProvider(BaseProvider):
                                 "Groq stream tool_use_failed 恢复: 提取 failed_generation (%d字)",
                                 len(text),
                             )
-                            yield text
+                            yield {"content": text}
                             return
                 except (json.JSONDecodeError, KeyError):
                     pass
@@ -215,9 +215,9 @@ class GroqProvider(BaseProvider):
                     choices = chunk.get("choices", [])
                     if not choices:
                         continue
-                    text = choices[0].get("delta", {}).get("content", "")
-                    if text:
-                        yield text
+                    delta = choices[0].get("delta", {})
+                    if delta:
+                        yield delta
                 except (json.JSONDecodeError, IndexError, KeyError):
                     continue
 

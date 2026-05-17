@@ -2,7 +2,7 @@ providers:
   google:
     name: Google AI Studio
     enabled: true
-    priority: 2
+    priority: 1
     url: https://aistudio.google.com/
     description: Google 提供的免费 Gemini 系列模型
     api_key_guide: https://aistudio.google.com/apikey
@@ -113,7 +113,7 @@ providers:
   groq:
     name: Groq
     enabled: true
-    priority: 1
+    priority: 2
     url: https://console.groq.com/
     description: Groq 提供的高速推理服务
     api_key_guide: https://console.groq.com/keys
@@ -165,8 +165,6 @@ providers:
       default_rpm: 30
       default_tpm: 6000
       category: 通用
-      enabled: true
-      priority: 3
       tool_calling: true
     - id: openai/gpt-oss-safeguard-20b
       name: GPT-OSS Safeguard 20B

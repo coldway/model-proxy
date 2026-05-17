@@ -57,6 +57,33 @@ class GroqProvider(BaseProvider):
             }
         return schema
 
+    def _try_recover_tool_use_failed(
+        self, resp: httpx.Response, model: str,
+    ) -> dict | None:
+        """Groq 严格模式下模型想输出文本但被拒绝时，
+        从 failed_generation 中恢复有效响应，避免不必要的降级。"""
+        try:
+            body = resp.json()
+        except Exception:
+            return None
+        err = body.get("error", {})
+        if err.get("code") != "tool_use_failed":
+            return None
+        text = err.get("failed_generation", "")
+        if not text:
+            return None
+        logger.info(
+            "Groq tool_use_failed 恢复: 提取 failed_generation (%d字) 作为有效响应",
+            len(text),
+        )
+        return {
+            "id": f"chatcmpl-{uuid.uuid4().hex[:12]}",
+            "created": int(time.time()),
+            "model": model,
+            "choices": [{"index": 0, "message": {"role": "assistant", "content": text}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+        }
+
     def _build_payload(self, model: str, request: ChatCompletionRequest, stream: bool = False) -> dict:
         payload: dict = {
             "model": model,
@@ -85,8 +112,13 @@ class GroqProvider(BaseProvider):
         resp = await self._client.post(
             url, headers=self._build_headers(), json=self._build_payload(model, request),
         )
-        resp.raise_for_status()
-        data = resp.json()
+        if resp.status_code == 400:
+            data = self._try_recover_tool_use_failed(resp, model)
+            if data is None:
+                resp.raise_for_status()
+        else:
+            resp.raise_for_status()
+            data = resp.json()
 
         choice = data["choices"][0]
         usage = data.get("usage", {})
@@ -123,7 +155,25 @@ class GroqProvider(BaseProvider):
             headers=self._build_headers(),
             json=self._build_payload(model, request, stream=True),
         ) as resp:
-            resp.raise_for_status()
+            if resp.status_code == 400:
+                body = await resp.aread()
+                try:
+                    err_data = json.loads(body)
+                    err = err_data.get("error", {})
+                    if err.get("code") == "tool_use_failed":
+                        text = err.get("failed_generation", "")
+                        if text:
+                            logger.info(
+                                "Groq stream tool_use_failed 恢复: 提取 failed_generation (%d字)",
+                                len(text),
+                            )
+                            yield text
+                            return
+                except (json.JSONDecodeError, KeyError):
+                    pass
+                resp.raise_for_status()
+            else:
+                resp.raise_for_status()
             async for line in resp.aiter_lines():
                 if not line.startswith("data: "):
                     continue

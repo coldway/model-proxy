@@ -119,5 +119,33 @@ def install(max_records: int = 2000) -> BufferedLogHandler:
     return handler
 
 
+def preload_from_file(path: str | Path, max_lines: int = 500) -> int:
+    """从日志文件预加载最近的日志条目到缓冲区，用于重启后恢复 UI 日志。
+    返回实际加载的行数。"""
+    if _instance is None:
+        return 0
+    from pathlib import Path as _P
+    p = _P(path)
+    if not p.is_file():
+        return 0
+    try:
+        lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
+        recent = lines[-max_lines:] if len(lines) > max_lines else lines
+        loaded = 0
+        for line in recent:
+            if not line.strip():
+                continue
+            record = logging.LogRecord(
+                name="(file)", level=logging.INFO,
+                pathname="", lineno=0, msg=line,
+                args=None, exc_info=None,
+            )
+            _instance.emit(record)
+            loaded += 1
+        return loaded
+    except Exception:
+        return 0
+
+
 def get_instance() -> BufferedLogHandler | None:
     return _instance

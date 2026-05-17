@@ -11,6 +11,7 @@
 - **Groq tool_use_failed 智能恢复**：当 Groq 模型在多轮 tool calling 后想输出文本但被严格模式拒绝时（HTTP 400 `tool_use_failed`），`GroqProvider` 自动从 `failed_generation` 字段提取文本作为有效响应返回（非流式 + 流式均支持）。新增 `_is_tool_call_json` 检测：当 `failed_generation` 内容为工具调用 JSON（模型试图调用工具但格式不被接受）时不恢复，正确降级到其他模型
 - **Groq schema 通用放宽**：`GroqProvider._relax_schema()` 递归放宽 tool schema：(1) `type: boolean` → `anyOf[boolean, string("true"/"false")]`；(2) `items: {type: "string"}` → `anyOf[string, object]`，修复模型将 `candidates` 输出为对象数组（`[{name: ...}]`）而非字符串数组时被 Groq 严格校验拒绝的问题
 - **熔断状态日志降级**：`ProviderCallError`（含熔断状态）从通用 `except Exception`（ERROR+堆栈）中分离为独立 catch（WARNING 无堆栈），涉及 4 处路由端点（非流式/流式/会话/流式会话），减少熔断期间日志刷屏
+- **UI 日志重启后恢复**：`BufferedLogHandler` 新增 `preload_from_file()` 方法，启动时从 `logs/app.log` 预加载最近 500 条历史日志到内存缓冲，解决 UI 实时日志重启后清空的问题（文件日志本身通过 `TimedRotatingFileHandler` 已保留 30 天轮转）
 
 ### 新增
 

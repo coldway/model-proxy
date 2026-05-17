@@ -29,7 +29,7 @@ from src.scheduler.dispatcher import Dispatcher
 from src.scheduler.history import RequestHistory
 from src.scheduler.rate_limiter import RateLimiter
 
-from src.api.log_buffer import install as install_log_buffer
+from src.api.log_buffer import install as install_log_buffer, preload_from_file as preload_logs
 
 _LOG_DIR = Path("logs")
 _LOG_DIR.mkdir(exist_ok=True)
@@ -52,6 +52,9 @@ logging.getLogger("watchfiles").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 install_log_buffer(max_records=2000)
+_preloaded = preload_logs(_LOG_DIR / "app.log", max_lines=500)
+if _preloaded:
+    logger.info("从日志文件预加载 %d 条历史记录到 UI 缓冲", _preloaded)
 
 
 def create_app() -> FastAPI:

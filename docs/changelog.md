@@ -6,6 +6,11 @@
 
 ## [Unreleased]
 
+### 新增
+
+- **流式 SSE 完整 delta 传递（MP-01）**：所有 provider 的 `stream_chat_completion` 从 yield 纯文本改为 yield 完整 delta dict，保留 `tool_calls`、`reasoning` 等非 content 字段；`streaming.py` 和 dispatcher `_guarded_stream` 同步适配 `dict | str` 类型
+- **/v1/* API Token 认证（MP-02）**：新增 `api_token` 配置字段，非空时 `/v1/*` 路由要求 `Authorization: Bearer <api_token>`（OpenAI SDK 的 `api_key` 参数即为此 token）；为空时向后兼容不启用
+
 ### 优化
 
 - **P2 批量（MP-10～MP-18）**：路由缓存哈希纳入 tools 体积/摘要与多模态图像段尺度；可配置 CORS（`cors_origins`）；能力缓存与 `providers_catalog` 合并且目录优先；会话 YAML 读写加进程内锁；DEBUG 请求体改为脱敏摘要；熔断键细化为 `provider:model`（兼容旧厂商级键）；Payload 估算 +10% 余量且 413 记录原始/调整后限制；`routes.py` / `dispatcher.py` / 管理 UI 增加 region 注释分段

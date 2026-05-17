@@ -57,11 +57,28 @@ class GroqProvider(BaseProvider):
             }
         return schema
 
+    @staticmethod
+    def _is_tool_call_json(text: str) -> bool:
+        """判断文本是否为模型试图生成的工具调用 JSON（非面向用户的文本）。"""
+        stripped = text.strip()
+        if not stripped:
+            return False
+        try:
+            parsed = json.loads(stripped)
+        except (json.JSONDecodeError, ValueError):
+            return False
+        if isinstance(parsed, list):
+            return any(isinstance(item, dict) and "name" in item for item in parsed[:3])
+        if isinstance(parsed, dict) and "name" in parsed and "parameters" in parsed:
+            return True
+        return False
+
     def _try_recover_tool_use_failed(
         self, resp: httpx.Response, model: str,
     ) -> dict | None:
         """Groq 严格模式下模型想输出文本但被拒绝时，
-        从 failed_generation 中恢复有效响应，避免不必要的降级。"""
+        从 failed_generation 中恢复有效响应，避免不必要的降级。
+        如果 failed_generation 是工具调用 JSON，则不恢复（让降级链处理）。"""
         try:
             body = resp.json()
         except Exception:
@@ -71,6 +88,12 @@ class GroqProvider(BaseProvider):
             return None
         text = err.get("failed_generation", "")
         if not text:
+            return None
+        if self._is_tool_call_json(text):
+            logger.info(
+                "Groq tool_use_failed: failed_generation 是工具调用 JSON (%d字)，不恢复",
+                len(text),
+            )
             return None
         logger.info(
             "Groq tool_use_failed 恢复: 提取 failed_generation (%d字) 作为有效响应",
@@ -162,7 +185,7 @@ class GroqProvider(BaseProvider):
                     err = err_data.get("error", {})
                     if err.get("code") == "tool_use_failed":
                         text = err.get("failed_generation", "")
-                        if text:
+                        if text and not self._is_tool_call_json(text):
                             logger.info(
                                 "Groq stream tool_use_failed 恢复: 提取 failed_generation (%d字)",
                                 len(text),

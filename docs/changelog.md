@@ -13,6 +13,7 @@
 
 ### 优化
 
+- **模型请求/响应完整日志增强**：请求日志新增 `payload` 大小（KB）、`tools` 名称列表（前 5 个 + 计数）、`temperature`/`max_tokens` 参数。非流式响应 INFO 日志新增 `finish_reason`、`tool_calls` 名称/数量、内容预览（前 200 字符）；DEBUG 日志输出完整 `message` 对象。流式响应 INFO 日志新增 tool_calls 详情（函数名 + 参数预览）、reasoning 摘要、内容预览、首包 TTFB（Time To First Byte）；DEBUG 日志输出所有 tool_call chunks 和响应结构
 - **P2 批量（MP-10～MP-18）**：路由缓存哈希纳入 tools 体积/摘要与多模态图像段尺度；可配置 CORS（`cors_origins`）；能力缓存与 `providers_catalog` 合并且目录优先；会话 YAML 读写加进程内锁；DEBUG 请求体改为脱敏摘要；熔断键细化为 `provider:model`（兼容旧厂商级键）；Payload 估算 +10% 余量且 413 记录原始/调整后限制；`routes.py` / `dispatcher.py` / 管理 UI 增加 region 注释分段
 
 ### 修复
@@ -22,7 +23,7 @@
 - **Groq tool_use_failed 智能恢复**：当 Groq 模型在多轮 tool calling 后想输出文本但被严格模式拒绝时（HTTP 400 `tool_use_failed`），`GroqProvider` 自动从 `failed_generation` 字段提取文本作为有效响应返回（非流式 + 流式均支持）。新增 `_is_tool_call_json` 检测：当 `failed_generation` 内容为工具调用 JSON（模型试图调用工具但格式不被接受）时不恢复，正确降级到其他模型
 - **Groq schema 通用放宽**：`GroqProvider._relax_schema()` 递归放宽 tool schema：(1) `type: boolean` → `anyOf[boolean, string("true"/"false")]`；(2) `items: {type: "string"}` → `anyOf[string, object]`，修复模型将 `candidates` 输出为对象数组（`[{name: ...}]`）而非字符串数组时被 Groq 严格校验拒绝的问题
 - **熔断状态日志降级**：`ProviderCallError`（含熔断状态）从通用 `except Exception`（ERROR+堆栈）中分离为独立 catch（WARNING 无堆栈），涉及 4 处路由端点（非流式/流式/会话/流式会话），减少熔断期间日志刷屏
-- **UI 日志重启后恢复**：`BufferedLogHandler` 新增 `preload_from_file()` 方法，启动时从 `logs/app.log` 预加载最近 500 条历史日志到内存缓冲，解决 UI 实时日志重启后清空的问题（文件日志本身通过 `TimedRotatingFileHandler` 已保留 30 天轮转）
+- **UI 日志重启后恢复（增强版）**：`preload_from_file()` 现在自动扫描所有轮转备份文件（`app.log.YYYY-MM-DD`），按日期从旧到新加载，预加载量从 500 行提升到 2000 行。新增 `GET /api/logs/history` 端点：无参数返回可用日志文件列表（含大小）；传 `date=YYYY-MM-DD` 或 `date=current` 可查询任意一天的日志文件（最多 5000 行）。文件日志通过 `TimedRotatingFileHandler(backupCount=30)` 保留 30 天轮转。UI 实时日志支持无限滚动加载历史日志：向下滚动接近底部时自动从轮转日志文件加载更多条目，底部显示「加载更多历史日志（还有 N 天）」提示；最大渲染条数从 500 提升至 2000
 
 ### 新增
 

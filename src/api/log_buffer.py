@@ -119,32 +119,52 @@ def install(max_records: int = 2000) -> BufferedLogHandler:
     return handler
 
 
-def preload_from_file(path: str | Path, max_lines: int = 500) -> int:
-    """从日志文件预加载最近的日志条目到缓冲区，用于重启后恢复 UI 日志。
-    返回实际加载的行数。"""
+def preload_from_file(path: str | Path, max_lines: int = 2000) -> int:
+    """从日志文件及其轮转备份预加载最近的日志条目到缓冲区，用于重启后恢复 UI 日志。
+
+    会自动扫描同目录下 ``app.log.YYYY-MM-DD`` 格式的轮转文件，
+    按日期从旧到新加载，最终加载当前 ``app.log``。
+    返回实际加载的行数。
+    """
     if _instance is None:
         return 0
     from pathlib import Path as _P
     p = _P(path)
-    if not p.is_file():
+    log_dir = p.parent
+    stem = p.name
+
+    rotated = sorted(
+        f for f in log_dir.iterdir()
+        if f.is_file() and f.name.startswith(stem + ".") and f.name != stem
+    )
+
+    all_lines: list[str] = []
+    for rf in rotated:
+        try:
+            all_lines.extend(rf.read_text(encoding="utf-8", errors="replace").splitlines())
+        except Exception:
+            continue
+    if p.is_file():
+        try:
+            all_lines.extend(p.read_text(encoding="utf-8", errors="replace").splitlines())
+        except Exception:
+            pass
+    if not all_lines:
         return 0
-    try:
-        lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
-        recent = lines[-max_lines:] if len(lines) > max_lines else lines
-        loaded = 0
-        for line in recent:
-            if not line.strip():
-                continue
-            record = logging.LogRecord(
-                name="(file)", level=logging.INFO,
-                pathname="", lineno=0, msg=line,
-                args=None, exc_info=None,
-            )
-            _instance.emit(record)
-            loaded += 1
-        return loaded
-    except Exception:
-        return 0
+
+    recent = all_lines[-max_lines:]
+    loaded = 0
+    for line in recent:
+        if not line.strip():
+            continue
+        record = logging.LogRecord(
+            name="(file)", level=logging.INFO,
+            pathname="", lineno=0, msg=line,
+            args=None, exc_info=None,
+        )
+        _instance.emit(record)
+        loaded += 1
+    return loaded
 
 
 def get_instance() -> BufferedLogHandler | None:

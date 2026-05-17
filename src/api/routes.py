@@ -1241,6 +1241,59 @@ async def clear_logs():
     return {"status": "ok"}
 
 
+@router.get("/api/logs/history")
+async def get_log_history(date: str = "", tail: int = 500):
+    """查询历史日志文件。
+
+    - date: 日期字符串（YYYY-MM-DD），为空时返回可用日期列表
+    - tail: 返回文件末尾行数（默认 500，最大 5000）
+    """
+    from pathlib import Path
+    import os
+
+    log_dir = Path("logs")
+    if not log_dir.is_dir():
+        return {"dates": [], "lines": []}
+
+    if not date:
+        dates = []
+        for f in sorted(log_dir.iterdir()):
+            if f.is_file() and f.name.startswith("app.log"):
+                stat = f.stat()
+                size_kb = round(stat.st_size / 1024, 1)
+                if f.name == "app.log":
+                    dates.append({"name": "app.log", "label": "当前", "size_kb": size_kb})
+                else:
+                    suffix = f.name.replace("app.log.", "")
+                    dates.append({"name": f.name, "label": suffix, "size_kb": size_kb})
+        return {"dates": dates}
+
+    import re
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", date) and date != "current":
+        return JSONResponse(status_code=400, content={"detail": "日期格式无效，应为 YYYY-MM-DD 或 current"})
+
+    if date == "current":
+        target = log_dir / "app.log"
+    else:
+        target = log_dir / f"app.log.{date}"
+
+    if not target.is_file():
+        return JSONResponse(status_code=404, content={"detail": f"日志文件不存在: {target.name}"})
+
+    tail = min(max(tail, 1), 5000)
+    try:
+        all_lines = target.read_text(encoding="utf-8", errors="replace").splitlines()
+        lines = all_lines[-tail:]
+        return {
+            "file": target.name,
+            "total_lines": len(all_lines),
+            "returned_lines": len(lines),
+            "lines": lines,
+        }
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"detail": f"读取日志文件失败: {e}"})
+
+
 @router.get("/api/logs/level")
 async def get_log_level():
     """获取当前日志级别"""

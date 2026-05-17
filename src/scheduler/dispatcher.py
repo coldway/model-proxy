@@ -894,10 +894,19 @@ class Dispatcher:
         stream_timeout = max(1, int(getattr(model_cfg, "timeout", 60) or 60))
         sid_tag = f" session={request.session_id}" if request.session_id else ""
         msg_summary = self._summarize_messages(request.messages)
+        payload_bytes = estimate_payload_bytes(request)
+        tools_tag = ""
+        if request.tools:
+            tnames = [t.function.name for t in request.tools[:5]]
+            tools_tag = f" tools=[{','.join(tnames)}]({len(request.tools)}个)"
+        params_tag = f" temp={request.temperature}"
+        if request.max_tokens:
+            params_tag += f" max_tokens={request.max_tokens}"
         logger.info(
-            "[流式] trace=%s%s 请求 %s:%s | 消息数=%d %s",
+            "[流式] trace=%s%s 请求 %s:%s | 消息数=%d payload=%.1fKB%s%s %s",
             trace_id, sid_tag, prov_name, model_cfg.name,
-            len(request.messages), msg_summary,
+            len(request.messages), payload_bytes / 1024,
+            tools_tag, params_tag, msg_summary,
         )
         logger.debug(
             "[流式] trace=%s 请求体摘要: %s",
@@ -914,6 +923,11 @@ class Dispatcher:
         first_chunk = None
         try:
             first_chunk = await asyncio.wait_for(raw_iter.__anext__(), timeout=stream_timeout)
+            ttfb_ms = (time.monotonic_ns() - stream_start) / 1_000_000
+            logger.info(
+                "[流式] trace=%s %s:%s 首包到达 TTFB=%.0fms",
+                trace_id, prov_name, model_cfg.name, ttfb_ms,
+            )
         except asyncio.TimeoutError:
             elapsed_ms = (time.monotonic_ns() - stream_start) / 1_000_000
             self._record_provider_failure(prov_name, model_cfg.name)
@@ -983,15 +997,58 @@ class Dispatcher:
                 )
                 estimated_tokens = len(full_text) // 2
                 rate_limiter.record_tokens(prov_name, model_cfg.name, estimated_tokens)
-                has_tc = any(isinstance(c, dict) and "tool_calls" in c for c in chunks_collected)
-                logger.info(
-                    "[流式] trace=%s 响应完成 %s:%s | 耗时=%.0fms chunks=%d 响应长度=%d tool_calls=%s",
-                    trace_id, prov_name, model_cfg.name,
-                    elapsed_ms, len(chunks_collected), len(full_text), has_tc,
+
+                tc_chunks = [c for c in chunks_collected if isinstance(c, dict) and "tool_calls" in c]
+                reasoning_text = "".join(
+                    c.get("reasoning", "") or c.get("reasoning_content", "")
+                    for c in chunks_collected if isinstance(c, dict)
                 )
+                tc_summary = ""
+                if tc_chunks:
+                    tc_names: dict[int, str] = {}
+                    tc_args: dict[int, list[str]] = {}
+                    for c in tc_chunks:
+                        for tc in c.get("tool_calls", []):
+                            idx = tc.get("index", 0)
+                            fn = tc.get("function", {})
+                            if fn.get("name"):
+                                tc_names[idx] = fn["name"]
+                            if fn.get("arguments"):
+                                tc_args.setdefault(idx, []).append(fn["arguments"])
+                    parts = []
+                    for idx in sorted(tc_names):
+                        args_preview = "".join(tc_args.get(idx, []))[:100]
+                        parts.append(f"{tc_names[idx]}({args_preview})")
+                    tc_summary = f" tool_calls=[{', '.join(parts)}]"
+
+                reasoning_summary = ""
+                if reasoning_text:
+                    preview = reasoning_text[:200] + ("…" if len(reasoning_text) > 200 else "")
+                    reasoning_summary = f" reasoning({len(reasoning_text)}字符)={preview!r}"
+
+                content_preview = ""
+                if full_text:
+                    preview = full_text[:200].replace("\n", "\\n")
+                    content_preview = f" 内容预览={preview!r}"
+
+                logger.info(
+                    "[流式] trace=%s 响应完成 %s:%s | 耗时=%.0fms chunks=%d 响应长度=%d%s%s%s",
+                    trace_id, prov_name, model_cfg.name,
+                    elapsed_ms, len(chunks_collected), len(full_text),
+                    tc_summary, reasoning_summary, content_preview,
+                )
+
+                debug_response = {"content_length": len(full_text)}
+                if tc_chunks:
+                    debug_response["tool_calls_chunks"] = tc_chunks[:20]
+                if reasoning_text:
+                    debug_response["reasoning"] = reasoning_text[:500]
+                if full_text:
+                    debug_response["content_preview"] = full_text[:500]
                 logger.debug(
-                    "[流式] trace=%s 完整响应内容:\n%s",
-                    trace_id, full_text,
+                    "[流式] trace=%s 完整响应详情:\n%s",
+                    trace_id,
+                    json.dumps(debug_response, ensure_ascii=False, default=str),
                 )
             except httpx.HTTPStatusError as e:
                 elapsed_ms = (time.monotonic_ns() - stream_start) / 1_000_000
@@ -1131,10 +1188,19 @@ class Dispatcher:
         tag = "路由" if is_routing else "推理"
         sid_tag = f" session={request.session_id}" if request.session_id else ""
         msg_summary = self._summarize_messages(request.messages)
+        payload_bytes = estimate_payload_bytes(request)
+        tools_tag = ""
+        if request.tools:
+            tnames = [t.function.name for t in request.tools[:5]]
+            tools_tag = f" tools=[{','.join(tnames)}]({len(request.tools)}个)"
+        params_tag = f" temp={request.temperature}"
+        if request.max_tokens:
+            params_tag += f" max_tokens={request.max_tokens}"
         logger.info(
-            "[%s] trace=%s%s %s请求 %s:%s | 消息数=%d %s",
+            "[%s] trace=%s%s %s请求 %s:%s | 消息数=%d payload=%.1fKB%s%s %s",
             tag, trace_id, sid_tag, tag, provider_name, model_name,
-            len(request.messages), msg_summary,
+            len(request.messages), payload_bytes / 1024,
+            tools_tag, params_tag, msg_summary,
         )
         logger.debug(
             "[%s] trace=%s 请求体摘要: %s",
@@ -1168,21 +1234,41 @@ class Dispatcher:
                 )
                 self._record_provider_success(provider_name, model_name)
 
-            reply_content = result.choices[0].message.content if result.choices else ""
+            msg_obj = result.choices[0].message if result.choices else None
+            reply_content = msg_obj.content if msg_obj else ""
             reply_len = len(reply_content) if reply_content else 0
+            finish_reason = result.choices[0].finish_reason if result.choices else None
             usage = result.usage
+
+            tc_summary = ""
+            if msg_obj and getattr(msg_obj, "tool_calls", None):
+                tc_list = msg_obj.tool_calls
+                tc_names = [getattr(tc.function, "name", "?") for tc in tc_list]
+                tc_summary = f" tool_calls=[{', '.join(tc_names)}]({len(tc_list)}个)"
+
+            content_preview = ""
+            if reply_content:
+                preview = reply_content[:200].replace("\n", "\\n")
+                content_preview = f" 内容预览={preview!r}"
+
             logger.info(
-                "[%s] trace=%s%s %s响应 %s:%s | 耗时=%.0fms tokens(prompt=%d,completion=%d,total=%d) 响应长度=%d",
+                "[%s] trace=%s%s %s响应 %s:%s | 耗时=%.0fms tokens(prompt=%d,completion=%d,total=%d) "
+                "响应长度=%d finish_reason=%s%s%s",
                 tag, trace_id, sid_tag, tag, provider_name, model_name,
                 elapsed_ms,
                 usage.prompt_tokens if usage else 0,
                 usage.completion_tokens if usage else 0,
                 usage.total_tokens if usage else 0,
-                reply_len,
+                reply_len, finish_reason, tc_summary, content_preview,
             )
+
+            raw_msg_dict = msg_obj.model_dump() if msg_obj and hasattr(msg_obj, "model_dump") else {}
+            if raw_msg_dict.get("content") and len(raw_msg_dict["content"]) > 500:
+                raw_msg_dict["content"] = raw_msg_dict["content"][:500] + f"…(截断,共{len(reply_content)}字符)"
             logger.debug(
-                "[%s] trace=%s 完整响应内容:\n%s",
-                tag, trace_id, reply_content,
+                "[%s] trace=%s 完整响应 message 对象:\n%s",
+                tag, trace_id,
+                json.dumps(raw_msg_dict, ensure_ascii=False, default=str),
             )
             return result
         except asyncio.TimeoutError:

@@ -43,17 +43,24 @@ class GroqProvider(BaseProvider):
         }
 
     @staticmethod
-    def _relax_bool_props(schema: dict) -> dict:
-        """递归将 JSON Schema 中 boolean 属性放宽为同时接受 string，
-        避免模型输出 "true"/"false" 被 Groq 严格校验拒绝。"""
+    def _relax_schema(schema: dict) -> dict:
+        """递归放宽 JSON Schema 以兼容 Groq 模型的非严格输出：
+        1. boolean → anyOf[boolean, string("true"/"false")]
+        2. array items: {type: "string"} → items: anyOf[string, object]
+        """
         if not isinstance(schema, dict):
             return schema
         if schema.get("type") == "boolean":
             return {"anyOf": [{"type": "boolean"}, {"type": "string", "enum": ["true", "false"]}]}
+        if schema.get("type") == "array":
+            items = schema.get("items", {})
+            if isinstance(items, dict) and items.get("type") == "string":
+                schema = dict(schema)
+                schema["items"] = {"anyOf": [{"type": "string"}, {"type": "object"}]}
         if "properties" in schema and isinstance(schema["properties"], dict):
             schema = dict(schema)
             schema["properties"] = {
-                k: GroqProvider._relax_bool_props(v) for k, v in schema["properties"].items()
+                k: GroqProvider._relax_schema(v) for k, v in schema["properties"].items()
             }
         return schema
 
@@ -121,7 +128,7 @@ class GroqProvider(BaseProvider):
             for t in request.tools:
                 td = t.model_dump()
                 if "function" in td and "parameters" in td["function"]:
-                    td["function"]["parameters"] = self._relax_bool_props(td["function"]["parameters"])
+                    td["function"]["parameters"] = self._relax_schema(td["function"]["parameters"])
                 relaxed.append(td)
             payload["tools"] = relaxed
         if request.tool_choice is not None:

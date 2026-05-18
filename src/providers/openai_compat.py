@@ -34,7 +34,7 @@ class OpenAICompatibleProvider(BaseProvider):
         super().__init__(api_key)
         self._base_url = base_url.rstrip("/")
         self._provider_name = provider_name
-        self._client = self._create_client(timeout=120.0)
+        self._client = httpx.AsyncClient(timeout=120.0)
 
     async def close(self) -> None:
         await self._client.aclose()
@@ -64,20 +64,8 @@ class OpenAICompatibleProvider(BaseProvider):
         self, model: str, request: ChatCompletionRequest
     ) -> ChatCompletionResponse:
         url = f"{self._base_url}/chat/completions"
-        logger.info(
-            "[%s] 非流式请求 model=%s url=%s msgs=%d temp=%s max_tokens=%s tools=%d",
-            self._provider_name, model, url, len(request.messages),
-            request.temperature, request.max_tokens,
-            len(request.tools) if request.tools else 0,
-        )
-        t0 = time.monotonic()
         resp = await self._client.post(
             url, headers=self._build_headers(), json=self._build_payload(model, request),
-        )
-        http_ms = (time.monotonic() - t0) * 1000
-        logger.info(
-            "[%s] HTTP响应 status=%d 耗时=%.0fms body_len=%d",
-            self._provider_name, resp.status_code, http_ms, len(resp.content),
         )
         resp.raise_for_status()
         data = resp.json()
@@ -112,10 +100,6 @@ class OpenAICompatibleProvider(BaseProvider):
         self, model: str, request: ChatCompletionRequest
     ) -> AsyncIterator[str]:
         url = f"{self._base_url}/chat/completions"
-        logger.info(
-            "[%s] 流式请求 model=%s url=%s msgs=%d",
-            self._provider_name, model, url, len(request.messages),
-        )
         async with self._client.stream(
             "POST", url,
             headers=self._build_headers(),

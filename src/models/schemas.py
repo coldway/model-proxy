@@ -46,7 +46,6 @@ class AppSettings(BaseModel):
     auto_switch: bool = True
     log_level: str = "info"
     admin_token: str = Field(default="", description="管理面板认证令牌，为空则不启用认证")
-    proxy_api_key: str = Field(default="", description="/v1 推理接口认证密钥，为空则不验证（任意客户端可调用）")
     route_cache_ttl: int = Field(default=600, description="路由缓存有效期（秒）")
     breaker_threshold: int = Field(default=3, description="连续失败 N 次触发厂商熔断")
     breaker_cooldown: int = Field(default=300, description="熔断冷却时间（秒）")

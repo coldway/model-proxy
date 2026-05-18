@@ -45,6 +45,3 @@ ui/.next/
 *.db
 *.sqlite3
 data/
-
-# macOS 服务管理脚本（含用户名、路径等私密信息）
-scripts/

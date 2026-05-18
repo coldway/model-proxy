@@ -32,7 +32,7 @@ class GoogleProvider(BaseProvider):
 
     def __init__(self, api_key: str):
         super().__init__(api_key)
-        self._client = httpx.AsyncClient(timeout=120.0)
+        self._client = self._create_client(timeout=120.0, http2=True)
 
     async def close(self) -> None:
         await self._client.aclose()
@@ -81,8 +81,15 @@ class GoogleProvider(BaseProvider):
     ) -> ChatCompletionResponse:
         url = f"{GOOGLE_API_BASE}/models/{model}:generateContent"
         params = {"key": self._api_key}
-
+        logger.info(
+            "[google] 非流式请求 model=%s msgs=%d temp=%s max_tokens=%s tools=%d",
+            model, len(request.messages), request.temperature, request.max_tokens,
+            len(request.tools) if request.tools else 0,
+        )
+        t0 = time.monotonic()
         resp = await self._client.post(url, params=params, json=self._build_payload(request))
+        http_ms = (time.monotonic() - t0) * 1000
+        logger.info("[google] HTTP响应 status=%d 耗时=%.0fms body_len=%d", resp.status_code, http_ms, len(resp.content))
         resp.raise_for_status()
         data = resp.json()
 
@@ -116,7 +123,7 @@ class GoogleProvider(BaseProvider):
     ) -> AsyncIterator[str]:
         url = f"{GOOGLE_API_BASE}/models/{model}:streamGenerateContent"
         params = {"key": self._api_key, "alt": "sse"}
-
+        logger.info("[google] 流式请求 model=%s msgs=%d", model, len(request.messages))
         async with self._client.stream(
             "POST", url, params=params, json=self._build_payload(request),
         ) as resp:

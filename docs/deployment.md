@@ -187,6 +187,59 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now model-proxy
 ```
 
+### 5. macOS launchd 服务（开机自启 + 崩溃拉起 + 代码变更重启）
+
+macOS 原生方案，零额外依赖（仅需 fswatch 用于双保险代码监听）。
+
+> **隐私说明**：launchd 配置文件（plist、管理脚本）包含用户名和本地路径等私密信息，
+> 已从仓库 `.gitignore` 中排除。文件保存在 `~/.config/model-proxy-launchd/`。
+
+#### 架构
+
+```
+launchd (macOS 原生进程管理)
+  ├── com.<username>.model-proxy        ← 主服务（开机自启 + 崩溃拉起）
+  │     └── uvicorn reload=True         ← 代码变更自动热重载（内置）
+  └── com.<username>.model-proxy-watcher ← fswatch 文件监听（可选双保险）
+        └── watch-and-restart.sh        ← 检测 .py/.yaml 变更后 kickstart 重启
+```
+
+三层保障：
+- **开机自启**：launchd `RunAtLoad=true`，开机后自动启动
+- **崩溃拉起**：launchd `KeepAlive`，进程异常退出后 3 秒自动重启
+- **代码变更重启**：uvicorn `reload=True`（主）+ fswatch（备）
+
+#### 文件存储位置
+
+| 位置 | 文件 | 说明 |
+|------|------|------|
+| `~/.config/model-proxy-launchd/` | `*.plist`, `*.sh` | 私密配置主副本（不提交 Git） |
+| `~/Library/LaunchAgents/` | `com.<username>.model-proxy*.plist` | launchd 加载位置（由 manage.sh 自动复制） |
+
+#### 管理命令
+
+```bash
+cd ~/.config/model-proxy-launchd/
+./manage.sh install    # 安装并启动服务
+./manage.sh uninstall  # 卸载全部 launchd 服务
+./manage.sh start      # 启动服务
+./manage.sh stop       # 停止服务
+./manage.sh restart    # 重启 model-proxy
+./manage.sh status     # 查看服务状态
+./manage.sh logs       # 查看实时日志
+```
+
+#### 日志位置
+
+```
+<project>/logs/
+├── model-proxy.log         # 应用日志（Python RotatingFileHandler，50MB 轮转）
+├── model-proxy.stderr.log  # launchd 捕获的未处理错误
+├── watcher.stdout.log      # fswatch 监听输出
+├── watcher.stderr.log      # fswatch 监听错误
+└── watch-restart.log       # 代码变更重启记录
+```
+
 ---
 
 ## 安全建议

@@ -31,7 +31,7 @@ class GitHubProvider(BaseProvider):
 
     def __init__(self, api_key: str):
         super().__init__(api_key)
-        self._client = httpx.AsyncClient(timeout=60.0)
+        self._client = self._create_client(timeout=60.0)
 
     async def close(self) -> None:
         await self._client.aclose()
@@ -61,9 +61,17 @@ class GitHubProvider(BaseProvider):
         self, model: str, request: ChatCompletionRequest
     ) -> ChatCompletionResponse:
         url = f"{GITHUB_MODELS_BASE}/chat/completions"
+        logger.info(
+            "[github] 非流式请求 model=%s msgs=%d temp=%s max_tokens=%s tools=%d",
+            model, len(request.messages), request.temperature, request.max_tokens,
+            len(request.tools) if request.tools else 0,
+        )
+        t0 = time.monotonic()
         resp = await self._client.post(
             url, headers=self._build_headers(), json=self._build_payload(model, request),
         )
+        http_ms = (time.monotonic() - t0) * 1000
+        logger.info("[github] HTTP响应 status=%d 耗时=%.0fms body_len=%d", resp.status_code, http_ms, len(resp.content))
         resp.raise_for_status()
         data = resp.json()
 
@@ -97,6 +105,7 @@ class GitHubProvider(BaseProvider):
         self, model: str, request: ChatCompletionRequest
     ) -> AsyncIterator[str]:
         url = f"{GITHUB_MODELS_BASE}/chat/completions"
+        logger.info("[github] 流式请求 model=%s msgs=%d", model, len(request.messages))
         async with self._client.stream(
             "POST", url,
             headers=self._build_headers(),

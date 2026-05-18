@@ -371,7 +371,11 @@ async def get_config():
             "priority": prov.priority,
             "models": [m.model_dump() for m in prov.models],
         }
-    return {"providers": result, "settings": _deps.config_manager.settings.model_dump()}
+    safe_settings = _deps.config_manager.settings.model_dump()
+    for secret_key in ("admin_token", "api_token"):
+        if safe_settings.get(secret_key):
+            safe_settings[secret_key] = "***"
+    return {"providers": result, "settings": safe_settings}
 
 
 class ApiKeyUpdateRequest(BaseModel):
@@ -1169,7 +1173,7 @@ async def stream_chat_message(session_id: str, request: ChatCompletionRequest):
         if thinking:
             logger.info("[流式会话] trace=%s 模型 %s 思考过程:\n%s", trace_id, model_name, thinking[:500])
 
-        save_assistant = (not stream_broken) and len(reply_text.strip()) >= 10
+        save_assistant = (not stream_broken) and len(reply_text.strip()) >= 1
         if save_assistant:
             session.add_message("assistant", reply_text, model=model_name)
         elif stream_broken:
@@ -1179,8 +1183,8 @@ async def stream_chat_message(session_id: str, request: ChatCompletionRequest):
             )
         else:
             logger.info(
-                "[流式会话] trace=%s 输出过短（<%d 字符），跳过写入助手消息",
-                trace_id, 10,
+                "[流式会话] trace=%s 输出为空，跳过写入助手消息",
+                trace_id,
             )
         await asyncio.to_thread(_deps.session_mgr.save)
 
@@ -1241,6 +1245,26 @@ async def clear_logs():
     return {"status": "ok"}
 
 
+def _tail_file(path, n: int, chunk_size: int = 8192) -> list[str]:
+    """从文件末尾高效读取最后 n 行，避免将整个文件加载到内存。"""
+    from pathlib import Path
+    with open(path, "rb") as f:
+        f.seek(0, 2)
+        size = f.tell()
+        if size == 0:
+            return []
+        buf = b""
+        pos = size
+        lines_found = 0
+        while pos > 0 and lines_found <= n:
+            read_size = min(chunk_size, pos)
+            pos -= read_size
+            f.seek(pos)
+            buf = f.read(read_size) + buf
+            lines_found = buf.count(b"\n")
+        return buf.decode("utf-8", errors="replace").splitlines()[-n:]
+
+
 @router.get("/api/logs/history")
 async def get_log_history(date: str = "", tail: int = 500):
     """查询历史日志文件。
@@ -1249,7 +1273,6 @@ async def get_log_history(date: str = "", tail: int = 500):
     - tail: 返回文件末尾行数（默认 500，最大 5000）
     """
     from pathlib import Path
-    import os
 
     log_dir = Path("logs")
     if not log_dir.is_dir():
@@ -1282,11 +1305,9 @@ async def get_log_history(date: str = "", tail: int = 500):
 
     tail = min(max(tail, 1), 5000)
     try:
-        all_lines = target.read_text(encoding="utf-8", errors="replace").splitlines()
-        lines = all_lines[-tail:]
+        lines = _tail_file(target, tail)
         return {
             "file": target.name,
-            "total_lines": len(all_lines),
             "returned_lines": len(lines),
             "lines": lines,
         }

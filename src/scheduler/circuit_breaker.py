@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_THRESHOLD = 3
 _DEFAULT_COOLDOWN = 300
-_WINDOW_SECONDS = 120
+_DEFAULT_WINDOW = 120
 
 # 不应触发熔断的 HTTP 状态码（客户端请求自身问题，非厂商故障）
 CLIENT_ERROR_NO_BREAKER = frozenset({400, 404, 413, 414, 415, 422})
@@ -39,9 +39,11 @@ class CircuitBreaker:
         *,
         threshold: int = _DEFAULT_THRESHOLD,
         cooldown: int = _DEFAULT_COOLDOWN,
+        window: int = _DEFAULT_WINDOW,
     ):
         self._threshold = threshold
         self._cooldown = cooldown
+        self._window = window
         self._failures: dict[str, list[float]] = {}
         self._breaker: dict[str, float] = {}
 
@@ -53,7 +55,7 @@ class CircuitBreaker:
             self._failures[key] = []
         fails = self._failures[key]
         fails.append(now)
-        self._failures[key] = [t for t in fails if now - t < _WINDOW_SECONDS]
+        self._failures[key] = [t for t in fails if now - t < self._window]
 
         if len(self._failures[key]) >= self._threshold:
             self._breaker[key] = now + self._cooldown

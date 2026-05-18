@@ -25,7 +25,7 @@ from src.models.schemas import ChatCompletionRequest
 
 logger = logging.getLogger(__name__)
 
-_DATA_DIR = Path("data")
+_DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 _LIMITS_FILE = _DATA_DIR / "payload_limits.yaml"
 
 # 客户端估算与网关实际限制可能有偏差，比较与 413 记录统一使用加缓冲后的估算值
@@ -66,6 +66,7 @@ class PayloadTracker:
         self._path = path
         self._lock = threading.Lock()
         self._limits: dict[str, dict[str, Any]] = {}
+        self._dirty = False
         self._load()
 
     def _load(self) -> None:
@@ -80,6 +81,11 @@ class PayloadTracker:
             logger.warning("加载 payload 上限文件失败: %s", e)
 
     def _save(self) -> None:
+        """标记为脏，由周期性 flush 统一持久化（避免在事件循环线程中做阻塞 I/O）"""
+        self._dirty = True
+
+    def _persist(self) -> None:
+        """实际写入磁盘"""
         try:
             self._path.parent.mkdir(parents=True, exist_ok=True)
             self._path.write_text(
@@ -88,6 +94,14 @@ class PayloadTracker:
             )
         except Exception as e:
             logger.warning("保存 payload 上限文件失败: %s", e)
+
+    def flush(self) -> None:
+        """将内存状态持久化到磁盘（由外部定时任务或关停钩子调用）"""
+        with self._lock:
+            if not self._dirty:
+                return
+            self._dirty = False
+            self._persist()
 
     @staticmethod
     def _key(provider: str, model: str) -> str:

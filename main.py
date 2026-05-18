@@ -132,6 +132,7 @@ def create_app() -> FastAPI:
                     rate_limiter.flush()
                     history.flush()
                     catalog.flush()
+                    dispatcher.payload_tracker.flush()
                 except Exception as exc:
                     logger.warning("周期性刷盘异常: %s", exc)
 
@@ -152,6 +153,7 @@ def create_app() -> FastAPI:
         rate_limiter.flush()
         history.flush()
         catalog.flush()
+        dispatcher.payload_tracker.flush()
         await dispatcher.close_providers()
         logger.info("所有资源已释放")
 

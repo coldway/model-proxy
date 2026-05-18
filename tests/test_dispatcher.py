@@ -107,6 +107,38 @@ class TestDispatchAuto:
             await dispatcher.dispatch(_make_request(), [("prov_a", cfg)])
 
 
+class TestAutoSwitchOnFailure:
+    @pytest.mark.asyncio
+    async def test_falls_back_to_next_provider_on_failure(self, dispatcher: Dispatcher):
+        fail_provider = AsyncMock()
+        fail_provider.chat_completion = AsyncMock(side_effect=RuntimeError("模拟调用失败"))
+        ok_provider = AsyncMock()
+        ok_provider.chat_completion = AsyncMock(return_value=_make_response("good-model"))
+
+        dispatcher.register_provider("bad", fail_provider)
+        dispatcher.register_provider("good", ok_provider)
+
+        enabled = [
+            ("bad", _make_model_cfg("bad-model", priority=1)),
+            ("good", _make_model_cfg("good-model", priority=2)),
+        ]
+        prov, model, resp = await dispatcher.dispatch(_make_request(), enabled)
+        assert prov == "good"
+        assert resp.model == "good-model"
+        fail_provider.chat_completion.assert_called_once()
+        ok_provider.chat_completion.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_raises_when_all_providers_fail(self, dispatcher: Dispatcher):
+        fail_provider = AsyncMock()
+        fail_provider.chat_completion = AsyncMock(side_effect=RuntimeError("模拟调用失败"))
+        dispatcher.register_provider("bad", fail_provider)
+
+        enabled = [("bad", _make_model_cfg("bad-model"))]
+        with pytest.raises(AllModelsUnavailable):
+            await dispatcher.dispatch(_make_request(), enabled)
+
+
 class TestBreakerMechanism:
     def test_breaker_triggers_after_threshold(self, dispatcher: Dispatcher):
         dispatcher._breaker_threshold = 3

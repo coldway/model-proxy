@@ -56,7 +56,7 @@ class Dispatcher:
         self._providers: dict[str, "BaseProvider"] = {}
         self._capability_cache: CapabilityCache | None = capability_cache
         self._history = history
-        self._route_cache: dict[str, tuple[str, float]] = {}
+        self._route_cache: dict[str, tuple[str, float, int]] = {}
         self._route_log: list[dict[str, Any]] = []
         self._last_route_strategy: str = ""
         self._provider_failures: dict[str, list[float]] = {}
@@ -93,7 +93,7 @@ class Dispatcher:
             self._provider_breaker[provider_name] = now + self._breaker_cooldown
             self._provider_failures[provider_name] = []
             logger.warning(
-                "⚠ 厂商 %s 连续失败 %d 次，触发熔断 %d 秒，恢复时间: %s",
+                "厂商 %s 连续失败 %d 次，触发熔断 %d 秒，恢复时间: %s",
                 provider_name, self._breaker_threshold, self._breaker_cooldown,
                 time.strftime("%H:%M:%S", time.localtime(now + self._breaker_cooldown)),
             )
@@ -778,7 +778,7 @@ class Dispatcher:
                     preview = full_text[:_MAX_STREAM_LOG]
                     if len(full_text) > _MAX_STREAM_LOG:
                         preview += f"...(截断, 共{len(full_text)}字符)"
-                    logger.info("[流式] trace=%s 响应内容:\n%s", trace_id, preview)
+                    logger.debug("[流式] trace=%s 响应内容:\n%s", trace_id, preview)
             except httpx.HTTPStatusError as e:
                 elapsed_ms = (time.monotonic_ns() - stream_start) / 1_000_000
                 status = e.response.status_code
@@ -902,7 +902,7 @@ class Dispatcher:
                 preview = reply_content[:_MAX_REPLY_LOG]
                 if len(reply_content) > _MAX_REPLY_LOG:
                     preview += f"...(截断, 共{len(reply_content)}字符)"
-                logger.info("[%s] trace=%s 响应内容:\n%s", tag, trace_id, preview)
+                logger.debug("[%s] trace=%s 响应内容:\n%s", tag, trace_id, preview)
             return result
         except asyncio.TimeoutError:
             elapsed_ms = (time.monotonic_ns() - start_ns) / 1_000_000

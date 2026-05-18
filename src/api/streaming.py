@@ -8,6 +8,7 @@ import time
 import uuid
 from typing import AsyncIterator
 
+import httpx
 from starlette.responses import StreamingResponse
 
 from src.models.schemas import ChatCompletionRequest, ChatMessage
@@ -59,10 +60,9 @@ async def _stream_generator(model: str, content_iterator: AsyncIterator[str]) ->
             yield f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
     except Exception as e:
         has_error = True
-        import httpx as _httpx
         error_type = "stream_error"
         error_msg = "流式响应中断"
-        if isinstance(e, _httpx.HTTPStatusError):
+        if isinstance(e, httpx.HTTPStatusError):
             status = e.response.status_code
             if status == 429:
                 error_type = "rate_limit"

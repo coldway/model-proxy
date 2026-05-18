@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import logging
 import logging.handlers
 import sys
@@ -33,25 +34,30 @@ from src.scheduler.rate_limiter import RateLimiter
 from src.api.log_buffer import install as install_log_buffer
 
 _LOG_DIR = Path(__file__).parent / "logs"
-_LOG_DIR.mkdir(exist_ok=True)
 _LOG_FMT = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 
 _console_handler = logging.StreamHandler(sys.stdout)
 _console_handler.setLevel(logging.INFO)
 _console_handler.setFormatter(_LOG_FMT)
 
-_file_handler = logging.handlers.RotatingFileHandler(
-    _LOG_DIR / "model-proxy.log",
-    maxBytes=50 * 1024 * 1024,  # 50MB
-    backupCount=5,
-    encoding="utf-8",
-)
-_file_handler.setLevel(logging.INFO)
-_file_handler.setFormatter(_LOG_FMT)
+_log_handlers: list[logging.Handler] = [_console_handler]
+try:
+    _LOG_DIR.mkdir(exist_ok=True)
+    _file_handler = logging.handlers.RotatingFileHandler(
+        _LOG_DIR / "model-proxy.log",
+        maxBytes=50 * 1024 * 1024,  # 50MB
+        backupCount=5,
+        encoding="utf-8",
+    )
+    _file_handler.setLevel(logging.INFO)
+    _file_handler.setFormatter(_LOG_FMT)
+    _log_handlers.append(_file_handler)
+except OSError:
+    pass
 
 logging.basicConfig(
     level=logging.INFO,
-    handlers=[_console_handler, _file_handler],
+    handlers=_log_handlers,
 )
 logger = logging.getLogger(__name__)
 
@@ -122,12 +128,17 @@ def create_app() -> FastAPI:
 
         flush_task = asyncio.create_task(_periodic_flush())
 
-        if capability_cache and capability_cache.get_all():
-            cached_count = len(capability_cache.get_all())
-            logger.info("已加载 %d 个模型的能力缓存（预热）", cached_count)
+        if capability_cache:
+            all_caps = capability_cache.get_all()
+            if all_caps:
+                logger.info("已加载 %d 个模型的能力缓存（预热）", len(all_caps))
 
         yield
         flush_task.cancel()
+        try:
+            await flush_task
+        except asyncio.CancelledError:
+            pass
         logger.info("正在优雅关闭…")
         rate_limiter.flush()
         history.flush()
@@ -157,11 +168,11 @@ def create_app() -> FastAPI:
             bearer_token = auth.removeprefix("Bearer ").strip() if auth.startswith("Bearer ") else ""
 
             if path.startswith("/v1/"):
-                if proxy_api_key and bearer_token != proxy_api_key:
+                if proxy_api_key and not hmac.compare_digest(bearer_token, proxy_api_key):
                     return JSONResponse(status_code=401, content={"detail": "未授权，请提供有效的 API Key"})
                 return await call_next(request)
 
-            if admin_token and bearer_token != admin_token:
+            if admin_token and not hmac.compare_digest(bearer_token, admin_token):
                 return JSONResponse(status_code=401, content={"detail": "未授权，请提供有效的管理令牌"})
             return await call_next(request)
 
@@ -203,16 +214,16 @@ if __name__ == "__main__":
     _config = ConfigManager(catalog=_catalog)
 
     if args.validate:
-        print(f"配置校验通过 ✓")
+        print("配置校验通过 ✓")
         print(f"  监听: {_config.settings.host}:{_config.settings.port}")
         providers = {n for n, p in _config.config.providers.items() if p.enabled}
         models = _config.get_enabled_models()
         print(f"  已启用厂商: {', '.join(sorted(providers)) or '无'}")
         print(f"  已启用模型: {len(models)} 个")
         if _config.settings.proxy_api_key:
-            print(f"  /v1 认证: 已启用")
+            print("  /v1 认证: 已启用")
         if _config.settings.admin_token:
-            print(f"  管理面板认证: 已启用")
+            print("  管理面板认证: 已启用")
         sys.exit(0)
 
     uvicorn.run(

@@ -66,3 +66,33 @@ class TestAdminAuth:
                 headers={"Authorization": "Bearer test-secret-token"},
             )
             assert resp.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_v1_also_protected_when_only_admin_token(self, app_with_token):
+        """只配 admin_token 时，/v1/ 路径也应受保护（互兜底）"""
+        transport = ASGITransport(app=app_with_token)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get("/v1/models")
+            assert resp.status_code == 401
+
+            resp = await client.get(
+                "/v1/models",
+                headers={"Authorization": "Bearer test-secret-token"},
+            )
+            assert resp.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_bearer_case_insensitive(self, app_with_token):
+        """Bearer 前缀大小写不敏感"""
+        transport = ASGITransport(app=app_with_token)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get(
+                "/api/config",
+                headers={"Authorization": "bearer test-secret-token"},
+            )
+            assert resp.status_code == 200
+            resp = await client.get(
+                "/api/config",
+                headers={"Authorization": "BEARER test-secret-token"},
+            )
+            assert resp.status_code == 200

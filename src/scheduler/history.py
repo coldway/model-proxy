@@ -46,6 +46,7 @@ class RequestHistory:
         self._records: deque[RequestRecord] = deque(maxlen=cap)
         self._persist = persist
         self._pending: list[RequestRecord] = []
+        self._pending_lock = threading.Lock()
         self._flush_timer: threading.Timer | None = None
         if persist:
             HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -78,7 +79,8 @@ class RequestHistory:
         self._records.append(rec)
 
         if self._persist:
-            self._pending.append(rec)
+            with self._pending_lock:
+                self._pending.append(rec)
             self._schedule_flush()
 
     def get_recent(self, limit: int = 50) -> list[dict[str, Any]]:
@@ -253,16 +255,19 @@ class RequestHistory:
             self._flush_timer.start()
 
     def _flush(self) -> None:
-        if not self._pending:
-            return
-        batch = self._pending[:]
+        with self._pending_lock:
+            if not self._pending:
+                return
+            batch = self._pending[:]
+            self._pending.clear()
         try:
             with open(HISTORY_FILE, "a", encoding="utf-8") as f:
                 for rec in batch:
                     f.write(json.dumps(rec.to_dict(), ensure_ascii=False) + "\n")
-            self._pending = self._pending[len(batch):]
         except Exception as e:
             logger.warning("批量写入历史记录失败（%d 条将在下次重试）: %s", len(batch), e)
+            with self._pending_lock:
+                self._pending = batch + self._pending
 
     def flush(self) -> None:
         """立即刷盘（用于优雅关闭）"""

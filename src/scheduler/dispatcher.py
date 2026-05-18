@@ -7,6 +7,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import threading
 import time
 import uuid
 from typing import TYPE_CHECKING, Any
@@ -74,6 +75,7 @@ class Dispatcher:
         self._route_log: list[dict[str, Any]] = []
         self._last_route_strategy: str = ""
         self._session_bindings: dict[str, tuple[str, str, float]] = {}
+        self._session_lock = threading.Lock()
         self._route_cache_ttl = route_cache_ttl
         self._session_bind_ttl = session_bind_ttl
 
@@ -197,12 +199,13 @@ class Dispatcher:
 
     def bind_session(self, session_id: str, provider: str, model: str) -> None:
         """绑定 session_id 到指定的 provider/model"""
-        if len(self._session_bindings) >= self._SESSION_BIND_MAX and session_id not in self._session_bindings:
-            self._evict_expired_sessions()
-            if len(self._session_bindings) >= self._SESSION_BIND_MAX:
-                oldest_sid = min(self._session_bindings, key=lambda k: self._session_bindings[k][2])
-                del self._session_bindings[oldest_sid]
-        self._session_bindings[session_id] = (provider, model, time.time())
+        with self._session_lock:
+            if len(self._session_bindings) >= self._SESSION_BIND_MAX and session_id not in self._session_bindings:
+                self._evict_expired_sessions()
+                if len(self._session_bindings) >= self._SESSION_BIND_MAX:
+                    oldest_sid = min(self._session_bindings, key=lambda k: self._session_bindings[k][2])
+                    del self._session_bindings[oldest_sid]
+            self._session_bindings[session_id] = (provider, model, time.time())
         logger.info("会话绑定: %s → %s:%s", session_id, provider, model)
 
     def _evict_expired_sessions(self) -> int:
@@ -215,17 +218,22 @@ class Dispatcher:
 
     def get_session_binding(self, session_id: str) -> tuple[str, str] | None:
         """获取 session_id 绑定的 (provider, model)，过期返回 None"""
-        if session_id not in self._session_bindings:
-            return None
-        provider, model, ts = self._session_bindings[session_id]
-        if time.time() - ts > self._session_bind_ttl:
-            del self._session_bindings[session_id]
-            logger.info("会话绑定过期: %s", session_id)
-            return None
-        return provider, model
+        with self._session_lock:
+            if session_id not in self._session_bindings:
+                return None
+            provider, model, ts = self._session_bindings[session_id]
+            if time.time() - ts > self._session_bind_ttl:
+                del self._session_bindings[session_id]
+                logger.info("会话绑定过期: %s", session_id)
+                return None
+            return provider, model
 
     def get_all_session_bindings(self) -> dict[str, dict[str, Any]]:
         """获取所有有效的会话绑定"""
+        with self._session_lock:
+            return self._get_all_session_bindings_unlocked()
+
+    def _get_all_session_bindings_unlocked(self) -> dict[str, dict[str, Any]]:
         now = time.time()
         result = {}
         expired = []
@@ -245,11 +253,12 @@ class Dispatcher:
 
     def clear_session_binding(self, session_id: str = "") -> int:
         """清除会话绑定。返回清除数量。"""
-        if session_id:
-            return 1 if self._session_bindings.pop(session_id, None) else 0
-        count = len(self._session_bindings)
-        self._session_bindings.clear()
-        return count
+        with self._session_lock:
+            if session_id:
+                return 1 if self._session_bindings.pop(session_id, None) else 0
+            count = len(self._session_bindings)
+            self._session_bindings.clear()
+            return count
 
     # endregion
 
@@ -940,6 +949,7 @@ class Dispatcher:
         stream_start = time.monotonic_ns()
 
         first_chunk = None
+        first_chunk_failed = False
         try:
             first_chunk = await asyncio.wait_for(raw_iter.__anext__(), timeout=stream_timeout)
             ttfb_ms = (time.monotonic_ns() - stream_start) / 1_000_000
@@ -948,6 +958,7 @@ class Dispatcher:
                 trace_id, prov_name, model_cfg.name, ttfb_ms,
             )
         except asyncio.TimeoutError:
+            first_chunk_failed = True
             elapsed_ms = (time.monotonic_ns() - stream_start) / 1_000_000
             self._record_provider_failure(prov_name, model_cfg.name)
             logger.error(
@@ -958,6 +969,7 @@ class Dispatcher:
         except StopAsyncIteration:
             pass
         except Exception as e:
+            first_chunk_failed = True
             elapsed_ms = (time.monotonic_ns() - stream_start) / 1_000_000
             if isinstance(e, httpx.HTTPStatusError) and not should_trigger_breaker(e.response.status_code):
                 if e.response.status_code == 413:
@@ -980,6 +992,12 @@ class Dispatcher:
                 self._record_provider_failure(prov_name, model_cfg.name)
                 logger.error("[流式] trace=%s %s:%s 连接建立失败（%.0fms）: %s", trace_id, prov_name, model_cfg.name, elapsed_ms, e)
             raise ProviderCallError(f"流式连接失败: {e}") from e
+        finally:
+            if first_chunk_failed:
+                try:
+                    await raw_iter.aclose()
+                except Exception:
+                    pass
 
         rate_limiter = self._rate_limiter
         payload_tracker = self._payload_tracker
@@ -991,13 +1009,36 @@ class Dispatcher:
         rpd, rpm, tpm, tpd = self._unpack_rate_limit(model_cfg)
 
         async def _guarded_stream():
-            chunks_collected: list[dict | str] = []
+            text_parts: list[str] = []
+            reasoning_parts: list[str] = []
+            tc_names: dict[int, str] = {}
+            tc_args: dict[int, list[str]] = {}
+            chunk_count = 0
+
+            def _accumulate(c: dict | str) -> None:
+                if isinstance(c, dict):
+                    text_parts.append(c.get("content", ""))
+                    r = c.get("reasoning", "") or c.get("reasoning_content", "")
+                    if r:
+                        reasoning_parts.append(r)
+                    for tc in c.get("tool_calls", []):
+                        idx = tc.get("index", 0)
+                        fn = tc.get("function", {})
+                        if fn.get("name"):
+                            tc_names[idx] = fn["name"]
+                        if fn.get("arguments"):
+                            tc_args.setdefault(idx, []).append(fn["arguments"])
+                else:
+                    text_parts.append(c)
+
             try:
                 if first_chunk is not None:
-                    chunks_collected.append(first_chunk)
+                    chunk_count += 1
+                    _accumulate(first_chunk)
                     yield first_chunk
                 async for chunk in raw_iter:
-                    chunks_collected.append(chunk)
+                    chunk_count += 1
+                    _accumulate(chunk)
                     yield chunk
                 record_success(prov_name)
                 rate_limiter.clear_429_backoff(prov_name, model_cfg.name)
@@ -1009,29 +1050,14 @@ class Dispatcher:
                         trace_id, prov_name, model_cfg.name,
                     )
                 elapsed_ms = (time.monotonic_ns() - stream_start) / 1_000_000
-                full_text = "".join(
-                    (c.get("content", "") if isinstance(c, dict) else c) for c in chunks_collected
-                )
+                full_text = "".join(text_parts)
                 estimated_tokens = len(full_text) // 2
                 rate_limiter.record_tokens(prov_name, model_cfg.name, estimated_tokens)
 
-                tc_chunks = [c for c in chunks_collected if isinstance(c, dict) and "tool_calls" in c]
-                reasoning_text = "".join(
-                    c.get("reasoning", "") or c.get("reasoning_content", "")
-                    for c in chunks_collected if isinstance(c, dict)
-                )
+                reasoning_text = "".join(reasoning_parts)
+
                 tc_summary = ""
-                if tc_chunks:
-                    tc_names: dict[int, str] = {}
-                    tc_args: dict[int, list[str]] = {}
-                    for c in tc_chunks:
-                        for tc in c.get("tool_calls", []):
-                            idx = tc.get("index", 0)
-                            fn = tc.get("function", {})
-                            if fn.get("name"):
-                                tc_names[idx] = fn["name"]
-                            if fn.get("arguments"):
-                                tc_args.setdefault(idx, []).append(fn["arguments"])
+                if tc_names:
                     parts = []
                     for idx in sorted(tc_names):
                         args_preview = "".join(tc_args.get(idx, []))[:100]
@@ -1051,13 +1077,13 @@ class Dispatcher:
                 logger.info(
                     "[流式] trace=%s 响应完成 %s:%s | 耗时=%.0fms chunks=%d 响应长度=%d%s%s%s",
                     trace_id, prov_name, model_cfg.name,
-                    elapsed_ms, len(chunks_collected), len(full_text),
+                    elapsed_ms, chunk_count, len(full_text),
                     tc_summary, reasoning_summary, content_preview,
                 )
 
                 debug_response = {"content_length": len(full_text)}
-                if tc_chunks:
-                    debug_response["tool_calls_chunks"] = tc_chunks[:20]
+                if tc_names:
+                    debug_response["tool_calls_count"] = len(tc_names)
                 if reasoning_text:
                     debug_response["reasoning"] = reasoning_text[:500]
                 if full_text:

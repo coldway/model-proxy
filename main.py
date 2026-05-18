@@ -191,18 +191,30 @@ def create_app() -> FastAPI:
             logger.info("CORS 已启用: %s", _allowed)
 
     if admin_token or api_token:
+        def _extract_bearer(auth_header: str) -> str:
+            if auth_header.lower().startswith("bearer "):
+                return auth_header[7:].strip()
+            return ""
+
+        def _token_match(given: str, expected: str) -> bool:
+            if not given or not expected:
+                return False
+            return hmac.compare_digest(given.encode(), expected.encode())
+
         @app.middleware("http")
         async def auth_middleware(request: Request, call_next):
             path = request.url.path
             if path in OPEN_PATHS:
                 return await call_next(request)
-            auth = request.headers.get("Authorization", "")
+            bearer = _extract_bearer(request.headers.get("Authorization", ""))
             if path.startswith("/v1/"):
-                if api_token and not hmac.compare_digest(auth, f"Bearer {api_token}"):
-                    return JSONResponse(status_code=401, content={"detail": "未授权，请在 api_key 中提供有效令牌"})
+                expected = api_token or admin_token
+                if expected and not _token_match(bearer, expected):
+                    return JSONResponse(status_code=401, content={"detail": "未授权：需要有效的 API 令牌"})
                 return await call_next(request)
-            if admin_token and not hmac.compare_digest(auth, f"Bearer {admin_token}"):
-                return JSONResponse(status_code=401, content={"detail": "未授权，请提供有效的管理令牌"})
+            expected = admin_token or api_token
+            if expected and not _token_match(bearer, expected):
+                return JSONResponse(status_code=401, content={"detail": "未授权：需要有效的管理令牌"})
             return await call_next(request)
         _auth_parts = []
         if admin_token:

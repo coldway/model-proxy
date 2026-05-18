@@ -160,11 +160,11 @@ async def chat_completions(request: ChatCompletionRequest):
     except AllModelsUnavailable as e:
         _record_failure(start_time, str(e))
         logger.error("[API] trace=%s 所有模型不可用: %s", trace_id, e)
-        raise HTTPException(status_code=503, detail=str(e))
+        raise HTTPException(status_code=503, detail="所有模型均不可用，请稍后重试")
     except ProviderCallError as e:
         _record_failure(start_time, str(e))
         logger.warning("[API] trace=%s 厂商调用失败（可恢复）: %s", trace_id, e)
-        raise HTTPException(status_code=503, detail=str(e))
+        raise HTTPException(status_code=503, detail="模型服务暂时不可用，请稍后重试")
     except Exception as e:
         _record_failure(start_time, str(e))
         logger.error("[API] trace=%s 推理请求异常: %s", trace_id, e, exc_info=True)
@@ -191,11 +191,11 @@ async def _handle_stream(request: ChatCompletionRequest, enabled_models, trace_i
     except AllModelsUnavailable as e:
         _record_failure(start_time, str(e))
         logger.error("[API] trace=%s 流式所有模型不可用: %s", trace_id, e)
-        raise HTTPException(status_code=503, detail=str(e))
+        raise HTTPException(status_code=503, detail="所有模型均不可用，请稍后重试")
     except ProviderCallError as e:
         _record_failure(start_time, str(e))
         logger.warning("[API] trace=%s 流式厂商调用失败（可恢复）: %s", trace_id, e)
-        raise HTTPException(status_code=503, detail=str(e))
+        raise HTTPException(status_code=503, detail="模型服务暂时不可用，请稍后重试")
     except Exception as e:
         _record_failure(start_time, str(e))
         logger.error("[API] trace=%s 流式请求异常: %s", trace_id, e, exc_info=True)
@@ -227,7 +227,8 @@ async def _handle_stream(request: ChatCompletionRequest, enabled_models, trace_i
 def _record_failure(start_time: float, error: str, provider: str = "unknown", model: str = "unknown") -> None:
     if _deps.history:
         latency = (time.time() - start_time) * 1000
-        _deps.history.record(provider=provider, model=model, success=False, latency_ms=latency, error=error)
+        safe_error = error[:200] if error else ""
+        _deps.history.record(provider=provider, model=model, success=False, latency_ms=latency, error=safe_error)
 
 
 # region 模型管理、厂商与用量
@@ -397,8 +398,8 @@ async def update_api_key(body: ApiKeyUpdateRequest):
             logger.info(f"动态注册厂商 {provider}")
             return {"status": "ok", "message": f"{provider} API Key 已更新，厂商已自动加载"}
         except Exception as e:
-            logger.error(f"动态注册厂商 {provider} 失败: {e}")
-            return {"status": "ok", "message": f"{provider} API Key 已保存，但厂商加载失败: {e}"}
+            logger.error(f"动态注册厂商 {provider} 失败: {e}", exc_info=True)
+            return {"status": "ok", "message": f"{provider} API Key 已保存，但厂商加载失败，请检查 Key 是否正确"}
     elif not api_key.strip():
         _deps.dispatcher.unregister_provider(provider)
         logger.info(f"已注销厂商 {provider}（API Key 已清空）")
@@ -585,7 +586,7 @@ async def fetch_provider_models(provider_name: str, force: bool = False):
         models = await provider.list_models()
     except Exception as e:
         logger.error(f"拉取 {provider_name} 模型列表失败: {e}", exc_info=True)
-        raise HTTPException(status_code=502, detail=f"拉取 {provider_name} 模型列表失败: {e}")
+        raise HTTPException(status_code=502, detail=f"拉取 {provider_name} 模型列表失败，请检查配置")
 
     result = {"provider": provider_name, "available_models": models}
 
@@ -667,7 +668,7 @@ async def test_capabilities(provider: str = "", model: str = "", force: bool = F
             try:
                 models = await prov_inst.list_models()
             except Exception as e:
-                raise HTTPException(status_code=502, detail=f"拉取模型列表失败: {e}")
+                raise HTTPException(status_code=502, detail="拉取模型列表失败，请检查配置")
 
         results = await _deps.capability_tester.test_provider_models(
             prov_inst, provider, models, force=force,
@@ -1067,12 +1068,13 @@ async def send_chat_message(session_id: str, request: ChatCompletionRequest):
         await asyncio.to_thread(_deps.session_mgr.save)
         logger.warning("[会话] trace=%s session=%s 失败: %s", trace_id, session_id, e)
         status = 429 if isinstance(e, RateLimitExceeded) else (404 if isinstance(e, ModelNotFound) else 503)
-        raise HTTPException(status_code=status, detail=str(e))
+        _detail_map = {429: "请求过于频繁，请稍后重试", 404: "模型未找到", 503: "所有模型均不可用，请稍后重试"}
+        raise HTTPException(status_code=status, detail=_detail_map.get(status, "服务异常"))
     except ProviderCallError as e:
         _record_failure(start_time, str(e))
         await asyncio.to_thread(_deps.session_mgr.save)
         logger.warning("[会话] trace=%s session=%s 厂商调用失败（可恢复）: %s", trace_id, session_id, e)
-        raise HTTPException(status_code=503, detail=str(e))
+        raise HTTPException(status_code=503, detail="模型服务暂时不可用，请稍后重试")
     except Exception as e:
         _record_failure(start_time, str(e))
         logger.error("[会话] trace=%s session=%s 异常: %s", trace_id, session_id, e, exc_info=True)
@@ -1124,11 +1126,12 @@ async def stream_chat_message(session_id: str, request: ChatCompletionRequest):
         _record_failure(start_time, str(e))
         logger.warning("[流式会话] trace=%s session=%s 失败: %s", trace_id, session_id, e)
         status = 429 if isinstance(e, RateLimitExceeded) else (404 if isinstance(e, ModelNotFound) else 503)
-        raise HTTPException(status_code=status, detail=str(e))
+        _detail_map = {429: "请求过于频繁，请稍后重试", 404: "模型未找到", 503: "所有模型均不可用，请稍后重试"}
+        raise HTTPException(status_code=status, detail=_detail_map.get(status, "服务异常"))
     except ProviderCallError as e:
         _record_failure(start_time, str(e))
         logger.warning("[流式会话] trace=%s session=%s 厂商调用失败（可恢复）: %s", trace_id, session_id, e)
-        raise HTTPException(status_code=503, detail=str(e))
+        raise HTTPException(status_code=503, detail="模型服务暂时不可用，请稍后重试")
     except Exception as e:
         _record_failure(start_time, str(e))
         logger.error("[流式会话] trace=%s session=%s 异常: %s", trace_id, session_id, e, exc_info=True)
@@ -1305,14 +1308,15 @@ async def get_log_history(date: str = "", tail: int = 500):
 
     tail = min(max(tail, 1), 5000)
     try:
-        lines = _tail_file(target, tail)
+        lines = await asyncio.to_thread(_tail_file, target, tail)
         return {
             "file": target.name,
             "returned_lines": len(lines),
             "lines": lines,
         }
     except Exception as e:
-        return JSONResponse(status_code=500, content={"detail": f"读取日志文件失败: {e}"})
+        logger.warning("读取日志文件失败: %s", e)
+        return JSONResponse(status_code=500, content={"detail": "读取日志文件失败"})
 
 
 @router.get("/api/logs/level")

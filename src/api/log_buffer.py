@@ -138,21 +138,23 @@ def preload_from_file(path: str | Path, max_lines: int = 2000) -> int:
         if f.is_file() and f.name.startswith(stem + ".") and f.name != stem
     )
 
-    all_lines: list[str] = []
-    for rf in rotated:
+    files_newest_first: list[_P] = []
+    if p.is_file():
+        files_newest_first.append(p)
+    files_newest_first.extend(reversed(rotated))
+
+    recent: list[str] = []
+    for rf in files_newest_first:
+        if len(recent) >= max_lines:
+            break
         try:
-            all_lines.extend(rf.read_text(encoding="utf-8", errors="replace").splitlines())
+            lines = rf.read_text(encoding="utf-8", errors="replace").splitlines()
+            remaining = max_lines - len(recent)
+            recent = lines[-remaining:] + recent
         except Exception:
             continue
-    if p.is_file():
-        try:
-            all_lines.extend(p.read_text(encoding="utf-8", errors="replace").splitlines())
-        except Exception:
-            pass
-    if not all_lines:
+    if not recent:
         return 0
-
-    recent = all_lines[-max_lines:]
     loaded = 0
     for line in recent:
         if not line.strip():

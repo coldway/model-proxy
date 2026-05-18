@@ -59,10 +59,10 @@ async def _stream_generator(
             yield f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
     except Exception as e:
         has_error = True
-        logger.error(f"流式生成异常: {e}")
+        logger.error("流式生成异常: %s", e, exc_info=True)
         error_data = {
             "error": {
-                "message": str(e) or "流式响应中断",
+                "message": "流式响应中断，请稍后重试",
                 "type": "server_error",
                 "code": None,
             },

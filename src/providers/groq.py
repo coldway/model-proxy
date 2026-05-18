@@ -67,8 +67,13 @@ class GroqProvider(BaseProvider):
         return schema
 
     @staticmethod
+    def _looks_like_tool_call(obj: dict) -> bool:
+        return "name" in obj and ("arguments" in obj or "parameters" in obj)
+
+    @staticmethod
     def _is_tool_call_json(text: str) -> bool:
-        """判断文本是否为模型试图生成的工具调用 JSON（非面向用户的文本）。"""
+        """判断文本是否为模型试图生成的工具调用 JSON（非面向用户的文本）。
+        要求同时包含 name + (arguments|parameters) 才认定为工具调用。"""
         stripped = text.strip()
         if not stripped:
             return False
@@ -77,9 +82,12 @@ class GroqProvider(BaseProvider):
         except (json.JSONDecodeError, ValueError):
             return False
         if isinstance(parsed, list):
-            return any(isinstance(item, dict) and "name" in item for item in parsed[:3])
-        if isinstance(parsed, dict) and "name" in parsed and "parameters" in parsed:
-            return True
+            return any(
+                isinstance(item, dict) and GroqProvider._looks_like_tool_call(item)
+                for item in parsed[:5]
+            )
+        if isinstance(parsed, dict):
+            return GroqProvider._looks_like_tool_call(parsed)
         return False
 
     def _try_recover_tool_use_failed(

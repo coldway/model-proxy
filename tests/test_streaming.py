@@ -51,7 +51,7 @@ class TestStreamGenerator:
         assert len(error_frames) == 1
         assert error_frames[0]["type"] == "server_error"
         assert error_frames[0]["code"] is None
-        assert "boom" in error_frames[0]["message"]
+        assert "重试" in error_frames[0]["message"]
         assert chunks[-1].strip() == "data: [DONE]"
 
     @pytest.mark.asyncio

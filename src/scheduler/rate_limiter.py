@@ -153,7 +153,7 @@ class RateLimiter:
         """在已持有 ``_lock`` 的前提下检查是否可再记一笔请求（含黑名单与额度）"""
         key = self._key(provider, model)
 
-        if self.is_blacklisted(provider, model):
+        if self._is_blacklisted_unlocked(provider, model):
             return False
 
         usage = self._usage[key]
@@ -266,24 +266,25 @@ class RateLimiter:
         - 连续 429：每次翻倍，最长 30 分钟
         - 成功请求后重置退避计数器
         """
-        key = self._key(provider, model)
-        consecutive = self._blacklist_consecutive.get(key, 0) + 1
-        self._blacklist_consecutive[key] = consecutive
-        cooldown = min(
-            _BLACKLIST_BASE_COOLDOWN * (2 ** (consecutive - 1)),
-            _BLACKLIST_MAX_COOLDOWN,
-        )
-        expire_at = time.time() + cooldown
-        self._blacklist[key] = expire_at
-        expire_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(expire_at))
-        logger.warning(
-            "模型 %s 标记为 429 限流（第 %d 次，冷却 %ds，将于 %s 恢复）",
-            key, consecutive, cooldown, expire_str,
-        )
+        with self._lock:
+            key = self._key(provider, model)
+            consecutive = self._blacklist_consecutive.get(key, 0) + 1
+            self._blacklist_consecutive[key] = consecutive
+            cooldown = min(
+                _BLACKLIST_BASE_COOLDOWN * (2 ** (consecutive - 1)),
+                _BLACKLIST_MAX_COOLDOWN,
+            )
+            expire_at = time.time() + cooldown
+            self._blacklist[key] = expire_at
+            expire_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(expire_at))
+            logger.warning(
+                "模型 %s 标记为 429 限流（第 %d 次，冷却 %ds，将于 %s 恢复）",
+                key, consecutive, cooldown, expire_str,
+            )
         self._save_blacklist()
 
-    def is_blacklisted(self, provider: str, model: str) -> bool:
-        """检查模型是否在 429 黑名单中（超过封禁时长自动恢复）"""
+    def _is_blacklisted_unlocked(self, provider: str, model: str) -> bool:
+        """内部无锁版本，须在持有 _lock 时调用"""
         key = self._key(provider, model)
         if key not in self._blacklist:
             return False
@@ -295,66 +296,75 @@ class RateLimiter:
             return False
         return True
 
+    def is_blacklisted(self, provider: str, model: str) -> bool:
+        """检查模型是否在 429 黑名单中（超过封禁时长自动恢复）"""
+        with self._lock:
+            return self._is_blacklisted_unlocked(provider, model)
+
     def clear_429_backoff(self, provider: str, model: str) -> None:
         """模型请求成功后调用，重置其 429 退避计数器"""
-        key = self._key(provider, model)
-        if key in self._blacklist_consecutive:
-            del self._blacklist_consecutive[key]
+        with self._lock:
+            key = self._key(provider, model)
+            if key in self._blacklist_consecutive:
+                del self._blacklist_consecutive[key]
 
     def get_blacklist_remaining(self, provider: str, model: str) -> int:
         """返回封禁剩余秒数，未封禁返回 0"""
-        key = self._key(provider, model)
-        expire_at = self._blacklist.get(key)
-        if expire_at is None:
-            return 0
-        remaining = expire_at - time.time()
-        return max(0, int(remaining))
+        with self._lock:
+            key = self._key(provider, model)
+            expire_at = self._blacklist.get(key)
+            if expire_at is None:
+                return 0
+            remaining = expire_at - time.time()
+            return max(0, int(remaining))
 
     def clear_blacklist(self, provider: str = "", model: str = "") -> int:
         """清除黑名单。provider+model 都传则清除指定模型；
         仅传 provider 清除该厂商下所有模型；都不传清除全部。
         仅传 model 不做任何操作（避免误删）。返回清除数量。
         """
-        if provider and model:
-            key = self._key(provider, model)
-            if key in self._blacklist:
-                del self._blacklist[key]
+        with self._lock:
+            if provider and model:
+                key = self._key(provider, model)
+                if key in self._blacklist:
+                    del self._blacklist[key]
+                    self._save_blacklist()
+                    return 1
+                return 0
+            if provider:
+                prefix = f"{provider}:"
+                to_del = [k for k in self._blacklist if k.startswith(prefix)]
+                for k in to_del:
+                    del self._blacklist[k]
+                if to_del:
+                    self._save_blacklist()
+                return len(to_del)
+            if model:
+                return 0
+            count = len(self._blacklist)
+            self._blacklist.clear()
+            if count:
                 self._save_blacklist()
-                return 1
-            return 0
-        if provider:
-            prefix = f"{provider}:"
-            to_del = [k for k in self._blacklist if k.startswith(prefix)]
-            for k in to_del:
-                del self._blacklist[k]
-            if to_del:
-                self._save_blacklist()
-            return len(to_del)
-        if model:
-            return 0
-        count = len(self._blacklist)
-        self._blacklist.clear()
-        if count:
-            self._save_blacklist()
-        return count
+            return count
 
     def get_blacklist(self) -> dict[str, dict[str, Any]]:
         """返回当前黑名单 {key: {expire_at, remaining_seconds}}，自动清理过期记录"""
-        now = time.time()
-        expired = [k for k, exp in self._blacklist.items() if now >= exp]
-        for k in expired:
-            del self._blacklist[k]
-        if expired:
-            self._save_blacklist()
-            logger.info("自动清理了 %d 个过期的 429 封禁", len(expired))
-        return {
-            k: {
-                "expire_at": exp,
-                "expire_time": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(exp)),
-                "remaining_seconds": max(0, int(exp - now)),
+        with self._lock:
+            now = time.time()
+            expired = [k for k, exp in self._blacklist.items() if now >= exp]
+            for k in expired:
+                del self._blacklist[k]
+            if expired:
+                self._save_blacklist()
+                logger.info("自动清理了 %d 个过期的 429 封禁", len(expired))
+            return {
+                k: {
+                    "expire_at": exp,
+                    "expire_time": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(exp)),
+                    "remaining_seconds": max(0, int(exp - now)),
+                }
+                for k, exp in self._blacklist.items()
             }
-            for k, exp in self._blacklist.items()
-        }
 
     def _load_blacklist(self) -> None:
         """从磁盘加载 429 黑名单，过滤掉已过期的记录"""

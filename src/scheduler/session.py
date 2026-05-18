@@ -53,18 +53,20 @@ class ChatSession:
         self.model = model
         self.system_prompt = system_prompt
         self._max_context_tokens = max_context_tokens
+        self._lock = threading.Lock()
         self.messages: list[dict[str, str]] = []
         self.created_at: float = time.time()
         self.updated_at: float = time.time()
         self.total_tokens_est: int = 0
 
     def add_message(self, role: str, content: str, model: str | None = None) -> None:
-        msg: dict[str, Any] = {"role": role, "content": content}
-        if model:
-            msg["model"] = model
-        self.messages.append(msg)
-        self.updated_at = time.time()
-        self._update_token_estimate()
+        with self._lock:
+            msg: dict[str, Any] = {"role": role, "content": content}
+            if model:
+                msg["model"] = model
+            self.messages.append(msg)
+            self.updated_at = time.time()
+            self._update_token_estimate()
 
     def _update_token_estimate(self) -> None:
         total_chars = len(self.system_prompt)
@@ -74,25 +76,26 @@ class ChatSession:
 
     def get_context_messages(self) -> list[dict[str, str]]:
         """获取用于 API 调用的消息列表（含系统提示、自动截断）"""
-        result = [{"role": "system", "content": self.system_prompt}]
-        budget = self._max_context_tokens - RESERVED_SYSTEM_TOKENS
-        selected: list[dict[str, str]] = []
-        consumed = 0
+        with self._lock:
+            result = [{"role": "system", "content": self.system_prompt}]
+            budget = self._max_context_tokens - RESERVED_SYSTEM_TOKENS
+            selected: list[dict[str, str]] = []
+            consumed = 0
 
-        for msg in reversed(self.messages):
-            msg_tokens = len(msg.get("content") or "") // CHARS_PER_TOKEN
-            if consumed + msg_tokens > budget:
-                break
-            selected.append(msg)
-            consumed += msg_tokens
+            for msg in reversed(self.messages):
+                msg_tokens = len(msg.get("content") or "") // CHARS_PER_TOKEN
+                if consumed + msg_tokens > budget:
+                    break
+                selected.append(msg)
+                consumed += msg_tokens
 
-        selected.reverse()
+            selected.reverse()
 
-        if selected and selected[0]["role"] == "assistant":
-            selected = selected[1:]
+            if selected and selected[0]["role"] == "assistant":
+                selected = selected[1:]
 
-        result.extend({"role": m["role"], "content": m["content"]} for m in selected)
-        return result
+            result.extend({"role": m["role"], "content": m["content"]} for m in selected)
+            return result
 
     def auto_title(self) -> None:
         """从第一条用户消息自动生成标题"""

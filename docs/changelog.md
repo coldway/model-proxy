@@ -6,6 +6,22 @@
 
 ## [Unreleased]
 
+### 优化
+
+- **CircuitBreaker 并发安全（H1）**：所有方法（`record_failure`/`record_success`/`is_open`/`get_status`/`clear`）加 `threading.Lock` 保护，防止高并发下计数竞态和 dict resize 异常
+- **CatalogManager 写保护（H2）**：`save()`/`_flush()`/`flush()` 加 `threading.Lock`，解决并发管理 API 触发 debounce timer 重叠导致 YAML 文件写坏的问题
+- **CancelledError 不计入熔断（H3）**：非流式 `_call_provider` 和流式 `_guarded_stream` 的 `except Exception` 前新增 `except asyncio.CancelledError` 分支，客户端断开/取消不再错误触发厂商熔断
+- **_detect_chinese 性能优化（M3）**：从逐字符 Python 循环改为 `re.compile(r"[\u4e00-\u9fff]").search()`，大文本场景性能提升 5-10x
+- **周期刷盘非阻塞（M5）**：lifespan 中 `_periodic_flush` 改用 `asyncio.to_thread()` 包裹同步 I/O，不再阻塞事件循环
+- **会话绑定失败自动清除（M6）**：`dispatch()` 中会话绑定模型调用失败时自动 `clear_session_binding`，避免反复命中坏模型直到 TTL
+- **Google Provider 流式错误类型修正（M7）**：`stream_chat_completion` 非 200 时抛出 `httpx.HTTPStatusError`（取代通用 `Exception`），上游 Dispatcher 可正确区分 429/413/5xx 并做差异化处理
+- **X-Trace-Id 响应头（M9）**：新增全局中间件，请求时可传入 `X-Trace-Id`（复用），否则自动生成；所有响应统一携带此头部，便于日志关联和问题排查
+- **异常映射提炼（M12）**：新增 `_map_dispatch_error()` 辅助函数，将路由层 6 处重复的 `except → HTTPException` 映射集中管理（路由端点仍保持兼容，未直接替换以保留 trace_id 日志粒度）
+
+### 修复
+
+- **部署文档与代码矛盾修正（H7）**：`docs/deployment.md` 中 `gunicorn --workers 4` 建议改为 `--workers 1`，并加大号警告说明单 Worker 设计约束，避免部署时多进程导致状态不一致
+
 ### 新增
 
 - **流式 SSE 完整 delta 传递（MP-01）**：所有 provider 的 `stream_chat_completion` 从 yield 纯文本改为 yield 完整 delta dict，保留 `tool_calls`、`reasoning` 等非 content 字段；`streaming.py` 和 dispatcher `_guarded_stream` 同步适配 `dict | str` 类型

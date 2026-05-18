@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from typing import Any
 
@@ -46,29 +47,32 @@ class CircuitBreaker:
         self._window = window
         self._failures: dict[str, list[float]] = {}
         self._breaker: dict[str, float] = {}
+        self._lock = threading.Lock()
 
     def record_failure(self, provider: str, model: str | None = None) -> None:
         """记录失败。传入 model 时仅计入该模型，不传时保持厂商级熔断（兼容旧调用）。"""
         key = _breaker_key(provider, model)
         now = time.time()
-        if key not in self._failures:
-            self._failures[key] = []
-        fails = self._failures[key]
-        fails.append(now)
-        self._failures[key] = [t for t in fails if now - t < self._window]
+        with self._lock:
+            if key not in self._failures:
+                self._failures[key] = []
+            fails = self._failures[key]
+            fails.append(now)
+            self._failures[key] = [t for t in fails if now - t < self._window]
 
-        if len(self._failures[key]) >= self._threshold:
-            self._breaker[key] = now + self._cooldown
-            self._failures[key] = []
-            logger.warning(
-                "熔断触发: %s 连续失败 %d 次，冷却 %d 秒",
-                key, self._threshold, self._cooldown,
-            )
+            if len(self._failures[key]) >= self._threshold:
+                self._breaker[key] = now + self._cooldown
+                self._failures[key] = []
+                logger.warning(
+                    "熔断触发: %s 连续失败 %d 次，冷却 %d 秒",
+                    key, self._threshold, self._cooldown,
+                )
 
     def record_success(self, provider: str, model: str | None = None) -> None:
         """记录成功，清除该键的失败计数。"""
         key = _breaker_key(provider, model)
-        self._failures.pop(key, None)
+        with self._lock:
+            self._failures.pop(key, None)
 
     def is_open(self, provider: str, model: str | None = None) -> bool:
         """是否处于熔断。传入 model 时同时尊重旧的厂商级熔断键（向后兼容）。"""
@@ -78,61 +82,64 @@ class CircuitBreaker:
         keys_to_check.append(_breaker_key(provider, None))
 
         now = time.time()
-        for key in keys_to_check:
-            if key not in self._breaker:
-                continue
-            if now > self._breaker[key]:
-                del self._breaker[key]
-                logger.info("熔断已恢复: %s", key)
-                continue
-            return True
+        with self._lock:
+            for key in keys_to_check:
+                if key not in self._breaker:
+                    continue
+                if now > self._breaker[key]:
+                    del self._breaker[key]
+                    logger.info("熔断已恢复: %s", key)
+                    continue
+                return True
         return False
 
     def get_status(self) -> dict[str, Any]:
         """获取所有熔断中的键状态"""
         now = time.time()
         result = {}
-        for key, expire in list(self._breaker.items()):
-            if now > expire:
-                del self._breaker[key]
-                continue
-            result[key] = {
-                "broken": True,
-                "remaining_seconds": round(expire - now),
-                "failures": len(self._failures.get(key, [])),
-            }
+        with self._lock:
+            for key, expire in list(self._breaker.items()):
+                if now > expire:
+                    del self._breaker[key]
+                    continue
+                result[key] = {
+                    "broken": True,
+                    "remaining_seconds": round(expire - now),
+                    "failures": len(self._failures.get(key, [])),
+                }
         return result
 
     def clear(self, provider: str = "", model: str | None = None) -> int:
         """清除熔断。model 有值时只清该 provider:model；仅 provider 时清除该厂商全部键；空则清除全部。"""
-        if not provider:
-            count = len(self._breaker)
-            self._breaker.clear()
-            self._failures.clear()
-            if count:
-                logger.info("手动清除全部 %d 条熔断状态", count)
-            return count
+        with self._lock:
+            if not provider:
+                count = len(self._breaker)
+                self._breaker.clear()
+                self._failures.clear()
+                if count:
+                    logger.info("手动清除全部 %d 条熔断状态", count)
+                return count
 
-        removed = 0
-        if model:
-            target = _breaker_key(provider, model)
-            if target in self._breaker:
-                del self._breaker[target]
+            removed = 0
+            if model:
+                target = _breaker_key(provider, model)
+                if target in self._breaker:
+                    del self._breaker[target]
+                    removed += 1
+                self._failures.pop(target, None)
+                if removed:
+                    logger.info("手动清除熔断状态: %s", target)
+                return removed
+
+            to_remove = [k for k in self._breaker if k == provider or k.startswith(f"{provider}:")]
+            for k in to_remove:
+                del self._breaker[k]
                 removed += 1
-            self._failures.pop(target, None)
+                self._failures.pop(k, None)
+
             if removed:
-                logger.info("手动清除熔断状态: %s", target)
+                logger.info("手动清除厂商 %s 的 %d 条熔断状态", provider, removed)
             return removed
-
-        to_remove = [k for k in self._breaker if k == provider or k.startswith(f"{provider}:")]
-        for k in to_remove:
-            del self._breaker[k]
-            removed += 1
-            self._failures.pop(k, None)
-
-        if removed:
-            logger.info("手动清除厂商 %s 的 %d 条熔断状态", provider, removed)
-        return removed
 
     @property
     def cooldown(self) -> int:

@@ -123,7 +123,11 @@ class GoogleProvider(BaseProvider):
             if resp.status_code != 200:
                 await resp.aread()
                 logger.error(f"Google 流式请求失败 ({resp.status_code}): {resp.text[:200]}")
-                raise Exception(f"Google API {resp.status_code}")
+                raise httpx.HTTPStatusError(
+                    f"Google API {resp.status_code}",
+                    request=resp.request,
+                    response=resp,
+                )
             async for line in resp.aiter_lines():
                 if not line.startswith("data: "):
                     continue

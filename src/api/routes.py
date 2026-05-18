@@ -231,6 +231,29 @@ def _record_failure(start_time: float, error: str, provider: str = "unknown", mo
         _deps.history.record(provider=provider, model=model, success=False, latency_ms=latency, error=safe_error)
 
 
+def _map_dispatch_error(e: Exception, trace_id: str = "") -> HTTPException:
+    """将 Dispatcher 异常统一映射为 HTTPException（去重重复 except 块）"""
+    from src.scheduler.dispatcher import AllModelsUnavailable, ModelNotFound, PayloadTooLarge, ProviderCallError, RateLimitExceeded
+
+    if isinstance(e, PayloadTooLarge):
+        logger.warning("[API] trace=%s payload 过大: %s", trace_id, e)
+        return HTTPException(status_code=413, detail=str(e))
+    if isinstance(e, RateLimitExceeded):
+        logger.warning("[API] trace=%s 限流: %s", trace_id, e)
+        return HTTPException(status_code=429, detail=str(e))
+    if isinstance(e, ModelNotFound):
+        logger.warning("[API] trace=%s 模型未找到: %s", trace_id, e)
+        return HTTPException(status_code=404, detail=str(e))
+    if isinstance(e, AllModelsUnavailable):
+        logger.error("[API] trace=%s 所有模型不可用: %s", trace_id, e)
+        return HTTPException(status_code=503, detail="所有模型均不可用，请稍后重试")
+    if isinstance(e, ProviderCallError):
+        logger.warning("[API] trace=%s 厂商调用失败（可恢复）: %s", trace_id, e)
+        return HTTPException(status_code=503, detail="模型服务暂时不可用，请稍后重试")
+    logger.error("[API] trace=%s 推理请求异常: %s", trace_id, e, exc_info=True)
+    return HTTPException(status_code=500, detail="推理服务内部错误，请稍后重试")
+
+
 # region 模型管理、厂商与用量
 
 @router.get("/v1/models", response_model=ModelListResponse)

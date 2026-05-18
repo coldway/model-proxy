@@ -1,6 +1,6 @@
 # model-proxy 优化 Backlog
 
-> 扫描日期：2026-05-17 | 状态：P0 = 阻塞级 / P1 = 重要 / P2 = 改善
+> 扫描日期：2026-05-17（第一轮）/ 2026-05-18（第二轮）| 状态：P0 = 阻塞级 / P1 = 重要 / P2 = 改善
 
 ## 全部已完成 ✅
 
@@ -36,3 +36,18 @@
 | MP-16 | DEBUG 请求体脱敏 | `dispatcher.py` | ✅ 已完成 |
 | MP-17 | 熔断粒度到模型级 | `circuit_breaker.py`, `dispatcher.py` | ✅ 已完成 |
 | MP-18 | Payload 估算安全余量 | `payload_tracker.py` | ✅ 已完成 |
+
+### 第二轮优化（2026-05-18）
+
+| 编号 | 名称 | 涉及文件 | 状态 |
+|------|------|---------|------|
+| MP-19 | CircuitBreaker 并发锁 | `circuit_breaker.py` | ✅ 已完成 |
+| MP-20 | CatalogManager 写保护锁 | `catalog.py` | ✅ 已完成 |
+| MP-21 | CancelledError 不计入熔断 | `dispatcher.py` | ✅ 已完成 |
+| MP-22 | 部署文档单 Worker 修正 | `docs/deployment.md` | ✅ 已完成 |
+| MP-23 | _detect_chinese 正则优化 | `dispatcher.py` | ✅ 已完成 |
+| MP-24 | 周期刷盘 asyncio.to_thread | `main.py` | ✅ 已完成 |
+| MP-25 | 会话绑定失败自动清除 | `dispatcher.py` | ✅ 已完成 |
+| MP-26 | Google 流式错误 HTTPStatusError | `google.py` | ✅ 已完成 |
+| MP-27 | X-Trace-Id 响应头中间件 | `main.py` | ✅ 已完成 |
+| MP-28 | 异常映射 _map_dispatch_error | `routes.py` | ✅ 已完成 |

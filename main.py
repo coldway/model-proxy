@@ -7,6 +7,7 @@ import asyncio
 import hmac
 import logging
 import sys
+import uuid
 from contextlib import asynccontextmanager
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
@@ -125,14 +126,17 @@ def create_app() -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
+        def _sync_flush_all():
+            rate_limiter.flush()
+            history.flush()
+            catalog.flush()
+            dispatcher.payload_tracker.flush()
+
         async def _periodic_flush():
             while True:
                 await asyncio.sleep(_PERIODIC_FLUSH_INTERVAL)
                 try:
-                    rate_limiter.flush()
-                    history.flush()
-                    catalog.flush()
-                    dispatcher.payload_tracker.flush()
+                    await asyncio.to_thread(_sync_flush_all)
                 except Exception as exc:
                     logger.warning("周期性刷盘异常: %s", exc)
 
@@ -189,6 +193,13 @@ def create_app() -> FastAPI:
                 allow_headers=["*"],
             )
             logger.info("CORS 已启用: %s", _allowed)
+
+    @app.middleware("http")
+    async def trace_id_middleware(request: Request, call_next):
+        trace_id = request.headers.get("X-Trace-Id") or uuid.uuid4().hex[:12]
+        response = await call_next(request)
+        response.headers["X-Trace-Id"] = trace_id
+        return response
 
     if admin_token or api_token:
         def _extract_bearer(auth_header: str) -> str:

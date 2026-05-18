@@ -927,25 +927,28 @@
                     return;
                 }
                 container.innerHTML = decisions.map(d => {
-                    const strategyColor = d.strategy.includes('快速') ? 'var(--accent-green)' :
-                                          d.strategy.includes('LLM') ? 'var(--accent-blue)' :
-                                          d.strategy.includes('缓存') ? 'var(--accent-purple)' : 'var(--accent-yellow)';
+                    const strategy = escapeHtml(d.strategy || '');
+                    const strategyColor = strategy.includes('快速') ? 'var(--accent-green)' :
+                                          strategy.includes('LLM') ? 'var(--accent-blue)' :
+                                          strategy.includes('缓存') ? 'var(--accent-purple)' : 'var(--accent-yellow)';
                     const cachedTag = d.cached ? '<span style="font-size:0.65rem;padding:1px 6px;border-radius:8px;background:rgba(139,92,246,0.12);color:var(--accent-purple)">⚡ 缓存</span>' : '';
+                    const selected = escapeHtml(d.selected || '-');
                     const candidates = (d.candidates || []).map(c => {
+                        const ce = escapeHtml(c);
                         const isSelected = d.selected && d.selected.endsWith(c);
-                        return `<span style="font-size:0.7rem;padding:2px 6px;border-radius:6px;background:${isSelected ? 'rgba(16,185,129,0.15)' : 'rgba(100,116,139,0.1)'};color:${isSelected ? 'var(--accent-green)' : 'var(--text-muted)'};font-weight:${isSelected ? '600' : '400'}">${c}</span>`;
+                        return `<span style="font-size:0.7rem;padding:2px 6px;border-radius:6px;background:${isSelected ? 'rgba(16,185,129,0.15)' : 'rgba(100,116,139,0.1)'};color:${isSelected ? 'var(--accent-green)' : 'var(--text-muted)'};font-weight:${isSelected ? '600' : '400'}">${ce}</span>`;
                     }).join(' ');
                     return `<div style="padding:12px;background:var(--bg-primary);border-radius:8px;margin-bottom:8px;border:1px solid var(--border)">
                         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
                             <div style="display:flex;align-items:center;gap:8px">
-                                <span style="font-size:0.75rem;font-weight:600;color:${strategyColor}">${d.strategy}</span>
+                                <span style="font-size:0.75rem;font-weight:600;color:${strategyColor}">${strategy}</span>
                                 ${cachedTag}
                             </div>
-                            <span style="font-size:0.7rem;color:var(--text-muted)">${d.timestamp || ''}</span>
+                            <span style="font-size:0.7rem;color:var(--text-muted)">${escapeHtml(d.timestamp || '')}</span>
                         </div>
                         <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
                             <span style="font-size:0.7rem;color:var(--text-muted)">选择:</span>
-                            <span style="font-size:0.8rem;font-weight:600;color:var(--accent-green)">${d.selected || '-'}</span>
+                            <span style="font-size:0.8rem;font-weight:600;color:var(--accent-green)">${selected}</span>
                         </div>
                         ${d.user_hint ? `<div style="font-size:0.7rem;color:var(--text-secondary);margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">📝 ${escapeHtml(d.user_hint)}</div>` : ''}
                         <div style="display:flex;gap:4px;flex-wrap:wrap">${candidates}</div>
@@ -1016,14 +1019,14 @@
                     const remainStr = remaining > 3600 ? Math.round(remaining/3600) + 'h' : remaining > 60 ? Math.round(remaining/60) + 'min' : remaining + 's';
                     const statusText = isBroken ? '🔥 熔断中（' + breakerRemainStr + '后恢复）' : is429 ? '🚫 429限流（' + remainStr + '后恢复）' : (s.available ? '● 可用' : '● 不可用');
                     const borderStyle = isBroken ? 'border-left:3px solid #e74c3c' : is429 ? 'border-left:3px solid var(--accent-red)' : '';
-                    const unblockBtn = is429 ? `<button class="btn btn-ghost btn-sm" style="font-size:0.65rem;margin-top:4px" onclick="unblock429('${s.provider}','${s.model}')">🔓 立即解除</button>` : '';
-                    const resetBreakerBtn = isBroken ? `<button class="btn btn-ghost btn-sm" style="font-size:0.65rem;margin-top:4px;color:#e74c3c" onclick="resetBreaker('${s.provider}')">⚡ 重置熔断</button>` : '';
+                    const unblockBtn = is429 ? `<button class="btn btn-ghost btn-sm" style="font-size:0.65rem;margin-top:4px" onclick="unblock429('${escapeHtml(s.provider)}','${escapeHtml(s.model)}')">🔓 立即解除</button>` : '';
+                    const resetBreakerBtn = isBroken ? `<button class="btn btn-ghost btn-sm" style="font-size:0.65rem;margin-top:4px;color:#e74c3c" onclick="resetBreaker('${escapeHtml(s.provider)}')">⚡ 重置熔断</button>` : '';
                     const cap = capMap[s.model];
                     const capHtml = cap ? buildCapBadges(cap) : '';
                     return `<div class="stat-card" style="${borderStyle}">
                         <div class="model-header">
-                            <span class="model-name">${s.model}</span>
-                            <span class="provider-tag">${s.provider}</span>
+                            <span class="model-name">${escapeHtml(s.model)}</span>
+                            <span class="provider-tag">${escapeHtml(s.provider)}</span>
                         </div>
                         <span class="availability ${statusClass}">${statusText}</span>
                         ${unblockBtn}${resetBreakerBtn}
@@ -1675,7 +1678,8 @@
         function showGuide(providerId) {
             const meta = providerMeta[providerId] || {};
             document.getElementById('guide-modal-title').textContent = (meta.name || providerId) + ' - 接入说明';
-            document.getElementById('guide-modal-url').innerHTML = meta.url ? `<a href="${meta.url}" target="_blank" style="color:var(--accent-blue);font-size:0.85rem">🔗 ${meta.url}</a>` : '';
+            const safeUrl = meta.url && /^https?:\/\//.test(meta.url) ? escapeHtml(meta.url) : '';
+            document.getElementById('guide-modal-url').innerHTML = safeUrl ? `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer" style="color:var(--accent-blue);font-size:0.85rem">🔗 ${safeUrl}</a>` : '';
             document.getElementById('guide-modal-content').textContent = meta.guide || '暂无接入说明';
             showModal('guide');
         }
@@ -1774,7 +1778,7 @@
                 const currentVal = select.value;
                 select.innerHTML = '<option value="auto">🤖 自动选择模型</option>';
                 data.models.filter(m => m.enabled).forEach(m => {
-                    select.innerHTML += `<option value="${m.id}">[${m.provider}] ${m.id}</option>`;
+                    select.innerHTML += `<option value="${escapeHtml(m.id)}">[${escapeHtml(m.provider)}] ${escapeHtml(m.id)}</option>`;
                 });
                 select.value = currentVal || 'auto';
             } catch(e) {}
@@ -1970,7 +1974,7 @@
 
         function escapeHtml(text) {
             if (!text) return '';
-            return text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            return text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
         }
 
         // --- 流式发送 ---
@@ -2278,7 +2282,7 @@
         }
 
         function escapeHtml(s) {
-            return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
         }
 
         function filterByTrace(traceId) {

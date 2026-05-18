@@ -33,4 +33,3 @@ settings:
   default_provider: "google"
   auto_switch: true
   log_level: "info"
-  # proxy_api_key: "your-secret-key"  # /v1 推理接口认证密钥，取消注释后客户端需在请求头携带 Authorization: Bearer <key>

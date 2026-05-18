@@ -1,7 +1,0 @@
-# 开发/测试依赖（不部署到生产环境）
--r requirements.txt
-
-pytest>=8.0.0
-pytest-asyncio>=0.24.0
-ruff>=0.8.0
-mypy>=1.13.0

@@ -35,7 +35,7 @@ class HuggingFaceProvider(BaseProvider):
 
     def __init__(self, api_key: str):
         super().__init__(api_key)
-        self._client = self._create_client(timeout=120.0)
+        self._client = httpx.AsyncClient(timeout=120.0)
 
     async def close(self) -> None:
         await self._client.aclose()
@@ -58,15 +58,8 @@ class HuggingFaceProvider(BaseProvider):
         if request.max_tokens:
             payload["max_tokens"] = request.max_tokens
 
-        logger.info(
-            "[huggingface] 非流式请求 model=%s msgs=%d temp=%s max_tokens=%s",
-            model, len(request.messages), request.temperature, request.max_tokens,
-        )
         try:
-            t0 = time.monotonic()
             resp = await self._client.post(url, headers=headers, json=payload)
-            http_ms = (time.monotonic() - t0) * 1000
-            logger.info("[huggingface] HTTP响应 status=%d 耗时=%.0fms body_len=%d", resp.status_code, http_ms, len(resp.content))
             resp.raise_for_status()
             data = resp.json()
 

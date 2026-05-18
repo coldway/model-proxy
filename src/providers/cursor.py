@@ -41,8 +41,6 @@ class CursorProvider(BaseProvider):
             f"[{m.role}]: {_extract_text(m)}" for m in request.messages
         )
 
-        logger.info("[cursor] CLI请求 msgs=%d prompt_len=%d", len(request.messages), len(prompt))
-        t0 = time.monotonic()
         try:
             proc = await asyncio.create_subprocess_exec(
                 "cursor", "agent", "--prompt", prompt,
@@ -50,9 +48,7 @@ class CursorProvider(BaseProvider):
                 stderr=asyncio.subprocess.PIPE,
             )
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
-            elapsed_ms = (time.monotonic() - t0) * 1000
             output = stdout.decode("utf-8", errors="replace").strip()
-            logger.info("[cursor] CLI完成 耗时=%.0fms returncode=%d output_len=%d", elapsed_ms, proc.returncode, len(output))
 
             if proc.returncode != 0:
                 error_msg = stderr.decode("utf-8", errors="replace")

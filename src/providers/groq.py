@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import time
@@ -47,18 +48,19 @@ class GroqProvider(BaseProvider):
         """递归放宽 JSON Schema 以兼容 Groq 模型的非严格输出：
         1. boolean → anyOf[boolean, string("true"/"false")]
         2. array items: {type: "string"} → items: anyOf[string, object]
+
+        使用 deepcopy 避免污染调用方的原始 schema。
         """
         if not isinstance(schema, dict):
             return schema
+        schema = copy.deepcopy(schema)
         if schema.get("type") == "boolean":
             return {"anyOf": [{"type": "boolean"}, {"type": "string", "enum": ["true", "false"]}]}
         if schema.get("type") == "array":
             items = schema.get("items", {})
             if isinstance(items, dict) and items.get("type") == "string":
-                schema = dict(schema)
                 schema["items"] = {"anyOf": [{"type": "string"}, {"type": "object"}]}
         if "properties" in schema and isinstance(schema["properties"], dict):
-            schema = dict(schema)
             schema["properties"] = {
                 k: GroqProvider._relax_schema(v) for k, v in schema["properties"].items()
             }

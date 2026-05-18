@@ -61,6 +61,10 @@ class AppSettings(BaseModel):
         default="",
         description="CORS 允许的 Origin，逗号分隔；空表示不启用跨域（仅同源）；* 表示允许任意来源",
     )
+    session_bind_ttl: int = Field(
+        default=3600,
+        description="会话模型绑定的 TTL（秒），过期后绑定自动失效",
+    )
 
 
 class AppConfig(BaseModel):

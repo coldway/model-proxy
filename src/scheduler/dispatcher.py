@@ -11,6 +11,8 @@ import time
 import uuid
 from typing import TYPE_CHECKING, Any
 
+import httpx
+
 from src.models.schemas import (
     ChatCompletionRequest,
     ChatCompletionResponse,
@@ -59,6 +61,7 @@ class Dispatcher:
         breaker_threshold: int = _DEFAULT_BREAKER_THRESHOLD,
         breaker_cooldown: int = _DEFAULT_BREAKER_COOLDOWN,
         payload_tracker: PayloadTracker | None = None,
+        session_bind_ttl: int = 3600,
     ):
         self._rate_limiter = rate_limiter
         self._providers: dict[str, "BaseProvider"] = {}
@@ -72,6 +75,7 @@ class Dispatcher:
         self._last_route_strategy: str = ""
         self._session_bindings: dict[str, tuple[str, str, float]] = {}
         self._route_cache_ttl = route_cache_ttl
+        self._session_bind_ttl = session_bind_ttl
 
     def _record_provider_failure(self, provider_name: str, model_name: str | None = None) -> None:
         self._breaker.record_failure(provider_name, model_name)
@@ -189,19 +193,32 @@ class Dispatcher:
 
     # region 会话模型绑定
 
-    _SESSION_BIND_TTL = 3600  # 绑定默认 1 小时过期
+    _SESSION_BIND_MAX = 10000  # 最大绑定条目数，防止内存无限增长
 
     def bind_session(self, session_id: str, provider: str, model: str) -> None:
         """绑定 session_id 到指定的 provider/model"""
+        if len(self._session_bindings) >= self._SESSION_BIND_MAX and session_id not in self._session_bindings:
+            self._evict_expired_sessions()
+            if len(self._session_bindings) >= self._SESSION_BIND_MAX:
+                oldest_sid = min(self._session_bindings, key=lambda k: self._session_bindings[k][2])
+                del self._session_bindings[oldest_sid]
         self._session_bindings[session_id] = (provider, model, time.time())
         logger.info("会话绑定: %s → %s:%s", session_id, provider, model)
+
+    def _evict_expired_sessions(self) -> int:
+        """清理过期的会话绑定，返回清理数量"""
+        now = time.time()
+        expired = [sid for sid, (_, _, ts) in self._session_bindings.items() if now - ts > self._session_bind_ttl]
+        for sid in expired:
+            del self._session_bindings[sid]
+        return len(expired)
 
     def get_session_binding(self, session_id: str) -> tuple[str, str] | None:
         """获取 session_id 绑定的 (provider, model)，过期返回 None"""
         if session_id not in self._session_bindings:
             return None
         provider, model, ts = self._session_bindings[session_id]
-        if time.time() - ts > self._SESSION_BIND_TTL:
+        if time.time() - ts > self._session_bind_ttl:
             del self._session_bindings[session_id]
             logger.info("会话绑定过期: %s", session_id)
             return None
@@ -213,7 +230,7 @@ class Dispatcher:
         result = {}
         expired = []
         for sid, (prov, model, ts) in self._session_bindings.items():
-            remaining = self._SESSION_BIND_TTL - (now - ts)
+            remaining = self._session_bind_ttl - (now - ts)
             if remaining <= 0:
                 expired.append(sid)
                 continue
@@ -514,10 +531,12 @@ class Dispatcher:
             return (health_penalty, stream_ok, cap_combo, cn, max(0, 30000 - latency))
 
         _CAP_LABELS = {6: "TC+MT+R", 5: "TC+MT", 4: "TC+R", 3: "MT+R", 2: "TC", 1: "MT|R", 0: "-"}
-        result = sorted(models, key=score, reverse=True)
+        scored = [(item, score(item)) for item in models]
+        scored.sort(key=lambda x: x[1], reverse=True)
+        result = [item for item, _ in scored]
         if len(result) > 1:
             ranking = ", ".join(
-                f"{m.name}({_CAP_LABELS.get(score((p, m))[2], '?')})" for p, m in result[:5]
+                f"{m.name}({_CAP_LABELS.get(s[2], '?')})" for (_, m), s in scored[:5]
             )
             logger.info(
                 "[排序] stream=%s cn=%s | 前5: %s",
@@ -939,9 +958,8 @@ class Dispatcher:
         except StopAsyncIteration:
             pass
         except Exception as e:
-            import httpx as _httpx
             elapsed_ms = (time.monotonic_ns() - stream_start) / 1_000_000
-            if isinstance(e, _httpx.HTTPStatusError) and not should_trigger_breaker(e.response.status_code):
+            if isinstance(e, httpx.HTTPStatusError) and not should_trigger_breaker(e.response.status_code):
                 if e.response.status_code == 413:
                     _pb = estimate_payload_bytes(request)
                     _kl = self._payload_tracker.get_limit(prov_name, model_cfg.name)
@@ -973,7 +991,6 @@ class Dispatcher:
         rpd, rpm, tpm, tpd = self._unpack_rate_limit(model_cfg)
 
         async def _guarded_stream():
-            import httpx
             chunks_collected: list[dict | str] = []
             try:
                 if first_chunk is not None:
@@ -1173,8 +1190,6 @@ class Dispatcher:
 
         is_routing=True 时为内部路由调用，不消耗正式配额。
         """
-        import httpx
-
         if not trace_id:
             trace_id = self.generate_trace_id()
 

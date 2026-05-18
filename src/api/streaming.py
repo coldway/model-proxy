@@ -73,7 +73,7 @@ async def _stream_generator(
             "choices": [{
                 "index": 0,
                 "delta": {},
-                "finish_reason": "stop",
+                "finish_reason": "error",
             }],
         }
         yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"

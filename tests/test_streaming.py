@@ -46,8 +46,8 @@ class TestStreamGenerator:
                     finish_reasons.append(fr)
                 if "error" in d:
                     error_frames.append(d["error"])
-        assert "stop" in finish_reasons
-        assert "error" not in finish_reasons
+        assert "error" in finish_reasons
+        assert "stop" not in finish_reasons
         assert len(error_frames) == 1
         assert error_frames[0]["type"] == "server_error"
         assert error_frames[0]["code"] is None

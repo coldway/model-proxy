@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hmac
 import logging
 import sys
 from contextlib import asynccontextmanager
@@ -33,29 +34,37 @@ from src.scheduler.rate_limiter import RateLimiter
 from src.api.log_buffer import install as install_log_buffer, preload_from_file as preload_logs
 
 _LOG_DIR = Path("logs")
-_LOG_DIR.mkdir(exist_ok=True)
 _LOG_FMT = "%(asctime)s [%(levelname)-7s] %(name)s: %(message)s"
 
-_file_handler = TimedRotatingFileHandler(
-    _LOG_DIR / "app.log",
-    when="midnight",
-    backupCount=30,
-    encoding="utf-8",
-)
-_file_handler.setFormatter(logging.Formatter(_LOG_FMT))
+_log_handlers: list[logging.Handler] = [logging.StreamHandler(sys.stdout)]
+try:
+    _LOG_DIR.mkdir(exist_ok=True)
+    _file_handler = TimedRotatingFileHandler(
+        _LOG_DIR / "app.log",
+        when="midnight",
+        backupCount=30,
+        encoding="utf-8",
+    )
+    _file_handler.setFormatter(logging.Formatter(_LOG_FMT))
+    _log_handlers.append(_file_handler)
+except OSError:
+    pass
 
 logging.basicConfig(
     level=logging.INFO,
     format=_LOG_FMT,
-    handlers=[logging.StreamHandler(sys.stdout), _file_handler],
+    handlers=_log_handlers,
 )
 logging.getLogger("watchfiles").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 install_log_buffer(max_records=2000)
-_preloaded = preload_logs(_LOG_DIR / "app.log", max_lines=500)
-if _preloaded:
-    logger.info("从日志文件预加载 %d 条历史记录到 UI 缓冲", _preloaded)
+try:
+    _preloaded = preload_logs(_LOG_DIR / "app.log", max_lines=500)
+    if _preloaded:
+        logger.info("从日志文件预加载 %d 条历史记录到 UI 缓冲", _preloaded)
+except OSError:
+    pass
 
 
 def create_app() -> FastAPI:
@@ -78,6 +87,7 @@ def create_app() -> FastAPI:
         route_cache_ttl=settings.route_cache_ttl,
         breaker_threshold=settings.breaker_threshold,
         breaker_cooldown=settings.breaker_cooldown,
+        session_bind_ttl=settings.session_bind_ttl,
     )
 
     # 注册各厂商 Provider（根据 API Key 是否存在决定是否注册）
@@ -161,10 +171,10 @@ def create_app() -> FastAPI:
                 return await call_next(request)
             auth = request.headers.get("Authorization", "")
             if path.startswith("/v1/"):
-                if api_token and auth != f"Bearer {api_token}":
+                if api_token and not hmac.compare_digest(auth, f"Bearer {api_token}"):
                     return JSONResponse(status_code=401, content={"detail": "未授权，请在 api_key 中提供有效令牌"})
                 return await call_next(request)
-            if admin_token and auth != f"Bearer {admin_token}":
+            if admin_token and not hmac.compare_digest(auth, f"Bearer {admin_token}"):
                 return JSONResponse(status_code=401, content={"detail": "未授权，请提供有效的管理令牌"})
             return await call_next(request)
         _auth_parts = []

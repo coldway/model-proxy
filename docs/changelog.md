@@ -26,6 +26,8 @@
 - **SessionManager 延迟写盘（MP-40）**：会话持久化从同步立即写盘改为 debounce timer（5 秒合并），减少高频对话时的磁盘 I/O
 - **429 黑名单延迟写盘（MP-41）**：`_save_blacklist` 从锁内直接写盘改为 dirty 标记 + debounce flush，消除 429 高频触发时的锁竞争
 - **历史记录启动单次扫描（MP-42）**：`_load_from_file` + `_cleanup_old_records` 合并为 `_load_and_cleanup`，启动时只读一次 JSONL 文件
+- **全项目函数内 import 清零（MP-43）**：`streaming.py`、`routes.py`、`google.py`、`huggingface.py`、`capability_tester.py` 中共 8 处函数内 import 提升到模块级，消除运行时重复 import 查找和代码可读性问题
+- **Import 排序规范（MP-44）**：`dispatcher.py` 中 `import re` 从第三方包区移入标准库区，符合 PEP 8 import 分组约定
 
 ### 安全修复（P0）
 
@@ -280,3 +282,10 @@
 | MP-40 | SessionManager 延迟写盘 | `session.py` |
 | MP-41 | 429 黑名单延迟写盘 | `rate_limiter.py` |
 | MP-42 | 历史记录启动单次扫描 | `history.py` |
+
+### 第五轮优化（2026-05-18 Import 规范化）
+
+| 编号 | 名称 | 涉及文件 |
+|------|------|---------|
+| MP-43 | 全项目函数内 import 清零 | `streaming.py`, `routes.py`, `google.py`, `huggingface.py`, `capability_tester.py` |
+| MP-44 | Import 排序 PEP 8 规范 | `dispatcher.py` |

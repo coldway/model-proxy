@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 import uuid
 from typing import AsyncIterator
@@ -211,7 +212,6 @@ class GoogleProvider(BaseProvider):
                             elif part.get("type") == "image_url":
                                 url = part.get("image_url", {}).get("url", "")
                                 if url and url.startswith("data:"):
-                                    import re
                                     m = re.match(r"data:([^;]+);base64,(.+)", url, re.DOTALL)
                                     if m:
                                         parts.append({"inlineData": {"mimeType": m.group(1), "data": m.group(2)}})

@@ -8,13 +8,12 @@ import contextvars
 import hashlib
 import json
 import logging
+import re
 import threading
 import time
 import uuid
 from collections import deque
 from typing import TYPE_CHECKING, Any
-
-import re
 
 import httpx
 

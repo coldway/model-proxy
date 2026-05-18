@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 import uuid
 from typing import AsyncIterator
@@ -11,6 +12,8 @@ from typing import AsyncIterator
 from starlette.responses import StreamingResponse
 
 from src.models.schemas import ProxyInfo
+
+logger = logging.getLogger(__name__)
 
 
 def create_stream_response(
@@ -36,8 +39,6 @@ async def _stream_generator(
     proxy_info: ProxyInfo | None = None,
 ) -> AsyncIterator[str]:
     """生成 SSE 格式的流式数据。支持 dict delta（保留 tool_calls 等字段）和纯 str 兼容。"""
-    import logging
-    logger = logging.getLogger(__name__)
     chat_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
     created = int(time.time())
 

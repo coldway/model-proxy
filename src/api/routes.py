@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import re
 import time
 import uuid
 
@@ -1167,15 +1169,13 @@ async def stream_chat_message(session_id: str, request: ChatCompletionRequest):
 
     async def _collect_and_stream():
         """流式输出的同时收集完整回复写入会话"""
-        import json as _json
-
         chat_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
         created = int(time.time())
         full_reply: list[str | dict] = []
         stream_broken = False
 
         meta = {"model": model_name, "provider": provider_name, "title": session.title, "session_id": session.id}
-        yield f"data: {_json.dumps({'meta': meta}, ensure_ascii=False)}\n\n"
+        yield f"data: {json.dumps({'meta': meta}, ensure_ascii=False)}\n\n"
 
         try:
             async for chunk in content_iter:
@@ -1186,7 +1186,7 @@ async def stream_chat_message(session_id: str, request: ChatCompletionRequest):
                     "model": model_name,
                     "choices": [{"index": 0, "delta": delta, "finish_reason": None}],
                 }
-                yield f"data: {_json.dumps(data, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
         except Exception as ex:
             stream_broken = True
             logger.error("[流式会话] trace=%s 流式传输异常: %s", trace_id, ex)
@@ -1227,7 +1227,7 @@ async def stream_chat_message(session_id: str, request: ChatCompletionRequest):
                 "total_messages": len(session.messages),
             },
         }
-        yield f"data: {_json.dumps(end_data, ensure_ascii=False)}\n\n"
+        yield f"data: {json.dumps(end_data, ensure_ascii=False)}\n\n"
         yield "data: [DONE]\n\n"
 
     from starlette.responses import StreamingResponse
@@ -1316,7 +1316,6 @@ async def get_log_history(date: str = "", tail: int = 500):
                     dates.append({"name": f.name, "label": suffix, "size_kb": size_kb})
         return {"dates": dates}
 
-    import re
     if not re.match(r"^\d{4}-\d{2}-\d{2}$", date) and date != "current":
         return JSONResponse(status_code=400, content={"detail": "日期格式无效，应为 YYYY-MM-DD 或 current"})
 

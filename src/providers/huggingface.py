@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 import uuid
@@ -131,8 +132,6 @@ class HuggingFaceProvider(BaseProvider):
         self, model: str, request: ChatCompletionRequest
     ):
         """真流式输出（使用 HuggingFace OpenAI 兼容 chat 接口的 SSE）"""
-        import json
-
         url = f"{HF_CHAT_BASE}/chat/completions"
         headers = {
             "Authorization": f"Bearer {self._api_key}",

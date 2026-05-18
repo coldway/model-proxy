@@ -9,10 +9,14 @@
 
 from __future__ import annotations
 
+import asyncio
+import base64
 import json
 import logging
+import struct
 import time
 import uuid
+import zlib
 from pathlib import Path
 from typing import Any
 
@@ -276,10 +280,6 @@ class CapabilityTester:
         if cls._TEST_IMAGE_B64 is not None:
             return cls._TEST_IMAGE_B64
 
-        import base64
-        import struct
-        import zlib
-
         width, height = 20, 20
         raw_data = b""
         for _ in range(height):
@@ -453,8 +453,6 @@ class CapabilityTester:
                 logger.debug("跳过已测试模型 %s/%s", provider_name, model_id)
                 return {**cached, "cached": True}
 
-        import asyncio
-
         result: dict[str, Any] = {
             "provider": provider_name,
             "model": model_id,
@@ -553,8 +551,6 @@ class CapabilityTester:
         force: bool = False,
     ) -> list[dict[str, Any]]:
         """批量测试一个厂商的所有模型"""
-        import asyncio
-
         results = []
         for mid in model_ids:
             result = await self.test_model_via_provider(

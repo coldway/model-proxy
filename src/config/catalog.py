@@ -34,7 +34,7 @@ class CatalogManager:
                 with open(self._path, "r", encoding="utf-8") as f:
                     return yaml.safe_load(f) or {"providers": {}}
             except Exception as e:
-                logger.error(f"加载模型目录失败: {e}")
+                logger.error("加载模型目录失败: %s", e)
         return {"providers": {}}
 
     def save(self) -> None:

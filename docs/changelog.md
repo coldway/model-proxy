@@ -17,10 +17,22 @@
 - **Google Provider 流式错误类型修正（M7）**：`stream_chat_completion` 非 200 时抛出 `httpx.HTTPStatusError`（取代通用 `Exception`），上游 Dispatcher 可正确区分 429/413/5xx 并做差异化处理
 - **X-Trace-Id 响应头（M9）**：新增全局中间件，请求时可传入 `X-Trace-Id`（复用），否则自动生成；所有响应统一携带此头部，便于日志关联和问题排查
 - **异常映射提炼（M12）**：新增 `_map_dispatch_error()` 辅助函数，将路由层 6 处重复的 `except → HTTPException` 映射集中管理（路由端点仍保持兼容，未直接替换以保留 trace_id 日志粒度）
+- **异常类独立模块（MP-34）**：`DispatchError` 及 5 个子类从 `dispatcher.py` 抽取到 `src/scheduler/exceptions.py`，消除 `routes.py` 中 3 处函数内 import，降低模块耦合
+- **日志格式化规范（MP-35）**：全项目 18 处 `logger.xxx(f"...")` f-string 日志改为 `%s` 惰性格式化，避免日志级别未开启时的无效字符串拼接开销
+- **LLM 路由跳过阈值（MP-36）**：`_can_skip_routing` 阈值从 ≤2 提升至 ≤3，候选模型少时直接规则排序，节省一次 LLM 路由调用
+- **路由缓存周期清理（MP-37）**：新增 `purge_expired_cache()` 方法 + lifespan 周期任务，按 TTL 间隔主动清理过期缓存条目，防止长期运行后内存缓慢增长
+
+### 安全修复（P0）
+
+- **`/api/config` Token 泄漏（MP-29）**：`get_config` 使用 `model_dump(exclude=_SECRET_KEYS)` 并回填掩码值，防止新增敏感字段被意外暴露
+- **`/api/logs/history` 路径穿越（MP-30）**：新增 `target.resolve().parent.samefile(log_dir)` 校验，阻止通过 `date=../../etc` 目录穿越读取任意文件
 
 ### 修复
 
 - **部署文档与代码矛盾修正（H7）**：`docs/deployment.md` 中 `gunicorn --workers 4` 建议改为 `--workers 1`，并加大号警告说明单 Worker 设计约束，避免部署时多进程导致状态不一致
+- **会话绑定模型故障不 fallback（MP-31）**：`dispatch_stream` 中会话绑定的模型失败时自动 `clear_session_binding`，确保后续请求正确降级而非反复命中坏模型
+- **路由策略并发竞态（MP-32）**：`_last_route_strategy` 从实例属性改为 `contextvars.ContextVar`，消除异步并发请求间的状态串扰
+- **日志预加载 OOM 风险（MP-33）**：`preload_from_file` 使用新增的 `_tail_lines()` 从文件末尾高效读取最后 N 行，避免大日志文件全量加载导致内存溢出
 
 ### 新增
 
@@ -185,3 +197,71 @@
   - Uvicorn 热重载（`reload=True`）
   - 52 项单元测试覆盖核心模块（rate_limiter / config / dispatcher / api / blacklist / streaming / utils / admin_auth）
   - 完整的项目文档（`docs/` 目录下 8 个模块文档）
+
+---
+
+## 优化 Backlog 总览
+
+> 扫描日期：2026-05-17（第一轮）/ 2026-05-18（第二、三轮）| 全部已完成 ✅
+
+### P0（阻塞级）
+
+| 编号 | 名称 | 涉及文件 |
+|------|------|---------|
+| MP-01 | 流式 SSE 保留完整 delta dict | `openai_compat.py`, `github.py`, `groq.py`, `google.py`, `huggingface.py`, `base.py`, `streaming.py`, `dispatcher.py` |
+| MP-02 | /v1/* API Token 认证 | `main.py`, `schemas.py` |
+
+### P1（重要）
+
+| 编号 | 名称 | 涉及文件 |
+|------|------|---------|
+| MP-03 | 流式配额记账时点修正 | `dispatcher.py` |
+| MP-04 | per-model 首包超时 | `dispatcher.py` |
+| MP-05 | RateLimiter 原子操作 | `rate_limiter.py`, `dispatcher.py` |
+| MP-06 | /health + /ready 探针 | `routes.py`, `main.py` |
+| MP-07 | RequestHistory 容量可配置 | `schemas.py`, `history.py`, `routes.py` |
+| MP-08 | 流式异常不存残缺回复 | `routes.py` |
+| MP-09 | SSE 错误帧 OpenAI 规范化 | `streaming.py` |
+
+### P2（改善）— 第一轮
+
+| 编号 | 名称 | 涉及文件 |
+|------|------|---------|
+| MP-10 | 路由缓存哈希含多模态/tools | `dispatcher.py` |
+| MP-11 | CORS 中间件可配置 | `main.py`, `schemas.py` |
+| MP-12 | catalog/capabilities 合并一致 | `capability_tester.py`, `catalog.py`, `dispatcher.py` |
+| MP-13 | routes/dispatcher region 分段 | `routes.py`, `dispatcher.py` |
+| MP-14 | 管理 UI 注释分区 | `ui.html` |
+| MP-15 | SessionManager 并发锁 | `session.py` |
+| MP-16 | DEBUG 请求体脱敏 | `dispatcher.py` |
+| MP-17 | 熔断粒度到模型级 | `circuit_breaker.py`, `dispatcher.py` |
+| MP-18 | Payload 估算安全余量 | `payload_tracker.py` |
+
+### 第二轮优化（2026-05-18）
+
+| 编号 | 名称 | 涉及文件 |
+|------|------|---------|
+| MP-19 | CircuitBreaker 并发锁 | `circuit_breaker.py` |
+| MP-20 | CatalogManager 写保护锁 | `catalog.py` |
+| MP-21 | CancelledError 不计入熔断 | `dispatcher.py` |
+| MP-22 | 部署文档单 Worker 修正 | `docs/deployment.md` |
+| MP-23 | _detect_chinese 正则优化 | `dispatcher.py` |
+| MP-24 | 周期刷盘 asyncio.to_thread | `main.py` |
+| MP-25 | 会话绑定失败自动清除 | `dispatcher.py` |
+| MP-26 | Google 流式错误 HTTPStatusError | `google.py` |
+| MP-27 | X-Trace-Id 响应头中间件 | `main.py` |
+| MP-28 | 异常映射 _map_dispatch_error | `routes.py` |
+
+### 第三轮优化（2026-05-18 PR #4 Review）
+
+| 编号 | 名称 | 涉及文件 |
+|------|------|---------|
+| MP-29 | /api/config Token 泄漏修复 | `routes.py` |
+| MP-30 | /api/logs/history 路径穿越修复 | `routes.py` |
+| MP-31 | 会话绑定模型故障不 fallback | `dispatcher.py` |
+| MP-32 | 路由策略并发竞态 contextvars | `dispatcher.py` |
+| MP-33 | 日志预加载 OOM 风险 _tail_lines | `log_buffer.py` |
+| MP-34 | 异常类独立模块 | `exceptions.py`, `dispatcher.py`, `routes.py` |
+| MP-35 | 日志格式化规范 f-string → %s | 全项目 10 文件 18 处 |
+| MP-36 | LLM 路由跳过阈值 ≤3 | `dispatcher.py` |
+| MP-37 | 路由缓存周期清理 purge_expired | `dispatcher.py`, `main.py` |

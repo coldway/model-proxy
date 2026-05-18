@@ -52,7 +52,7 @@ class ConfigManager:
                 if settings_data:
                     self._settings = AppSettings(**settings_data)
             except Exception as e:
-                logger.error(f"加载配置文件失败: {e}，使用默认设置")
+                logger.error("加载配置文件失败: %s，使用默认设置", e)
 
     def save(self) -> None:
         """仅保存 API Key 和 settings 到 config.yaml"""
@@ -68,7 +68,7 @@ class ConfigManager:
         }
         with open(self._path, "w", encoding="utf-8") as f:
             yaml.dump(data, f, allow_unicode=True, default_flow_style=False)
-        logger.info(f"配置已保存至 {self._path}")
+        logger.info("配置已保存至 %s", self._path)
 
     # --- API Key 管理 ---
 

@@ -28,6 +28,13 @@ from src.models.schemas import (
 )
 from src.config.catalog import CatalogManager
 from src.config.capability_tester import merge_catalog_capabilities
+from src.scheduler.exceptions import (
+    AllModelsUnavailable,
+    ModelNotFound,
+    PayloadTooLarge,
+    ProviderCallError,
+    RateLimitExceeded,
+)
 from src.scheduler.history import RequestHistory
 from src.scheduler.session import SessionManager
 
@@ -101,8 +108,6 @@ def init_routes(config_manager, dispatcher, rate_limiter, history=None, catalog=
 @router.post("/v1/chat/completions")
 async def chat_completions(request: ChatCompletionRequest):
     """聊天补全接口（支持流式和非流式）"""
-    from src.scheduler.dispatcher import AllModelsUnavailable, ModelNotFound, PayloadTooLarge, ProviderCallError, RateLimitExceeded
-
     trace_id = uuid.uuid4().hex[:12]
     sid_tag = f" session={request.session_id}" if request.session_id else ""
     logger.info(
@@ -174,7 +179,6 @@ async def chat_completions(request: ChatCompletionRequest):
 async def _handle_stream(request: ChatCompletionRequest, enabled_models, trace_id: str = ""):
     """处理流式请求，返回 SSE StreamingResponse"""
     from src.api.streaming import create_stream_response
-    from src.scheduler.dispatcher import AllModelsUnavailable, ModelNotFound, ProviderCallError, RateLimitExceeded
 
     sid_tag = f" session={request.session_id}" if request.session_id else ""
     start_time = time.time()
@@ -233,8 +237,6 @@ def _record_failure(start_time: float, error: str, provider: str = "unknown", mo
 
 def _map_dispatch_error(e: Exception, trace_id: str = "") -> HTTPException:
     """将 Dispatcher 异常统一映射为 HTTPException（去重重复 except 块）"""
-    from src.scheduler.dispatcher import AllModelsUnavailable, ModelNotFound, PayloadTooLarge, ProviderCallError, RateLimitExceeded
-
     if isinstance(e, PayloadTooLarge):
         logger.warning("[API] trace=%s payload 过大: %s", trace_id, e)
         return HTTPException(status_code=413, detail=str(e))
@@ -395,10 +397,11 @@ async def get_config():
             "priority": prov.priority,
             "models": [m.model_dump() for m in prov.models],
         }
-    safe_settings = _deps.config_manager.settings.model_dump()
-    for secret_key in ("admin_token", "api_token"):
-        if safe_settings.get(secret_key):
-            safe_settings[secret_key] = "***"
+    _SECRET_KEYS = frozenset({"admin_token", "api_token"})
+    safe_settings = _deps.config_manager.settings.model_dump(exclude=_SECRET_KEYS)
+    for key in _SECRET_KEYS:
+        val = getattr(_deps.config_manager.settings, key, "")
+        safe_settings[key] = "***" if val else ""
     return {"providers": result, "settings": safe_settings}
 
 
@@ -418,14 +421,14 @@ async def update_api_key(body: ApiKeyUpdateRequest):
         try:
             new_provider = _deps.provider_factories[provider](api_key.strip())
             _deps.dispatcher.register_provider(provider, new_provider)
-            logger.info(f"动态注册厂商 {provider}")
+            logger.info("动态注册厂商 %s", provider)
             return {"status": "ok", "message": f"{provider} API Key 已更新，厂商已自动加载"}
         except Exception as e:
-            logger.error(f"动态注册厂商 {provider} 失败: {e}", exc_info=True)
+            logger.error("动态注册厂商 %s 失败: %s", provider, e, exc_info=True)
             return {"status": "ok", "message": f"{provider} API Key 已保存，但厂商加载失败，请检查 Key 是否正确"}
     elif not api_key.strip():
         _deps.dispatcher.unregister_provider(provider)
-        logger.info(f"已注销厂商 {provider}（API Key 已清空）")
+        logger.info("已注销厂商 %s（API Key 已清空）", provider)
         return {"status": "ok", "message": f"{provider} API Key 已清空，厂商已卸载"}
 
     return {"status": "ok", "message": f"{provider} API Key 已更新"}
@@ -485,16 +488,16 @@ async def toggle_provider(provider: str, enabled: bool):
             if api_key.strip():
                 try:
                     _deps.dispatcher.register_provider(provider, _deps.provider_factories[provider](api_key))
-                    logger.info(f"动态注册厂商 {provider}")
+                    logger.info("动态注册厂商 %s", provider)
                     return {"status": "ok", "message": f"{provider} 已启用并加载"}
                 except Exception as e:
-                    logger.error(f"动态注册 {provider} 失败: {e}")
+                    logger.error("动态注册 %s 失败: %s", provider, e)
                     return {"status": "ok", "message": f"{provider} 已启用，但加载失败: {e}"}
             else:
                 return {"status": "ok", "message": f"{provider} 已启用，但 API Key 未配置，请先填写 API Key"}
     elif not enabled and _deps.dispatcher.has_provider(provider):
         _deps.dispatcher.unregister_provider(provider)
-        logger.info(f"已注销厂商 {provider}")
+        logger.info("已注销厂商 %s", provider)
         return {"status": "ok", "message": f"{provider} 已禁用并卸载"}
 
     return {"status": "ok", "message": f"{provider} 已{'启用' if enabled else '禁用'}"}
@@ -608,7 +611,7 @@ async def fetch_provider_models(provider_name: str, force: bool = False):
     try:
         models = await provider.list_models()
     except Exception as e:
-        logger.error(f"拉取 {provider_name} 模型列表失败: {e}", exc_info=True)
+        logger.error("拉取 %s 模型列表失败: %s", provider_name, e, exc_info=True)
         raise HTTPException(status_code=502, detail=f"拉取 {provider_name} 模型列表失败，请检查配置")
 
     result = {"provider": provider_name, "available_models": models}
@@ -1008,8 +1011,6 @@ async def rename_chat_session(session_id: str, title: str):
 @router.post("/api/chat/sessions/{session_id}/send")
 async def send_chat_message(session_id: str, request: ChatCompletionRequest):
     """向指定会话发送消息并获取回复（自动管理上下文）"""
-    from src.scheduler.dispatcher import AllModelsUnavailable, ModelNotFound, ProviderCallError, RateLimitExceeded
-
     trace_id = uuid.uuid4().hex[:12]
 
     session = _deps.session_mgr.get(session_id)
@@ -1108,8 +1109,6 @@ async def send_chat_message(session_id: str, request: ChatCompletionRequest):
 @router.post("/api/chat/sessions/{session_id}/stream")
 async def stream_chat_message(session_id: str, request: ChatCompletionRequest):
     """向指定会话发送消息（流式 SSE 响应 + 自动上下文管理）"""
-    from src.scheduler.dispatcher import AllModelsUnavailable, ModelNotFound, ProviderCallError, RateLimitExceeded
-
     trace_id = uuid.uuid4().hex[:12]
 
     session = _deps.session_mgr.get(session_id)
@@ -1325,6 +1324,9 @@ async def get_log_history(date: str = "", tail: int = 500):
         target = log_dir / "app.log"
     else:
         target = log_dir / f"app.log.{date}"
+
+    if not target.resolve().parent.samefile(log_dir.resolve()):
+        return JSONResponse(status_code=400, content={"detail": "非法路径"})
 
     if not target.is_file():
         return JSONResponse(status_code=404, content={"detail": f"日志文件不存在: {target.name}"})

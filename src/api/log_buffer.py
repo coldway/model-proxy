@@ -119,6 +119,25 @@ def install(max_records: int = 2000) -> BufferedLogHandler:
     return handler
 
 
+def _tail_lines(filepath, n: int, chunk_size: int = 8192) -> list[str]:
+    """从文件末尾高效读取最后 n 行，避免全量加载。"""
+    with open(filepath, "rb") as f:
+        f.seek(0, 2)
+        size = f.tell()
+        if size == 0:
+            return []
+        buf = b""
+        pos = size
+        lines_found = 0
+        while pos > 0 and lines_found <= n:
+            read_size = min(chunk_size, pos)
+            pos -= read_size
+            f.seek(pos)
+            buf = f.read(read_size) + buf
+            lines_found = buf.count(b"\n")
+        return buf.decode("utf-8", errors="replace").splitlines()[-n:]
+
+
 def preload_from_file(path: str | Path, max_lines: int = 2000) -> int:
     """从日志文件及其轮转备份预加载最近的日志条目到缓冲区，用于重启后恢复 UI 日志。
 
@@ -147,10 +166,10 @@ def preload_from_file(path: str | Path, max_lines: int = 2000) -> int:
     for rf in files_newest_first:
         if len(recent) >= max_lines:
             break
+        remaining = max_lines - len(recent)
         try:
-            lines = rf.read_text(encoding="utf-8", errors="replace").splitlines()
-            remaining = max_lines - len(recent)
-            recent = lines[-remaining:] + recent
+            tail_lines = _tail_lines(rf, remaining)
+            recent = tail_lines + recent
         except Exception:
             continue
     if not recent:

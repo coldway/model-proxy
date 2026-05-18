@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import hashlib
 import json
 import logging
@@ -24,6 +25,14 @@ from src.models.schemas import (
 )
 from src.config.capability_tester import merge_catalog_capabilities
 from src.scheduler.circuit_breaker import CircuitBreaker, should_trigger_breaker
+from src.scheduler.exceptions import (
+    AllModelsUnavailable,
+    DispatchError,
+    ModelNotFound,
+    PayloadTooLarge,
+    ProviderCallError,
+    RateLimitExceeded,
+)
 from src.scheduler.payload_tracker import PayloadTracker, estimate_payload_bytes
 from src.scheduler.rate_limiter import RateLimiter
 
@@ -41,6 +50,10 @@ ROUTE_LOG_MAX = 50
 _DEFAULT_ROUTE_CACHE_TTL = 600
 _DEFAULT_BREAKER_THRESHOLD = 3
 _DEFAULT_BREAKER_COOLDOWN = 300
+
+_route_strategy_var: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "_route_strategy_var", default="",
+)
 
 
 class Dispatcher:
@@ -75,7 +88,6 @@ class Dispatcher:
         self._breaker = CircuitBreaker(threshold=breaker_threshold, cooldown=breaker_cooldown)
         self._route_cache: dict[str, tuple[str, float]] = {}
         self._route_log: list[dict[str, Any]] = []
-        self._last_route_strategy: str = ""
         self._session_bindings: dict[str, tuple[str, str, float]] = {}
         self._session_lock = threading.Lock()
         self._route_cache_ttl = route_cache_ttl
@@ -165,7 +177,7 @@ class Dispatcher:
                     result = await self._call_provider(
                         prov, model, request, trace_id=trace_id, rate_limits=rlim,
                     )
-                    self._last_route_strategy = "会话绑定"
+                    _route_strategy_var.set("会话绑定")
                     return prov, model, result
                 except Exception as e:
                     logger.warning(
@@ -175,7 +187,7 @@ class Dispatcher:
                     self.clear_session_binding(request.session_id)
 
         if request.model != "auto":
-            self._last_route_strategy = "指定模型"
+            _route_strategy_var.set("指定模型")
             result = await self._dispatch_specific(request, enabled_models, trace_id)
             if request.session_id:
                 self.bind_session(request.session_id, result[0], result[1])
@@ -188,7 +200,7 @@ class Dispatcher:
 
     @property
     def last_route_strategy(self) -> str:
-        return self._last_route_strategy
+        return _route_strategy_var.get("")
 
     @property
     def payload_tracker(self) -> PayloadTracker:
@@ -321,7 +333,7 @@ class Dispatcher:
                 result = await self._call_provider(
                     prov_name, model_cfg.name, request, trace_id=trace_id, rate_limits=rlim,
                 )
-                self._last_route_strategy = "规则快速路径"
+                _route_strategy_var.set("规则快速路径")
                 logger.info("规则快速路径: %s:%s", prov_name, model_cfg.name)
                 self._log_route_decision(
                     strategy="规则快速路径",
@@ -349,7 +361,7 @@ class Dispatcher:
                                 prov_name, model_cfg.name, request, trace_id=trace_id, rate_limits=rlim,
                             )
                             strategy_name = "LLM 智能路由" + ("（缓存）" if was_cached else "")
-                            self._last_route_strategy = strategy_name
+                            _route_strategy_var.set(strategy_name)
                             logger.info("LLM 路由选择 %s:%s 成功", prov_name, model_cfg.name)
                             self._log_route_decision(
                                 strategy=strategy_name,
@@ -372,7 +384,7 @@ class Dispatcher:
                 result = await self._call_provider(
                     provider_name, model_cfg.name, request, trace_id=trace_id, rate_limits=rlim,
                 )
-                self._last_route_strategy = "规则遍历回退"
+                _route_strategy_var.set("规则遍历回退")
                 self._log_route_decision(
                     strategy="规则遍历回退",
                     selected=f"{provider_name}:{model_cfg.name}",
@@ -412,11 +424,11 @@ class Dispatcher:
         """判断是否可以跳过 LLM 路由，直接用规则排序的最优模型
 
         以下场景直接跳过（节省一次 LLM 调用）：
-        - 只有 1-2 个可用模型
+        - 只有 1-3 个可用模型（候选太少，LLM 路由收益不抵开销）
         - 最优模型在所有关键维度上都领先
         - 没有 capability_cache（无法构建有效的路由提示词）
         """
-        if len(sorted_models) <= 2:
+        if len(sorted_models) <= 3:
             return True
         if not self._capability_cache:
             return True
@@ -654,6 +666,16 @@ class Dispatcher:
             del self._route_cache[oldest_key]
         self._route_cache[feature_hash] = (model_name, time.time())
 
+    def purge_expired_cache(self) -> int:
+        """清理所有 TTL 过期的路由缓存条目，返回清理数量"""
+        now = time.time()
+        expired = [k for k, (_, ts) in self._route_cache.items() if now - ts >= self._route_cache_ttl]
+        for k in expired:
+            del self._route_cache[k]
+        if expired:
+            logger.debug("路由缓存过期清理: 删除 %d 条，剩余 %d 条", len(expired), len(self._route_cache))
+        return len(expired)
+
     async def _route_with_llm(
         self,
         request: ChatCompletionRequest,
@@ -845,10 +867,11 @@ class Dispatcher:
                 if candidates:
                     try:
                         result = await self._try_stream(candidates[0][0], candidates[0][1], request, trace_id=trace_id)
-                        self._last_route_strategy = "会话绑定"
+                        _route_strategy_var.set("会话绑定")
                         return result
                     except ProviderCallError as e:
-                        logger.warning("流式会话绑定 %s:%s 失败: %s，降级到正常路由", prov, model, e)
+                        logger.warning("流式会话绑定 %s:%s 失败: %s，清除绑定并降级到正常路由", prov, model, e)
+                        self.clear_session_binding(request.session_id)
 
         if request.model != "auto":
             candidates = [(p, m) for p, m in enabled_models if m.name == request.model]
@@ -1378,25 +1401,13 @@ class Dispatcher:
     # endregion
 
 
-class DispatchError(Exception):
-    pass
-
-
-class RateLimitExceeded(DispatchError):
-    pass
-
-
-class ModelNotFound(DispatchError):
-    pass
-
-
-class AllModelsUnavailable(DispatchError):
-    pass
-
-
-class ProviderCallError(DispatchError):
-    pass
-
-
-class PayloadTooLarge(DispatchError):
-    pass
+# 向后兼容：异常类已移至 src/scheduler/exceptions.py，此处通过 import 重导出
+__all__ = [
+    "Dispatcher",
+    "DispatchError",
+    "RateLimitExceeded",
+    "ModelNotFound",
+    "AllModelsUnavailable",
+    "ProviderCallError",
+    "PayloadTooLarge",
+]

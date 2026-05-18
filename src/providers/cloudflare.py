@@ -90,7 +90,7 @@ class CloudflareProvider(BaseProvider):
             models = data.get("result", [])
             return [m.get("name", m.get("id", "")) for m in models if "chat" in m.get("task", {}).get("name", "").lower() or "text-generation" in m.get("task", {}).get("name", "").lower()]
         except Exception as e:
-            logger.error(f"获取 Cloudflare 模型列表失败: {e}")
+            logger.error("获取 Cloudflare 模型列表失败: %s", e)
             return [
                 "@cf/meta/llama-3.1-8b-instruct",
                 "@cf/mistral/mistral-7b-instruct-v0.2-lora",

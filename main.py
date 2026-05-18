@@ -109,7 +109,7 @@ def create_app() -> FastAPI:
         api_key = config_manager.get_api_key(name)
         if api_key:
             dispatcher.register_provider(name, factory(api_key))
-            logger.info(f"已注册 {name} 厂商")
+            logger.info("已注册 %s 厂商", name)
 
     if catalog.is_provider_enabled("cursor"):
         dispatcher.register_provider("cursor", CursorProvider())
@@ -140,7 +140,16 @@ def create_app() -> FastAPI:
                 except Exception as exc:
                     logger.warning("周期性刷盘异常: %s", exc)
 
+        async def _periodic_cache_purge():
+            while True:
+                await asyncio.sleep(dispatcher._route_cache_ttl)
+                try:
+                    dispatcher.purge_expired_cache()
+                except Exception as exc:
+                    logger.warning("路由缓存清理异常: %s", exc)
+
         flush_task = asyncio.create_task(_periodic_flush())
+        cache_purge_task = asyncio.create_task(_periodic_cache_purge())
 
         if capability_cache:
             all_caps = capability_cache.get_all()
@@ -149,8 +158,13 @@ def create_app() -> FastAPI:
 
         yield
         flush_task.cancel()
+        cache_purge_task.cancel()
         try:
             await flush_task
+        except asyncio.CancelledError:
+            pass
+        try:
+            await cache_purge_task
         except asyncio.CancelledError:
             pass
         logger.info("正在优雅关闭…")
@@ -244,8 +258,8 @@ def create_app() -> FastAPI:
     async def root():
         return '<meta http-equiv="refresh" content="0;url=/ui">'
 
-    logger.info(f"Model Proxy 启动于 http://{settings.host}:{settings.port}")
-    logger.info(f"UI 面板: http://{settings.host}:{settings.port}/ui")
+    logger.info("Model Proxy 启动于 http://%s:%s", settings.host, settings.port)
+    logger.info("UI 面板: http://%s:%s/ui", settings.host, settings.port)
 
     return app
 

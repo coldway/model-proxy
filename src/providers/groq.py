@@ -240,7 +240,7 @@ class GroqProvider(BaseProvider):
             data = resp.json()
             return [m["id"] for m in data.get("data", [])]
         except Exception as e:
-            logger.error(f"获取 Groq 模型列表失败: {e}")
+            logger.error("获取 Groq 模型列表失败: %s", e)
             return []
 
     async def health_check(self) -> bool:

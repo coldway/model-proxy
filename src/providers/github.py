@@ -129,7 +129,7 @@ class GitHubProvider(BaseProvider):
             data = resp.json()
             return [m["id"] for m in data.get("data", [])]
         except Exception as e:
-            logger.error(f"获取 GitHub Models 列表失败: {e}")
+            logger.error("获取 GitHub Models 列表失败: %s", e)
             return []
 
     async def health_check(self) -> bool:

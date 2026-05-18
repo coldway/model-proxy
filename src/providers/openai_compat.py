@@ -132,7 +132,7 @@ class OpenAICompatibleProvider(BaseProvider):
             data = resp.json()
             return [m["id"] for m in data.get("data", [])]
         except Exception as e:
-            logger.error(f"获取 {self._provider_name} 模型列表失败: {e}")
+            logger.error("获取 %s 模型列表失败: %s", self._provider_name, e)
             return []
 
     async def health_check(self) -> bool:

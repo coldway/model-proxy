@@ -122,7 +122,7 @@ class GoogleProvider(BaseProvider):
         ) as resp:
             if resp.status_code != 200:
                 await resp.aread()
-                logger.error(f"Google 流式请求失败 ({resp.status_code}): {resp.text[:200]}")
+                logger.error("Google 流式请求失败 (%s): %s", resp.status_code, resp.text[:200])
                 raise httpx.HTTPStatusError(
                     f"Google API {resp.status_code}",
                     request=resp.request,
@@ -156,7 +156,7 @@ class GoogleProvider(BaseProvider):
                 if "generateContent" in m.get("supportedGenerationMethods", [])
             ]
         except Exception as e:
-            logger.error(f"获取 Google 模型列表失败: {e}")
+            logger.error("获取 Google 模型列表失败: %s", e)
             return []
 
     async def health_check(self) -> bool:

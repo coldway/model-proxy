@@ -19,12 +19,9 @@
     <key>RunAtLoad</key>
     <true/>
 
-    <!-- 崩溃自动拉起 -->
+    <!-- 无论退出码都自动拉起（防止优雅关闭后不重启） -->
     <key>KeepAlive</key>
-    <dict>
-        <key>SuccessfulExit</key>
-        <false/>
-    </dict>
+    <true/>
 
     <!-- 崩溃后等待 5 秒再拉起，确保端口完全释放 -->
     <key>ThrottleInterval</key>

@@ -20,46 +20,74 @@ log "轮询间隔: ${POLL_INTERVAL}s"
 LAST_COMMIT=$(git -C "$PROJECT_DIR" rev-parse HEAD 2>/dev/null)
 log "初始 commit: ${LAST_COMMIT:0:12}"
 
+HEALTH_URL="http://127.0.0.1:8000/health"
+HEALTH_CHECK_INTERVAL=30
+HEALTH_FAIL_COUNT=0
+HEALTH_FAIL_THRESHOLD=2
+POLL_COUNT=0
+CHECKS_PER_HEALTH=$((HEALTH_CHECK_INTERVAL / POLL_INTERVAL))
+
+restart_service() {
+    local reason="$1"
+    log "正在重启 model-proxy（原因: $reason）..."
+
+    STALE_PIDS=$(lsof -ti :8000 2>/dev/null)
+    if [ -n "$STALE_PIDS" ]; then
+        log "清理占用端口 8000 的进程: $STALE_PIDS"
+        echo "$STALE_PIDS" | xargs kill -9 2>/dev/null
+        sleep 2
+    fi
+
+    launchctl kickstart -k "gui/$(id -u)/$LABEL" 2>> "$LOG_FILE"
+
+    if [ $? -eq 0 ]; then
+        for i in $(seq 1 10); do
+            sleep 1
+            if curl -s --connect-timeout 2 --max-time 3 "$HEALTH_URL" >/dev/null 2>&1; then
+                log "重启成功（${i}s 后就绪）"
+                HEALTH_FAIL_COUNT=0
+                return 0
+            fi
+            if [ $i -eq 10 ]; then
+                log "重启超时（10s 未响应 /health）"
+            fi
+        done
+    else
+        log "重启失败 (exit=$?)"
+    fi
+    return 1
+}
+
 while true; do
     sleep "$POLL_INTERVAL"
+    POLL_COUNT=$((POLL_COUNT + 1))
 
+    # --- Git commit 检测 ---
     CURRENT_COMMIT=$(git -C "$PROJECT_DIR" rev-parse HEAD 2>/dev/null)
-
-    if [ -z "$CURRENT_COMMIT" ]; then
+    if [ -n "$CURRENT_COMMIT" ] && [ "$CURRENT_COMMIT" != "$LAST_COMMIT" ]; then
+        COMMIT_MSG=$(git -C "$PROJECT_DIR" log -1 --format='%s' 2>/dev/null)
+        log "检测到新 commit: ${CURRENT_COMMIT:0:12} - $COMMIT_MSG"
+        restart_service "新 commit"
+        LAST_COMMIT="$CURRENT_COMMIT"
+        POLL_COUNT=0
         continue
     fi
 
-    if [ "$CURRENT_COMMIT" != "$LAST_COMMIT" ]; then
-        COMMIT_MSG=$(git -C "$PROJECT_DIR" log -1 --format='%s' 2>/dev/null)
-        log "检测到新 commit: ${CURRENT_COMMIT:0:12} - $COMMIT_MSG"
-        log "正在重启 model-proxy..."
-
-        # 先清理可能残留的孤儿进程（占用端口 8000）
-        STALE_PIDS=$(lsof -ti :8000 2>/dev/null)
-        if [ -n "$STALE_PIDS" ]; then
-            log "清理占用端口 8000 的进程: $STALE_PIDS"
-            echo "$STALE_PIDS" | xargs kill -9 2>/dev/null
-            sleep 2
-        fi
-
-        launchctl kickstart -k "gui/$(id -u)/$LABEL" 2>> "$LOG_FILE"
-
-        if [ $? -eq 0 ]; then
-            # 等待服务就绪
-            for i in $(seq 1 10); do
-                sleep 1
-                if curl -s --connect-timeout 2 --max-time 3 http://127.0.0.1:8000/health >/dev/null 2>&1; then
-                    log "重启成功（${i}s 后就绪）"
-                    break
-                fi
-                if [ $i -eq 10 ]; then
-                    log "重启超时（10s 未响应 /health）"
-                fi
-            done
+    # --- 健康检查（每 HEALTH_CHECK_INTERVAL 秒一次） ---
+    if [ $POLL_COUNT -ge $CHECKS_PER_HEALTH ]; then
+        POLL_COUNT=0
+        if ! curl -s --connect-timeout 3 --max-time 5 "$HEALTH_URL" >/dev/null 2>&1; then
+            HEALTH_FAIL_COUNT=$((HEALTH_FAIL_COUNT + 1))
+            log "健康检查失败 ($HEALTH_FAIL_COUNT/$HEALTH_FAIL_THRESHOLD)"
+            if [ $HEALTH_FAIL_COUNT -ge $HEALTH_FAIL_THRESHOLD ]; then
+                restart_service "健康检查连续失败 ${HEALTH_FAIL_COUNT} 次"
+                HEALTH_FAIL_COUNT=0
+            fi
         else
-            log "重启失败 (exit=$?)"
+            if [ $HEALTH_FAIL_COUNT -gt 0 ]; then
+                log "健康检查恢复正常"
+            fi
+            HEALTH_FAIL_COUNT=0
         fi
-
-        LAST_COMMIT="$CURRENT_COMMIT"
     fi
 done

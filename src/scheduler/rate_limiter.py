@@ -63,6 +63,8 @@ class RateLimiter:
         self._save_timer: threading.Timer | None = None
         self._blacklist: dict[str, float] = {}
         self._blacklist_consecutive: dict[str, int] = {}
+        self._blacklist_dirty = False
+        self._blacklist_save_timer: threading.Timer | None = None
         self._lock = threading.Lock()
         if persist:
             self._load()
@@ -122,6 +124,10 @@ class RateLimiter:
             self._save_timer.cancel()
             self._save_timer = None
         self._flush_save()
+        if self._blacklist_save_timer:
+            self._blacklist_save_timer.cancel()
+            self._blacklist_save_timer = None
+        self._flush_blacklist()
 
     def _save(self) -> None:
         """将每日使用量持久化到磁盘（仅保存 daily_count 和 last_reset_day）"""
@@ -383,15 +389,32 @@ class RateLimiter:
         except Exception as e:
             logger.warning("加载 429 黑名单失败: %s", e)
 
-    def _save_blacklist(self) -> None:
-        """持久化 429 黑名单到磁盘（存储 expire_at 时间戳）"""
+    def _schedule_blacklist_save(self) -> None:
+        """标记黑名单为脏并调度延迟写盘"""
         if not self._persist:
             return
+        self._blacklist_dirty = True
+        if self._blacklist_save_timer is None or not self._blacklist_save_timer.is_alive():
+            self._blacklist_save_timer = threading.Timer(SAVE_DEBOUNCE_SECONDS, self._flush_blacklist)
+            self._blacklist_save_timer.daemon = True
+            self._blacklist_save_timer.start()
+
+    def _flush_blacklist(self) -> None:
+        """实际执行黑名单写盘"""
+        if not self._blacklist_dirty:
+            return
+        self._blacklist_dirty = False
         try:
             BLACKLIST_FILE.parent.mkdir(parents=True, exist_ok=True)
+            with self._lock:
+                snapshot = dict(self._blacklist)
             BLACKLIST_FILE.write_text(
-                yaml.dump(dict(self._blacklist), allow_unicode=True, default_flow_style=False),
+                yaml.dump(snapshot, allow_unicode=True, default_flow_style=False),
                 encoding="utf-8",
             )
         except Exception as e:
             logger.warning("保存 429 黑名单失败: %s", e)
+
+    def _save_blacklist(self) -> None:
+        """标记黑名单需持久化（延迟写盘，可在锁内安全调用）"""
+        self._schedule_blacklist_save()

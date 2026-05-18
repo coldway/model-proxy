@@ -21,6 +21,11 @@
 - **日志格式化规范（MP-35）**：全项目 18 处 `logger.xxx(f"...")` f-string 日志改为 `%s` 惰性格式化，避免日志级别未开启时的无效字符串拼接开销
 - **LLM 路由跳过阈值（MP-36）**：`_can_skip_routing` 阈值从 ≤2 提升至 ≤3，候选模型少时直接规则排序，节省一次 LLM 路由调用
 - **路由缓存周期清理（MP-37）**：新增 `purge_expired_cache()` 方法 + lifespan 周期任务，按 TTL 间隔主动清理过期缓存条目，防止长期运行后内存缓慢增长
+- **unregister_provider 连接泄漏修复（MP-38）**：`unregister_provider` 改为 `async`，pop 后自动调用 `provider.close()` 关闭 httpx 连接，防止动态切换厂商时连接池泄漏
+- **路由日志 deque 优化（MP-39）**：`_route_log` 从 `list` + 手动截断改为 `deque(maxlen=N)`，消除全量拷贝的内存抖动
+- **SessionManager 延迟写盘（MP-40）**：会话持久化从同步立即写盘改为 debounce timer（5 秒合并），减少高频对话时的磁盘 I/O
+- **429 黑名单延迟写盘（MP-41）**：`_save_blacklist` 从锁内直接写盘改为 dirty 标记 + debounce flush，消除 429 高频触发时的锁竞争
+- **历史记录启动单次扫描（MP-42）**：`_load_from_file` + `_cleanup_old_records` 合并为 `_load_and_cleanup`，启动时只读一次 JSONL 文件
 
 ### 安全修复（P0）
 
@@ -265,3 +270,13 @@
 | MP-35 | 日志格式化规范 f-string → %s | 全项目 10 文件 18 处 |
 | MP-36 | LLM 路由跳过阈值 ≤3 | `dispatcher.py` |
 | MP-37 | 路由缓存周期清理 purge_expired | `dispatcher.py`, `main.py` |
+
+### 第四轮优化（2026-05-18 资源管理/I/O 优化）
+
+| 编号 | 名称 | 涉及文件 |
+|------|------|---------|
+| MP-38 | unregister_provider 连接泄漏修复 | `dispatcher.py`, `routes.py` |
+| MP-39 | 路由日志 deque 优化 | `dispatcher.py` |
+| MP-40 | SessionManager 延迟写盘 | `session.py` |
+| MP-41 | 429 黑名单延迟写盘 | `rate_limiter.py` |
+| MP-42 | 历史记录启动单次扫描 | `history.py` |

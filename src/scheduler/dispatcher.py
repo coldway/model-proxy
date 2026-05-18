@@ -11,6 +11,7 @@ import logging
 import threading
 import time
 import uuid
+from collections import deque
 from typing import TYPE_CHECKING, Any
 
 import re
@@ -87,7 +88,7 @@ class Dispatcher:
         self._payload_tracker = payload_tracker or PayloadTracker()
         self._breaker = CircuitBreaker(threshold=breaker_threshold, cooldown=breaker_cooldown)
         self._route_cache: dict[str, tuple[str, float]] = {}
-        self._route_log: list[dict[str, Any]] = []
+        self._route_log: deque[dict[str, Any]] = deque(maxlen=ROUTE_LOG_MAX)
         self._session_bindings: dict[str, tuple[str, str, float]] = {}
         self._session_lock = threading.Lock()
         self._route_cache_ttl = route_cache_ttl
@@ -116,8 +117,6 @@ class Dispatcher:
         """记录一条路由决策"""
         kwargs["timestamp"] = time.strftime("%Y-%m-%d %H:%M:%S")
         self._route_log.append(kwargs)
-        if len(self._route_log) > ROUTE_LOG_MAX:
-            self._route_log = self._route_log[-ROUTE_LOG_MAX:]
 
     async def close_providers(self) -> None:
         """关闭所有 Provider 的底层连接"""
@@ -130,9 +129,16 @@ class Dispatcher:
     def register_provider(self, name: str, provider: "BaseProvider") -> None:
         self._providers[name] = provider
 
-    def unregister_provider(self, name: str) -> bool:
-        """注销厂商，返回是否成功"""
-        return self._providers.pop(name, None) is not None
+    async def unregister_provider(self, name: str) -> bool:
+        """注销厂商并关闭底层连接，返回是否成功"""
+        provider = self._providers.pop(name, None)
+        if provider is None:
+            return False
+        try:
+            await provider.close()
+        except Exception as e:
+            logger.warning("关闭 %s Provider 失败: %s", name, e)
+        return True
 
     def has_provider(self, name: str) -> bool:
         return name in self._providers

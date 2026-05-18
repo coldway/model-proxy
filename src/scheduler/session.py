@@ -132,6 +132,9 @@ class ChatSession:
         return s
 
 
+_SAVE_DEBOUNCE_SECONDS = 5
+
+
 class SessionManager:
     """管理所有聊天会话"""
 
@@ -145,6 +148,8 @@ class SessionManager:
         self._sessions: dict[str, ChatSession] = {}
         self._max_context_tokens = max_context_tokens
         self._max_sessions = max_sessions
+        self._dirty = False
+        self._save_timer: threading.Timer | None = None
         self._load()
 
     def create(self, model: str = "auto", title: str = "新对话") -> ChatSession:
@@ -214,10 +219,30 @@ class SessionManager:
             return False
 
     def save(self) -> None:
+        """立即刷盘（用于优雅关闭或显式保存）"""
+        if self._save_timer:
+            self._save_timer.cancel()
+            self._save_timer = None
         with self._lock:
-            self._save_unlocked()
+            self._persist_unlocked()
+
+    def _schedule_save(self) -> None:
+        """延迟写盘：合并短时间内的多次写入为一次磁盘操作"""
+        self._dirty = True
+        if self._save_timer is None or not self._save_timer.is_alive():
+            self._save_timer = threading.Timer(_SAVE_DEBOUNCE_SECONDS, self.save)
+            self._save_timer.daemon = True
+            self._save_timer.start()
 
     def _save_unlocked(self) -> None:
+        """在持有锁时标记脏并调度延迟写盘（须在 _lock 内调用）"""
+        self._schedule_save()
+
+    def _persist_unlocked(self) -> None:
+        """实际执行磁盘写入（须在 _lock 内调用）"""
+        if not self._dirty and not self._sessions:
+            return
+        self._dirty = False
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         data = {sid: s.to_dict() for sid, s in self._sessions.items()}
         try:

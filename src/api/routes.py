@@ -427,7 +427,7 @@ async def update_api_key(body: ApiKeyUpdateRequest):
             logger.error("动态注册厂商 %s 失败: %s", provider, e, exc_info=True)
             return {"status": "ok", "message": f"{provider} API Key 已保存，但厂商加载失败，请检查 Key 是否正确"}
     elif not api_key.strip():
-        _deps.dispatcher.unregister_provider(provider)
+        await _deps.dispatcher.unregister_provider(provider)
         logger.info("已注销厂商 %s（API Key 已清空）", provider)
         return {"status": "ok", "message": f"{provider} API Key 已清空，厂商已卸载"}
 
@@ -496,7 +496,7 @@ async def toggle_provider(provider: str, enabled: bool):
             else:
                 return {"status": "ok", "message": f"{provider} 已启用，但 API Key 未配置，请先填写 API Key"}
     elif not enabled and _deps.dispatcher.has_provider(provider):
-        _deps.dispatcher.unregister_provider(provider)
+        await _deps.dispatcher.unregister_provider(provider)
         logger.info("已注销厂商 %s", provider)
         return {"status": "ok", "message": f"{provider} 已禁用并卸载"}
 

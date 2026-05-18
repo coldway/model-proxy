@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.yuanrui.model-proxy</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/yuanrui/go/src/gitlab.p1staff.com/new/AI-Coding/workspace/AI-agent/model-proxy/.venv/bin/python</string>
+        <string>-u</string>
+        <string>main.py</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/yuanrui/go/src/gitlab.p1staff.com/new/AI-Coding/workspace/AI-agent/model-proxy</string>
+
+    <!-- 开机自启 -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- 崩溃自动拉起 -->
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+
+    <!-- 崩溃后等待 5 秒再拉起，确保端口完全释放 -->
+    <key>ThrottleInterval</key>
+    <integer>5</integer>
+
+    <!-- 终止时等待 10 秒让进程优雅关闭（含子进程） -->
+    <key>ExitTimeOut</key>
+    <integer>10</integer>
+
+    <!-- 日志由 Python RotatingFileHandler 管理(logs/model-proxy.log)，launchd 不再捕获 -->
+    <key>StandardOutPath</key>
+    <string>/dev/null</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/yuanrui/go/src/gitlab.p1staff.com/new/AI-Coding/workspace/AI-agent/model-proxy/logs/model-proxy.stderr.log</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PYTHONUNBUFFERED</key>
+        <string>1</string>
+        <key>PATH</key>
+        <string>/Users/yuanrui/go/src/gitlab.p1staff.com/new/AI-Coding/workspace/AI-agent/model-proxy/.venv/bin:/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+</dict>
+</plist>

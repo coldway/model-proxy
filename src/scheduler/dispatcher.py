@@ -293,14 +293,14 @@ class Dispatcher:
         """路由到指定模型"""
         for provider_name, model_cfg in enabled_models:
             if model_cfg.name == request.model:
-                rpd, rpm, tpm, tpd = self._unpack_rate_limit(model_cfg)
+                rlim = self._unpack_rate_limit(model_cfg)
+                rpd, rpm, tpm, tpd = rlim
 
                 if not self._rate_limiter.can_request(provider_name, model_cfg.name, rpd, rpm, tpm, tpd):
                     raise RateLimitExceeded(
                         f"模型 {model_cfg.name} 已达速率限制，请稍后重试或切换模型"
                     )
 
-                rlim = self._unpack_rate_limit(model_cfg)
                 result = await self._call_provider(
                     provider_name, model_cfg.name, request, trace_id=trace_id, rate_limits=rlim,
                 )
@@ -819,7 +819,7 @@ class Dispatcher:
         for msg in request.messages:
             if isinstance(msg.content, str):
                 total_len += len(msg.content)
-                if any("\u4e00" <= ch <= "\u9fff" for ch in msg.content):
+                if Dispatcher._RE_CHINESE.search(msg.content):
                     has_chinese = True
             elif isinstance(msg.content, list):
                 for part in msg.content:

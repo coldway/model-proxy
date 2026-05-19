@@ -28,6 +28,10 @@
 - **历史记录启动单次扫描（MP-42）**：`_load_from_file` + `_cleanup_old_records` 合并为 `_load_and_cleanup`，启动时只读一次 JSONL 文件
 - **全项目函数内 import 清零（MP-43）**：`streaming.py`、`routes.py`、`google.py`、`huggingface.py`、`capability_tester.py` 中共 8 处函数内 import 提升到模块级，消除运行时重复 import 查找和代码可读性问题
 - **Import 排序规范（MP-44）**：`dispatcher.py` 中 `import re` 从第三方包区移入标准库区，符合 PEP 8 import 分组约定
+- **`_summarize_request` 中文检测退化修复（MP-45）**：`_summarize_request` 中 `any("\u4e00" <= ch <= "\u9fff" ...)` 逐字符循环替换为已有的 `_RE_CHINESE.search()` 正则，与 MP-23 修复一致
+- **`_dispatch_specific` 冗余解包消除（MP-46）**：`_dispatch_specific` 中两次调用 `_unpack_rate_limit` 合并为一次，消除重复元组解构
+- **`routes.py` 函数内 import 二次清零（MP-47～MP-50）**：`create_stream_response`、`ModelCapabilities`、`StreamingResponse`、`get_instance`、`Path` 共 7 处函数内 import 提升到模块级（仅保留 `CursorProvider` 延迟导入）
+- **流式会话残缺输出写入阈值（MP-51）**：`_collect_and_stream` 中 `save_assistant` 阈值从 `>= 1` 提升到 `>= 10`，避免模型只返回 1-9 字符的异常短输出（如单个标点）时污染会话历史
 
 ### 安全修复（P0）
 
@@ -289,3 +293,15 @@
 |------|------|---------|
 | MP-43 | 全项目函数内 import 清零 | `streaming.py`, `routes.py`, `google.py`, `huggingface.py`, `capability_tester.py` |
 | MP-44 | Import 排序 PEP 8 规范 | `dispatcher.py` |
+
+### 第六轮优化（2026-05-18 深度扫描）
+
+| 编号 | 名称 | 涉及文件 |
+|------|------|---------|
+| MP-45 | `_summarize_request` 中文检测退化修复 | `dispatcher.py` |
+| MP-46 | `_dispatch_specific` 冗余 rate_limit 解包 | `dispatcher.py` |
+| MP-47 | `_handle_stream` 函数内 import 提升 | `routes.py` |
+| MP-48 | `_tail_file`/`get_log_history` 函数内 import 提升 | `routes.py` |
+| MP-49 | `stream_chat_message` 函数内 import 提升 | `routes.py` |
+| MP-50 | `list_models` 函数内 import 提升 | `routes.py` |
+| MP-51 | 流式会话残缺输出写入阈值修正 | `routes.py` |

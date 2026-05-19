@@ -14,9 +14,14 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from pathlib import Path
+
+from starlette.responses import StreamingResponse
+
 from src.models.schemas import (
     ChatCompletionRequest,
     ChatMessage,
+    ModelCapabilities,
     ModelDetail,
     ModelInfo,
     ModelListResponse,
@@ -28,6 +33,9 @@ from src.models.schemas import (
     UsageResponse,
     UsageStats,
 )
+from src.api.log_buffer import get_instance as _get_log_buffer
+from src.api.streaming import create_stream_response
+from src.api.thinking import strip_thinking as _strip_thinking
 from src.config.catalog import CatalogManager
 from src.config.capability_tester import merge_catalog_capabilities
 from src.scheduler.exceptions import (
@@ -39,8 +47,6 @@ from src.scheduler.exceptions import (
 )
 from src.scheduler.history import RequestHistory
 from src.scheduler.session import SessionManager
-
-from src.api.thinking import strip_thinking as _strip_thinking
 
 logger = logging.getLogger(__name__)
 
@@ -180,7 +186,6 @@ async def chat_completions(request: ChatCompletionRequest):
 
 async def _handle_stream(request: ChatCompletionRequest, enabled_models, trace_id: str = ""):
     """处理流式请求，返回 SSE StreamingResponse"""
-    from src.api.streaming import create_stream_response
 
     sid_tag = f" session={request.session_id}" if request.session_id else ""
     start_time = time.time()
@@ -263,7 +268,6 @@ def _map_dispatch_error(e: Exception, trace_id: str = "") -> HTTPException:
 @router.get("/v1/models", response_model=ModelListResponse)
 async def list_models():
     """列出所有已配置模型（含已探测的能力信息）"""
-    from src.models.schemas import ModelCapabilities
 
     models = []
     for prov_name, prov in _deps.config_manager.config.providers.items():
@@ -1198,7 +1202,7 @@ async def stream_chat_message(session_id: str, request: ChatCompletionRequest):
         if thinking:
             logger.info("[流式会话] trace=%s 模型 %s 思考过程:\n%s", trace_id, model_name, thinking[:500])
 
-        save_assistant = (not stream_broken) and len(reply_text.strip()) >= 1
+        save_assistant = (not stream_broken) and len(reply_text.strip()) >= 10
         if save_assistant:
             session.add_message("assistant", reply_text, model=model_name)
         elif stream_broken:
@@ -1230,7 +1234,6 @@ async def stream_chat_message(session_id: str, request: ChatCompletionRequest):
         yield f"data: {json.dumps(end_data, ensure_ascii=False)}\n\n"
         yield "data: [DONE]\n\n"
 
-    from starlette.responses import StreamingResponse
     return StreamingResponse(
         _collect_and_stream(),
         media_type="text/event-stream",
@@ -1251,8 +1254,7 @@ async def get_logs(after: int = 0, limit: int = 200):
     - after: 上次返回的 latest_seq，仅获取此后的新日志
     - limit: 最多返回条数
     """
-    from src.api.log_buffer import get_instance
-    handler = get_instance()
+    handler = _get_log_buffer()
     if not handler:
         return {"entries": [], "latest_seq": 0}
     limit = min(max(limit, 1), 500)
@@ -1263,8 +1265,7 @@ async def get_logs(after: int = 0, limit: int = 200):
 @router.delete("/api/logs/clear")
 async def clear_logs():
     """清空日志缓冲"""
-    from src.api.log_buffer import get_instance
-    handler = get_instance()
+    handler = _get_log_buffer()
     if handler:
         handler.clear()
     return {"status": "ok"}
@@ -1272,7 +1273,6 @@ async def clear_logs():
 
 def _tail_file(path, n: int, chunk_size: int = 8192) -> list[str]:
     """从文件末尾高效读取最后 n 行，避免将整个文件加载到内存。"""
-    from pathlib import Path
     with open(path, "rb") as f:
         f.seek(0, 2)
         size = f.tell()
@@ -1297,8 +1297,6 @@ async def get_log_history(date: str = "", tail: int = 500):
     - date: 日期字符串（YYYY-MM-DD），为空时返回可用日期列表
     - tail: 返回文件末尾行数（默认 500，最大 5000）
     """
-    from pathlib import Path
-
     log_dir = Path("logs")
     if not log_dir.is_dir():
         return {"dates": [], "lines": []}

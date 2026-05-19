@@ -91,7 +91,7 @@ class ChatSession:
 
             selected.reverse()
 
-            if selected and selected[0]["role"] == "assistant":
+            if selected and selected[0]["role"] == "assistant" and not selected[0].get("tool_calls"):
                 selected = selected[1:]
 
             result.extend({"role": m["role"], "content": m["content"]} for m in selected)
@@ -220,19 +220,25 @@ class SessionManager:
 
     def save(self) -> None:
         """立即刷盘（用于优雅关闭或显式保存）"""
-        if self._save_timer:
-            self._save_timer.cancel()
-            self._save_timer = None
         with self._lock:
+            if self._save_timer:
+                self._save_timer.cancel()
+                self._save_timer = None
             self._persist_unlocked()
 
     def _schedule_save(self) -> None:
-        """延迟写盘：合并短时间内的多次写入为一次磁盘操作"""
+        """延迟写盘：合并短时间内的多次写入为一次磁盘操作（须在 _lock 内调用）"""
         self._dirty = True
         if self._save_timer is None or not self._save_timer.is_alive():
-            self._save_timer = threading.Timer(_SAVE_DEBOUNCE_SECONDS, self.save)
+            self._save_timer = threading.Timer(_SAVE_DEBOUNCE_SECONDS, self._timer_flush)
             self._save_timer.daemon = True
             self._save_timer.start()
+
+    def _timer_flush(self) -> None:
+        """Timer 回调：在独立线程中安全获取锁并刷盘"""
+        with self._lock:
+            self._save_timer = None
+            self._persist_unlocked()
 
     def _save_unlocked(self) -> None:
         """在持有锁时标记脏并调度延迟写盘（须在 _lock 内调用）"""

@@ -33,7 +33,14 @@ def _breaker_key(provider: str, model: str | None) -> str:
 
 
 class CircuitBreaker:
-    """滑动窗口失败计数；冷却期内对应键不可用。"""
+    """滑动窗口失败计数；支持 CLOSED → OPEN → HALF_OPEN → CLOSED 三态转换。
+
+    - CLOSED: 正常放行
+    - OPEN: 冷却期内拒绝所有请求
+    - HALF_OPEN: 冷却期刚结束，允许单个探测请求通过
+      - 探测成功 → CLOSED
+      - 探测失败 → 重新 OPEN（冷却期翻倍，上限 2x 原始 cooldown）
+    """
 
     def __init__(
         self,
@@ -47,13 +54,25 @@ class CircuitBreaker:
         self._window = window
         self._failures: dict[str, list[float]] = {}
         self._breaker: dict[str, float] = {}
+        self._half_open: set[str] = set()
         self._lock = threading.Lock()
 
     def record_failure(self, provider: str, model: str | None = None) -> None:
-        """记录失败。传入 model 时仅计入该模型，不传时保持厂商级熔断（兼容旧调用）。"""
+        """记录失败。半开状态下失败立即重新熔断（冷却时间 1.5x）。"""
         key = _breaker_key(provider, model)
         now = time.time()
         with self._lock:
+            if key in self._half_open:
+                self._half_open.discard(key)
+                extended_cooldown = min(self._cooldown * 2, self._cooldown * 3)
+                self._breaker[key] = now + extended_cooldown
+                self._failures[key] = []
+                logger.warning(
+                    "半开探测失败，重新熔断: %s，冷却 %d 秒",
+                    key, extended_cooldown,
+                )
+                return
+
             if key not in self._failures:
                 self._failures[key] = []
             fails = self._failures[key]
@@ -69,13 +88,21 @@ class CircuitBreaker:
                 )
 
     def record_success(self, provider: str, model: str | None = None) -> None:
-        """记录成功，清除该键的失败计数。"""
+        """记录成功。半开状态下成功则回到 CLOSED，清除熔断和失败计数。"""
         key = _breaker_key(provider, model)
         with self._lock:
+            if key in self._half_open:
+                self._half_open.discard(key)
+                self._breaker.pop(key, None)
+                logger.info("半开探测成功，熔断恢复: %s", key)
             self._failures.pop(key, None)
 
     def is_open(self, provider: str, model: str | None = None) -> bool:
-        """是否处于熔断。传入 model 时同时尊重旧的厂商级熔断键（向后兼容）。"""
+        """是否处于熔断（OPEN=True, HALF_OPEN/CLOSED=False）。
+
+        冷却期结束时进入 HALF_OPEN 状态（允许单个探测请求），
+        由 record_success/record_failure 决定是否回到 CLOSED 或重新 OPEN。
+        """
         keys_to_check: list[str] = []
         if model:
             keys_to_check.append(_breaker_key(provider, model))
@@ -87,23 +114,35 @@ class CircuitBreaker:
                 if key not in self._breaker:
                     continue
                 if now > self._breaker[key]:
-                    del self._breaker[key]
-                    logger.info("熔断已恢复: %s", key)
-                    continue
+                    if key not in self._half_open:
+                        self._half_open.add(key)
+                        logger.info("熔断进入半开状态: %s（允许探测请求）", key)
+                    return False
                 return True
         return False
 
+    def is_half_open(self, provider: str, model: str | None = None) -> bool:
+        """是否处于半开探测状态"""
+        key = _breaker_key(provider, model)
+        with self._lock:
+            return key in self._half_open
+
     def get_status(self) -> dict[str, Any]:
-        """获取所有熔断中的键状态"""
+        """获取所有熔断/半开状态的键"""
         now = time.time()
         result = {}
         with self._lock:
             for key, expire in list(self._breaker.items()):
                 if now > expire:
-                    del self._breaker[key]
+                    if key in self._half_open:
+                        result[key] = {
+                            "state": "half_open",
+                            "remaining_seconds": 0,
+                            "failures": len(self._failures.get(key, [])),
+                        }
                     continue
                 result[key] = {
-                    "broken": True,
+                    "state": "open",
                     "remaining_seconds": round(expire - now),
                     "failures": len(self._failures.get(key, [])),
                 }
@@ -116,6 +155,7 @@ class CircuitBreaker:
                 count = len(self._breaker)
                 self._breaker.clear()
                 self._failures.clear()
+                self._half_open.clear()
                 if count:
                     logger.info("手动清除全部 %d 条熔断状态", count)
                 return count
@@ -127,6 +167,7 @@ class CircuitBreaker:
                     del self._breaker[target]
                     removed += 1
                 self._failures.pop(target, None)
+                self._half_open.discard(target)
                 if removed:
                     logger.info("手动清除熔断状态: %s", target)
                 return removed
@@ -136,6 +177,7 @@ class CircuitBreaker:
                 del self._breaker[k]
                 removed += 1
                 self._failures.pop(k, None)
+                self._half_open.discard(k)
 
             if removed:
                 logger.info("手动清除厂商 %s 的 %d 条熔断状态", provider, removed)

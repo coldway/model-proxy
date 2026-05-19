@@ -6,6 +6,22 @@
 
 ## [Unreleased]
 
+### 修复（Bug Fix）
+
+- **SessionManager 竞态条件修复（MP-52）**：`save()` 方法将 timer cancellation 移入 `_lock` 内，消除 cancel 与 lock acquisition 之间的 race window；timer 回调改为独立的 `_timer_flush()` 方法，避免 `save()` → `_lock` 的间接递归风险
+- **_filter_available 熔断检查缺失（MP-53）**：`_filter_available()` 新增 `_breaker.is_open()` 检查，被熔断的模型不再进入候选列表，避免浪费请求延迟后再失败
+- **PayloadTracker 持久化丢失（MP-54）**：新增 60s 周期自动 flush 定时器，`_save()` 标记的脏数据不再依赖外部调用 `flush()`；增加 `close()` 方法供优雅关闭时执行最终持久化
+- **get_context_messages 误删 tool_calls（MP-55）**：截断后首条消息若为 assistant 且包含 `tool_calls`，不再删除，避免丢失工具调用上下文导致模型回复不连贯
+
+### 增强（Enhancement）
+
+- **CircuitBreaker 半开状态（MP-56）**：实现 CLOSED → OPEN → HALF_OPEN → CLOSED 三态转换；冷却期结束后进入 HALF_OPEN 允许单个探测请求，探测成功回到 CLOSED、失败则以 2x cooldown 重新 OPEN，避免全量放开导致震荡
+- **路由缓存并发保护（MP-57）**：新增 `asyncio.Lock` 保护 `_route_cache` 写操作（`_set_cached_route_async` / `purge_expired_cache`），防止多协程并发写入导致条目超限
+- **_can_skip_routing 精细化（MP-58）**：当候选模型 ≤3 但请求需要 tool_calling 或包含中文时，不再跳过 LLM 路由，确保在模型能力差异大时仍能做出最优选择
+- **_compute_feature_hash 换用 blake2b（MP-59）**：路由缓存 hash 从 MD5 切换为 `hashlib.blake2b(digest_size=8)`，碰撞概率更低且 CPython 实现更快
+- **Session 绑定持久化（MP-60）**：会话绑定新增磁盘持久化（`data/session_bindings.yaml`），30s debounce 写盘 + 启动时自动加载，服务重启后多轮对话的模型绑定不再丢失
+- **RateLimiter 锁设计文档（MP-61）**：为 `threading.Lock` 的选择添加设计说明（临界区 < 50μs，RPM 有界），明确在 async 环境中的安全性边界
+
 ### 优化
 
 - **CircuitBreaker 并发安全（H1）**：所有方法（`record_failure`/`record_success`/`is_open`/`get_status`/`clear`）加 `threading.Lock` 保护，防止高并发下计数竞态和 dict resize 异常

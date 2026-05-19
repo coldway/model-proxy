@@ -144,7 +144,7 @@ def create_app() -> FastAPI:
             while True:
                 await asyncio.sleep(dispatcher._route_cache_ttl)
                 try:
-                    dispatcher.purge_expired_cache()
+                    await dispatcher.purge_expired_cache()
                 except Exception as exc:
                     logger.warning("路由缓存清理异常: %s", exc)
 
@@ -171,7 +171,8 @@ def create_app() -> FastAPI:
         rate_limiter.flush()
         history.flush()
         catalog.flush()
-        dispatcher.payload_tracker.flush()
+        dispatcher.payload_tracker.close()
+        dispatcher.flush_session_bindings()
         await dispatcher.close_providers()
         logger.info("所有资源已释放")
 

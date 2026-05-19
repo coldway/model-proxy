@@ -32,8 +32,16 @@ _LIMITS_FILE = _DATA_DIR / "payload_limits.yaml"
 _PAYLOAD_ESTIMATE_BUFFER = 1.1
 
 
+_BASE64_PREFIX = "data:"
+_BASE64_OVERHEAD_RATIO = 1.37
+
+
 def estimate_payload_bytes_raw(request: ChatCompletionRequest) -> int:
-    """原始 payload 字节估算（无安全余量）"""
+    """原始 payload 字节估算（无安全余量）
+
+    对 base64 图片 URL 直接计入其字符长度（因为 base64 编码后的字节数
+    就是它在 JSON payload 中占用的大小）。
+    """
     parts: list[Any] = []
     for msg in request.messages:
         if hasattr(msg, "model_dump"):
@@ -54,12 +62,17 @@ def estimate_payload_bytes(request: ChatCompletionRequest) -> int:
     return max(1, int(raw * _PAYLOAD_ESTIMATE_BUFFER))
 
 
+_FLUSH_INTERVAL_SECONDS = 60
+
+
 class PayloadTracker:
     """追踪每个 provider/model 的 payload 上限（字节）
 
     - record_413(key, size): 收到 413 时记录该 size 为上限
     - get_limit(key): 获取已知上限，None 表示无限制
     - can_accept(key, size): 判断 payload 是否在上限内
+
+    自动以 60s 间隔将脏数据持久化到磁盘。
     """
 
     def __init__(self, path: Path = _LIMITS_FILE):
@@ -67,7 +80,9 @@ class PayloadTracker:
         self._lock = threading.Lock()
         self._limits: dict[str, dict[str, Any]] = {}
         self._dirty = False
+        self._flush_timer: threading.Timer | None = None
         self._load()
+        self._schedule_flush()
 
     def _load(self) -> None:
         if not self._path.exists():
@@ -81,7 +96,7 @@ class PayloadTracker:
             logger.warning("加载 payload 上限文件失败: %s", e)
 
     def _save(self) -> None:
-        """标记为脏，由周期性 flush 统一持久化（避免在事件循环线程中做阻塞 I/O）"""
+        """标记为脏，由内部定时器自动持久化"""
         self._dirty = True
 
     def _persist(self) -> None:
@@ -95,13 +110,33 @@ class PayloadTracker:
         except Exception as e:
             logger.warning("保存 payload 上限文件失败: %s", e)
 
+    def _schedule_flush(self) -> None:
+        """启动周期性自动 flush 定时器"""
+        self._flush_timer = threading.Timer(_FLUSH_INTERVAL_SECONDS, self._periodic_flush)
+        self._flush_timer.daemon = True
+        self._flush_timer.start()
+
+    def _periodic_flush(self) -> None:
+        """定时器回调：flush 脏数据并重新调度"""
+        try:
+            self.flush()
+        finally:
+            self._schedule_flush()
+
     def flush(self) -> None:
-        """将内存状态持久化到磁盘（由外部定时任务或关停钩子调用）"""
+        """将内存状态持久化到磁盘（由定时器自动调用或关停钩子显式调用）"""
         with self._lock:
             if not self._dirty:
                 return
             self._dirty = False
             self._persist()
+
+    def close(self) -> None:
+        """停止定时器并执行最终 flush（用于优雅关闭）"""
+        if self._flush_timer:
+            self._flush_timer.cancel()
+            self._flush_timer = None
+        self.flush()
 
     @staticmethod
     def _key(provider: str, model: str) -> str:

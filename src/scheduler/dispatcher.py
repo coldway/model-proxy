@@ -13,6 +13,7 @@ import threading
 import time
 import uuid
 from collections import deque
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -87,11 +88,14 @@ class Dispatcher:
         self._payload_tracker = payload_tracker or PayloadTracker()
         self._breaker = CircuitBreaker(threshold=breaker_threshold, cooldown=breaker_cooldown)
         self._route_cache: dict[str, tuple[str, float]] = {}
+        self._route_cache_lock = asyncio.Lock()
         self._route_log: deque[dict[str, Any]] = deque(maxlen=ROUTE_LOG_MAX)
         self._session_bindings: dict[str, tuple[str, str, float]] = {}
         self._session_lock = threading.Lock()
+        self._bind_save_timer: threading.Timer | None = None
         self._route_cache_ttl = route_cache_ttl
         self._session_bind_ttl = session_bind_ttl
+        self._load_session_bindings()
 
     def _record_provider_failure(self, provider_name: str, model_name: str | None = None) -> None:
         self._breaker.record_failure(provider_name, model_name)
@@ -216,6 +220,60 @@ class Dispatcher:
     # region 会话模型绑定
 
     _SESSION_BIND_MAX = 10000  # 最大绑定条目数，防止内存无限增长
+    _SESSION_BIND_FILE = Path("data/session_bindings.yaml")
+    _SESSION_BIND_SAVE_DEBOUNCE = 30
+
+    def _load_session_bindings(self) -> None:
+        """从磁盘加载会话绑定，过滤掉已过期的记录"""
+        if not self._SESSION_BIND_FILE.exists():
+            return
+        try:
+            import yaml
+            raw = yaml.safe_load(self._SESSION_BIND_FILE.read_text(encoding="utf-8")) or {}
+            now = time.time()
+            loaded = 0
+            for sid, entry in raw.items():
+                if not isinstance(entry, dict):
+                    continue
+                ts = entry.get("ts", 0)
+                if now - ts > self._session_bind_ttl:
+                    continue
+                self._session_bindings[sid] = (entry["provider"], entry["model"], ts)
+                loaded += 1
+            if loaded:
+                logger.info("从磁盘恢复了 %d 个会话绑定", loaded)
+        except Exception as e:
+            logger.warning("加载会话绑定文件失败: %s", e)
+
+    def _schedule_bindings_save(self) -> None:
+        """延迟保存会话绑定到磁盘"""
+        if not hasattr(self, "_bind_save_timer") or self._bind_save_timer is None or not self._bind_save_timer.is_alive():
+            self._bind_save_timer = threading.Timer(self._SESSION_BIND_SAVE_DEBOUNCE, self._persist_bindings)
+            self._bind_save_timer.daemon = True
+            self._bind_save_timer.start()
+
+    def _persist_bindings(self) -> None:
+        """实际写入会话绑定到磁盘"""
+        try:
+            import yaml
+            with self._session_lock:
+                snapshot = {
+                    sid: {"provider": prov, "model": model, "ts": ts}
+                    for sid, (prov, model, ts) in self._session_bindings.items()
+                }
+            self._SESSION_BIND_FILE.parent.mkdir(parents=True, exist_ok=True)
+            self._SESSION_BIND_FILE.write_text(
+                yaml.dump(snapshot, allow_unicode=True, default_flow_style=False),
+                encoding="utf-8",
+            )
+        except Exception as e:
+            logger.warning("保存会话绑定文件失败: %s", e)
+
+    def flush_session_bindings(self) -> None:
+        """立即持久化会话绑定（用于优雅关闭）"""
+        if hasattr(self, "_bind_save_timer") and self._bind_save_timer:
+            self._bind_save_timer.cancel()
+        self._persist_bindings()
 
     def bind_session(self, session_id: str, provider: str, model: str) -> None:
         """绑定 session_id 到指定的 provider/model"""
@@ -226,6 +284,7 @@ class Dispatcher:
                     oldest_sid = min(self._session_bindings, key=lambda k: self._session_bindings[k][2])
                     del self._session_bindings[oldest_sid]
             self._session_bindings[session_id] = (provider, model, time.time())
+        self._schedule_bindings_save()
         logger.info("会话绑定: %s → %s:%s", session_id, provider, model)
 
     def _evict_expired_sessions(self) -> int:
@@ -429,13 +488,18 @@ class Dispatcher:
         """判断是否可以跳过 LLM 路由，直接用规则排序的最优模型
 
         以下场景直接跳过（节省一次 LLM 调用）：
-        - 只有 1-3 个可用模型（候选太少，LLM 路由收益不抵开销）
+        - 只有 1 个可用模型
+        - 2-3 个模型但请求无特殊需求（无 tool_calling 且无中文）
         - 最优模型在所有关键维度上都领先
         - 没有 capability_cache（无法构建有效的路由提示词）
         """
-        if len(sorted_models) <= 3:
+        if len(sorted_models) <= 1:
             return True
         if not self._capability_cache:
+            return True
+        needs_tc = bool(request.tools)
+        has_chinese = self._detect_chinese(request)
+        if len(sorted_models) <= 3 and not needs_tc and not has_chinese:
             return True
 
         top_prov, top_model = sorted_models[0]
@@ -487,9 +551,12 @@ class Dispatcher:
         self, models: list[tuple[str, ModelConfig]],
         payload_bytes: int = 0,
     ) -> list[tuple[str, ModelConfig]]:
-        """过滤出配额未耗尽且 payload 大小在限制内的模型"""
+        """过滤出未熔断、配额未耗尽且 payload 大小在限制内的模型"""
         result = []
         for prov_name, model_cfg in models:
+            if self._breaker.is_open(prov_name, model_cfg.name):
+                logger.info("跳过 %s:%s — 处于熔断状态", prov_name, model_cfg.name)
+                continue
             rpd, rpm, tpm, tpd = self._unpack_rate_limit(model_cfg)
             if not self._rate_limiter.can_request(prov_name, model_cfg.name, rpd, rpm, tpm, tpd):
                 continue
@@ -612,7 +679,7 @@ class Dispatcher:
                 ensure_ascii=False, sort_keys=True,
             )
             tools_sig = (
-                f"n={len(request.tools)}|h={hashlib.md5(tools_dump.encode()).hexdigest()[:10]}"
+                f"n={len(request.tools)}|h={hashlib.blake2b(tools_dump.encode(), digest_size=6).hexdigest()}"
                 f"|b={len(tools_dump.encode())}"
             )
         else:
@@ -650,36 +717,47 @@ class Dispatcher:
             f"|stream={request.stream}|len={len_bucket}"
             f"|models={','.join(model_set)}"
         )
-        return hashlib.md5(feature_str.encode()).hexdigest()[:12]
+        return hashlib.blake2b(feature_str.encode(), digest_size=8).hexdigest()
 
     # region 路由缓存与 LLM 路由
 
     def _get_cached_route(self, feature_hash: str) -> str | None:
-        """查找路由缓存"""
-        if feature_hash in self._route_cache:
-            model_name, ts = self._route_cache[feature_hash]
-            if time.time() - ts < self._route_cache_ttl:
-                logger.info("路由缓存命中: %s → %s", feature_hash, model_name)
-                return model_name
-            del self._route_cache[feature_hash]
+        """查找路由缓存（同步快速路径，仅读操作）"""
+        entry = self._route_cache.get(feature_hash)
+        if entry is None:
+            return None
+        model_name, ts = entry
+        if time.time() - ts < self._route_cache_ttl:
+            logger.info("路由缓存命中: %s → %s", feature_hash, model_name)
+            return model_name
+        self._route_cache.pop(feature_hash, None)
         return None
 
+    async def _set_cached_route_async(self, feature_hash: str, model_name: str) -> None:
+        """写入路由缓存（异步安全）"""
+        async with self._route_cache_lock:
+            if len(self._route_cache) >= ROUTE_CACHE_MAX:
+                oldest_key = min(self._route_cache, key=lambda k: self._route_cache[k][1])
+                del self._route_cache[oldest_key]
+            self._route_cache[feature_hash] = (model_name, time.time())
+
     def _set_cached_route(self, feature_hash: str, model_name: str) -> None:
-        """写入路由缓存"""
+        """写入路由缓存（同步版本，保留向后兼容；高并发场景应使用 _set_cached_route_async）"""
         if len(self._route_cache) >= ROUTE_CACHE_MAX:
             oldest_key = min(self._route_cache, key=lambda k: self._route_cache[k][1])
             del self._route_cache[oldest_key]
         self._route_cache[feature_hash] = (model_name, time.time())
 
-    def purge_expired_cache(self) -> int:
+    async def purge_expired_cache(self) -> int:
         """清理所有 TTL 过期的路由缓存条目，返回清理数量"""
-        now = time.time()
-        expired = [k for k, (_, ts) in self._route_cache.items() if now - ts >= self._route_cache_ttl]
-        for k in expired:
-            del self._route_cache[k]
-        if expired:
-            logger.debug("路由缓存过期清理: 删除 %d 条，剩余 %d 条", len(expired), len(self._route_cache))
-        return len(expired)
+        async with self._route_cache_lock:
+            now = time.time()
+            expired = [k for k, (_, ts) in self._route_cache.items() if now - ts >= self._route_cache_ttl]
+            for k in expired:
+                del self._route_cache[k]
+            if expired:
+                logger.debug("路由缓存过期清理: 删除 %d 条，剩余 %d 条", len(expired), len(self._route_cache))
+            return len(expired)
 
     async def _route_with_llm(
         self,

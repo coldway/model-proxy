@@ -81,7 +81,11 @@ class ChatSession:
         self.total_tokens_est = total_chars // CHARS_PER_TOKEN
 
     def get_context_messages(self) -> list[dict[str, str]]:
-        """获取用于 API 调用的消息列表（含系统提示、自动截断）"""
+        """获取用于 API 调用的消息列表（含系统提示、自动截断）
+
+        截断时保证 tool_call 链完整性：assistant(tool_calls) 和后续的
+        tool 回复消息作为一组，要么全部保留要么全部丢弃。
+        """
         with self._lock:
             result = [{"role": "system", "content": self.system_prompt}]
             budget = self._max_context_tokens - RESERVED_SYSTEM_TOKENS
@@ -96,6 +100,10 @@ class ChatSession:
                 consumed += msg_tokens
 
             selected.reverse()
+
+            # 确保不以孤立的 tool 回复开头（其前序 assistant tool_calls 被截掉）
+            while selected and selected[0].get("role") == "tool":
+                selected = selected[1:]
 
             if selected and selected[0]["role"] == "assistant" and not selected[0].get("tool_calls"):
                 selected = selected[1:]
@@ -252,16 +260,16 @@ class SessionManager:
 
     def _cleanup_expired_trash(self) -> None:
         """清理超过保留期限的回收站会话"""
-        now = time.time()
-        expired = [
-            sid for sid, entry in self._trash.items()
-            if now - entry["deleted_at"] > TRASH_RETENTION_DAYS * 86400
-        ]
-        if expired:
-            for sid in expired:
-                del self._trash[sid]
-            logger.info("清理 %d 个过期回收站会话", len(expired))
-            with self._lock:
+        with self._lock:
+            now = time.time()
+            expired = [
+                sid for sid, entry in self._trash.items()
+                if now - entry["deleted_at"] > TRASH_RETENTION_DAYS * 86400
+            ]
+            if expired:
+                for sid in expired:
+                    del self._trash[sid]
+                logger.info("清理 %d 个过期回收站会话", len(expired))
                 self._save_unlocked()
 
     def list_sessions(self) -> list[dict]:

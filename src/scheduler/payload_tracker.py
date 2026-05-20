@@ -112,6 +112,8 @@ class PayloadTracker:
 
     def _schedule_flush(self) -> None:
         """启动周期性自动 flush 定时器"""
+        if self._flush_timer is not None and self._flush_timer.is_alive():
+            return
         self._flush_timer = threading.Timer(_FLUSH_INTERVAL_SECONDS, self._periodic_flush)
         self._flush_timer.daemon = True
         self._flush_timer.start()

@@ -295,7 +295,10 @@ class RateLimiter:
         self._save_blacklist()
 
     def _is_blacklisted_unlocked(self, provider: str, model: str) -> bool:
-        """内部无锁版本，须在持有 _lock 时调用"""
+        """内部无锁版本，须在持有 _lock 时调用。
+
+        仅标记 dirty 而非调度 Timer，避免在持有锁时创建回调线程。
+        """
         key = self._key(provider, model)
         if key not in self._blacklist:
             return False
@@ -303,7 +306,7 @@ class RateLimiter:
         if time.time() >= expire_at:
             del self._blacklist[key]
             logger.info("模型 %s 429 封禁已到期，自动恢复", key)
-            self._save_blacklist()
+            self._blacklist_dirty = True
             return False
         return True
 

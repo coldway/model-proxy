@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import httpx
+import yaml
 
 from src.models.schemas import (
     ChatCompletionRequest,
@@ -89,6 +90,7 @@ class Dispatcher:
         self._breaker = CircuitBreaker(threshold=breaker_threshold, cooldown=breaker_cooldown)
         self._route_cache: dict[str, tuple[str, float]] = {}
         self._route_cache_lock = asyncio.Lock()
+        self._route_cache_sync_lock = threading.Lock()
         self._route_log: deque[dict[str, Any]] = deque(maxlen=ROUTE_LOG_MAX)
         self._session_bindings: dict[str, tuple[str, str, float]] = {}
         self._session_lock = threading.Lock()
@@ -228,7 +230,6 @@ class Dispatcher:
         if not self._SESSION_BIND_FILE.exists():
             return
         try:
-            import yaml
             raw = yaml.safe_load(self._SESSION_BIND_FILE.read_text(encoding="utf-8")) or {}
             now = time.time()
             loaded = 0
@@ -247,7 +248,7 @@ class Dispatcher:
 
     def _schedule_bindings_save(self) -> None:
         """延迟保存会话绑定到磁盘"""
-        if not hasattr(self, "_bind_save_timer") or self._bind_save_timer is None or not self._bind_save_timer.is_alive():
+        if self._bind_save_timer is None or not self._bind_save_timer.is_alive():
             self._bind_save_timer = threading.Timer(self._SESSION_BIND_SAVE_DEBOUNCE, self._persist_bindings)
             self._bind_save_timer.daemon = True
             self._bind_save_timer.start()
@@ -255,7 +256,6 @@ class Dispatcher:
     def _persist_bindings(self) -> None:
         """实际写入会话绑定到磁盘"""
         try:
-            import yaml
             with self._session_lock:
                 snapshot = {
                     sid: {"provider": prov, "model": model, "ts": ts}
@@ -271,7 +271,7 @@ class Dispatcher:
 
     def flush_session_bindings(self) -> None:
         """立即持久化会话绑定（用于优雅关闭）"""
-        if hasattr(self, "_bind_save_timer") and self._bind_save_timer:
+        if self._bind_save_timer:
             self._bind_save_timer.cancel()
         self._persist_bindings()
 
@@ -722,16 +722,17 @@ class Dispatcher:
     # region 路由缓存与 LLM 路由
 
     def _get_cached_route(self, feature_hash: str) -> str | None:
-        """查找路由缓存（同步快速路径，仅读操作）"""
-        entry = self._route_cache.get(feature_hash)
-        if entry is None:
+        """查找路由缓存"""
+        with self._route_cache_sync_lock:
+            entry = self._route_cache.get(feature_hash)
+            if entry is None:
+                return None
+            model_name, ts = entry
+            if time.time() - ts < self._route_cache_ttl:
+                logger.info("路由缓存命中: %s → %s", feature_hash, model_name)
+                return model_name
+            self._route_cache.pop(feature_hash, None)
             return None
-        model_name, ts = entry
-        if time.time() - ts < self._route_cache_ttl:
-            logger.info("路由缓存命中: %s → %s", feature_hash, model_name)
-            return model_name
-        self._route_cache.pop(feature_hash, None)
-        return None
 
     async def _set_cached_route_async(self, feature_hash: str, model_name: str) -> None:
         """写入路由缓存（异步安全）"""
@@ -742,11 +743,12 @@ class Dispatcher:
             self._route_cache[feature_hash] = (model_name, time.time())
 
     def _set_cached_route(self, feature_hash: str, model_name: str) -> None:
-        """写入路由缓存（同步版本，保留向后兼容；高并发场景应使用 _set_cached_route_async）"""
-        if len(self._route_cache) >= ROUTE_CACHE_MAX:
-            oldest_key = min(self._route_cache, key=lambda k: self._route_cache[k][1])
-            del self._route_cache[oldest_key]
-        self._route_cache[feature_hash] = (model_name, time.time())
+        """写入路由缓存"""
+        with self._route_cache_sync_lock:
+            if len(self._route_cache) >= ROUTE_CACHE_MAX:
+                oldest_key = min(self._route_cache, key=lambda k: self._route_cache[k][1])
+                del self._route_cache[oldest_key]
+            self._route_cache[feature_hash] = (model_name, time.time())
 
     async def purge_expired_cache(self) -> int:
         """清理所有 TTL 过期的路由缓存条目，返回清理数量"""
@@ -952,7 +954,7 @@ class Dispatcher:
                         result = await self._try_stream(candidates[0][0], candidates[0][1], request, trace_id=trace_id)
                         _route_strategy_var.set("会话绑定")
                         return result
-                    except ProviderCallError as e:
+                    except Exception as e:
                         logger.warning("流式会话绑定 %s:%s 失败: %s，清除绑定并降级到正常路由", prov, model, e)
                         self.clear_session_binding(request.session_id)
 

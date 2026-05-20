@@ -201,11 +201,12 @@ class MemoryEntry:
 
 
 class LongTermMemoryStore:
-    """L2 Long-term Memory — JSON 文件持久化"""
+    """L2 Long-term Memory — JSON 文件持久化（线程安全）"""
 
     def __init__(self, memory_file: Path | None = None):
         self._file = memory_file or (MEMORY_DIR / "long_term.json")
         self._file.parent.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.Lock()
         self._entries: list[MemoryEntry] = []
         self._load()
 
@@ -226,20 +227,23 @@ class LongTermMemoryStore:
         except Exception as e:
             logger.error("保存长期记忆失败: %s", e)
 
-    def add(self, entry: MemoryEntry) -> None:
+    def add(self, entry: MemoryEntry, *, auto_save: bool = True) -> None:
         """添加新记忆（去重：相同内容不重复添加，但提升重要性）"""
-        for existing in self._entries:
-            if self._is_similar(existing.content, entry.content):
-                existing.importance = min(1.0, existing.importance + 0.1)
-                existing.access_count += 1
-                existing.last_accessed = time.time()
+        with self._lock:
+            for existing in self._entries:
+                if self._is_similar(existing.content, entry.content):
+                    existing.importance = min(1.0, existing.importance + 0.1)
+                    existing.access_count += 1
+                    existing.last_accessed = time.time()
+                    if auto_save:
+                        self._save()
+                    return
+            self._entries.append(entry)
+            if auto_save:
                 self._save()
-                return
-        self._entries.append(entry)
-        self._save()
 
     def retrieve(self, query: str, max_results: int = 10) -> list[MemoryEntry]:
-        """基于 n-gram 相似度 + 关键词匹配 + 重要性 + 时效性的混合检索"""
+        """基于 n-gram 相似度 + 关键词匹配 + 重要性 + 时效性的混合检索（线程安全）"""
         if not self._entries:
             return []
 
@@ -279,17 +283,19 @@ class LongTermMemoryStore:
         scored.sort(key=lambda x: x[0], reverse=True)
 
         results = [entry for _, entry in scored[:max_results]]
-        for entry in results:
-            entry.access_count += 1
-            entry.last_accessed = now
-        if results:
-            self._save()
+        with self._lock:
+            for entry in results:
+                entry.access_count += 1
+                entry.last_accessed = now
+            if results:
+                self._save()
 
         return results
 
     def get_core_memories(self, importance_threshold: float = 0.6) -> list[MemoryEntry]:
         """获取核心记忆：高重要性偏好和语义知识，始终注入 system prompt"""
-        core = [e for e in self._entries if e.importance >= importance_threshold]
+        with self._lock:
+            core = [e for e in self._entries if e.importance >= importance_threshold]
         core.sort(key=lambda e: e.importance, reverse=True)
         return core[:10]
 
@@ -299,26 +305,28 @@ class LongTermMemoryStore:
         return sorted_entries[:n]
 
     def get_all(self) -> list[MemoryEntry]:
-        return list(self._entries)
+        with self._lock:
+            return list(self._entries)
 
     def size(self) -> int:
         return len(self._entries)
 
     def decay(self, max_entries: int = 200) -> int:
         """衰减清理：当超过上限时，移除最不重要且最久未访问的条目"""
-        if len(self._entries) <= max_entries:
-            return 0
-        now = time.time()
-        for entry in self._entries:
-            age_days = (now - entry.last_accessed) / 86400
-            entry.importance *= max(0.1, 1.0 - age_days * 0.005)
+        with self._lock:
+            if len(self._entries) <= max_entries:
+                return 0
+            now = time.time()
+            for entry in self._entries:
+                age_days = (now - entry.last_accessed) / 86400
+                entry.importance *= max(0.1, 1.0 - age_days * 0.005)
 
-        self._entries.sort(key=lambda e: e.importance, reverse=True)
-        removed = len(self._entries) - max_entries
-        self._entries = self._entries[:max_entries]
-        self._save()
-        logger.info("记忆衰减清理: 移除 %d 条低重要性记忆", removed)
-        return removed
+            self._entries.sort(key=lambda e: e.importance, reverse=True)
+            removed = len(self._entries) - max_entries
+            self._entries = self._entries[:max_entries]
+            self._save()
+            logger.info("记忆衰减清理: 移除 %d 条低重要性记忆", removed)
+            return removed
 
     @staticmethod
     def _is_similar(a: str, b: str) -> bool:
@@ -345,7 +353,7 @@ class MemoryConsolidator:
         self._store = store
 
     def consolidate(self, session_id: str, session_memory: SessionMemoryStore) -> int:
-        """将 Session Memory 巩固到 Long-term Memory，返回新增条目数"""
+        """将 Session Memory 巩固到 Long-term Memory，返回新增条目数（批量保存）"""
         added = 0
         now = time.time()
 
@@ -364,10 +372,11 @@ class MemoryConsolidator:
                     tags=session_memory.topics[:3],
                     source_session=session_id,
                 )
-                self._store.add(entry)
+                self._store.add(entry, auto_save=False)
                 added += 1
 
         if added > 0:
+            self._store._save()
             logger.info("记忆巩固: session=%s 写入 %d 条到长期记忆", session_id, added)
             self._store.decay()
 
@@ -378,25 +387,28 @@ AUTO_CONSOLIDATE_IDLE_SECONDS = 600  # 10 分钟空闲后自动巩固
 
 
 class MemoryManager:
-    """统一 Memory 管理器 — 集成 L1 + L2 + 自动巩固"""
+    """统一 Memory 管理器 — 集成 L1 + L2 + 自动巩固（线程安全）"""
 
     def __init__(self):
         self._store = LongTermMemoryStore()
         self._consolidator = MemoryConsolidator(self._store)
         self._extractor = SessionMemoryExtractor()
+        self._lock = threading.Lock()
         self._session_memories: dict[str, SessionMemoryStore] = {}
         self._session_last_active: dict[str, float] = {}
         self._auto_consolidate_timer: threading.Timer | None = None
         self._start_auto_consolidate()
 
     def get_session_memory(self, session_id: str) -> SessionMemoryStore:
-        if session_id not in self._session_memories:
-            self._session_memories[session_id] = SessionMemoryStore()
-        return self._session_memories[session_id]
+        with self._lock:
+            if session_id not in self._session_memories:
+                self._session_memories[session_id] = SessionMemoryStore()
+            return self._session_memories[session_id]
 
     def on_session_start(self, session_id: str, first_message: str) -> str:
         """会话开始 — 加载核心记忆 + 检索相关记忆，返回注入文本"""
-        self._session_memories[session_id] = SessionMemoryStore()
+        with self._lock:
+            self._session_memories[session_id] = SessionMemoryStore()
 
         core_memories = self._store.get_core_memories()
         relevant = self._store.retrieve(first_message, max_results=5)
@@ -420,7 +432,8 @@ class MemoryManager:
 
     def on_turn_complete(self, session_id: str, user_msg: str, assistant_msg: str) -> None:
         """每轮对话后 — 增量提取 Session Memory"""
-        self._session_last_active[session_id] = time.time()
+        with self._lock:
+            self._session_last_active[session_id] = time.time()
         new_entries = self._extractor.extract_from_turn(user_msg, assistant_msg)
         if new_entries:
             session_mem = self.get_session_memory(session_id)
@@ -428,11 +441,12 @@ class MemoryManager:
 
     def on_session_end(self, session_id: str) -> int:
         """会话结束 — 巩固到长期记忆"""
-        session_mem = self._session_memories.get(session_id)
-        if not session_mem:
-            return 0
+        with self._lock:
+            session_mem = self._session_memories.get(session_id)
+            if not session_mem:
+                return 0
+            self._session_memories.pop(session_id, None)
         added = self._consolidator.consolidate(session_id, session_mem)
-        self._session_memories.pop(session_id, None)
         return added
 
     async def llm_extract_memories(self, session_id: str, messages: list[dict]) -> dict[str, list[str]]:
@@ -514,16 +528,18 @@ class MemoryManager:
         """检查空闲会话并自动巩固"""
         try:
             now = time.time()
-            idle_sessions = [
-                sid for sid, last_active in list(self._session_last_active.items())
-                if now - last_active > AUTO_CONSOLIDATE_IDLE_SECONDS
-                and sid in self._session_memories
-            ]
+            with self._lock:
+                idle_sessions = [
+                    sid for sid, last_active in list(self._session_last_active.items())
+                    if now - last_active > AUTO_CONSOLIDATE_IDLE_SECONDS
+                    and sid in self._session_memories
+                ]
             for sid in idle_sessions:
                 added = self.on_session_end(sid)
                 if added > 0:
                     logger.info("[Memory] 自动巩固空闲会话 %s: %d 条", sid, added)
-                self._session_last_active.pop(sid, None)
+                with self._lock:
+                    self._session_last_active.pop(sid, None)
         except Exception as e:
             logger.warning("[Memory] 自动巩固检查异常: %s", e)
         finally:

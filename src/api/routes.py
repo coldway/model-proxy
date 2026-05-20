@@ -140,23 +140,15 @@ def _extract_json_from_response(content: str) -> str:
                 return candidate
             except (json.JSONDecodeError, ValueError):
                 pass
-    # 尝试从文本中找到第一个 { 或 [ 开始的 JSON
-    for start_char, end_char in [("{", "}"), ("[", "]")]:
+    # 逐位置尝试从 { 或 [ 开始解析 JSON（兼容字符串内的花括号）
+    for start_char in ("{", "["):
         start = stripped.find(start_char)
         if start >= 0:
-            depth = 0
-            for i in range(start, len(stripped)):
-                if stripped[i] == start_char:
-                    depth += 1
-                elif stripped[i] == end_char:
-                    depth -= 1
-                    if depth == 0:
-                        candidate = stripped[start:i + 1]
-                        try:
-                            json.loads(candidate)
-                            return candidate
-                        except (json.JSONDecodeError, ValueError):
-                            break
+            try:
+                obj = json.loads(stripped[start:])
+                return json.dumps(obj, ensure_ascii=False)
+            except (json.JSONDecodeError, ValueError):
+                pass
     return content
 
 
@@ -268,11 +260,7 @@ async def _handle_stream(request: ChatCompletionRequest, enabled_models, trace_i
 
     latency = (time.time() - start_time) * 1000
     route_strategy = _deps.dispatcher.last_route_strategy or ""
-    if _deps.history:
-        _deps.history.record(
-            provider=provider_name, model=model_name,
-            success=True, latency_ms=latency,
-        )
+    # 流式历史记录延迟到流结束后，此处仅记录连接建立（不标记 success）
     logger.info("[API] trace=%s%s 流式连接建立 | provider=%s model=%s 耗时=%.0fms", trace_id, sid_tag, provider_name, model_name, latency)
     bound = _deps.dispatcher.get_session_binding(request.session_id) if request.session_id else None
     info = ProxyInfo(

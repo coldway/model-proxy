@@ -80,7 +80,7 @@ class TestCircuitBreaker:
         cb.record_failure("google")
         status = cb.get_status()
         assert "google" in status
-        assert status["google"]["broken"] is True
+        assert status["google"]["state"] == "open"
         assert status["google"]["remaining_seconds"] > 0
 
     def test_model_level_independent(self):

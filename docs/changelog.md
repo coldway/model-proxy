@@ -6,6 +6,21 @@
 
 ## [Unreleased]
 
+### 修复（Bug Fix）— 第五轮审查
+
+- **_cleanup_expired_trash 死锁**：遍历 `_trash` 未持锁，并发修改可致 `RuntimeError`；整个操作移入 `_lock` 内
+- **CircuitBreaker 半开冷却计算错误**：`min(cooldown*2, cooldown*3)` 永远等于 `*2`；改为 `int(cooldown * 1.5)`
+- **路由缓存并发读写不一致**：`_get_cached_route` 含无锁 `pop` 写操作；新增 `threading.Lock` 统一保护
+- **流式会话绑定降级遗漏**：流式路径只捕获 `ProviderCallError`，`RateLimitExceeded` 等异常会冒泡且不清绑定；改为 `except Exception`
+- **_extract_json 花括号匹配错误**：简单深度计数不处理字符串内花括号；改用 `json.loads` 解析
+- **流式历史记录虚假成功**：`_handle_stream` 在流未结束时即记录 `success=True`；移除连接建立时的记录
+- **get_context_messages tool_call 链断裂**：截断可能保留 `tool` 回复但丢失前序 `assistant` tool_calls；截断后跳过孤立的 `tool` 消息
+- **Memory 系统并发安全**：`LongTermMemoryStore` 和 `MemoryManager` 均无线程安全保护；新增 `threading.Lock`
+- **MemoryConsolidator 批量 I/O**：巩固 N 条记忆触发 N 次磁盘写入；改为批量完成后统一 `_save()`
+- **_is_blacklisted_unlocked 锁内创建 Timer**：持锁时调 `_save_blacklist()` 创建 Timer 线程，改为仅标记 dirty
+- **dispatcher 函数内 import yaml**：提升到模块级，符合 MP-43 规范
+- **PayloadTracker 定时器泄漏**：未检查旧 Timer 存活即覆盖；新增 `is_alive()` 前置检查
+
 ### 修复（Bug Fix）
 
 - **SessionManager 竞态条件修复（MP-52）**：`save()` 方法将 timer cancellation 移入 `_lock` 内，消除 cancel 与 lock acquisition 之间的 race window；timer 回调改为独立的 `_timer_flush()` 方法，避免 `save()` → `_lock` 的间接递归风险

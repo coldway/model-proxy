@@ -6,6 +6,16 @@
 
 ## [Unreleased]
 
+### 新功能（Feature）
+
+- **Ollama 本地模型 Provider**：新增 `src/providers/ollama.py`，接入本地 Ollama 实例
+  - 无需 API Key，通过 OpenAI 兼容 API（`/v1/chat/completions`）接入
+  - 实时查询本地已安装模型（`/api/tags`），自动注册到 Catalog
+  - 支持流式 / 非流式 / tool calling / response_format
+  - 启动时自动发现已安装模型，新增 `POST /api/provider/ollama/refresh` 端点手动刷新
+  - base_url 可通过 config.yaml 自定义（默认 `http://localhost:11434`）
+  - 智能推断 tool calling 支持（llama3.1+, qwen2.5+, mistral 等）
+
 ### 修复（Bug Fix）— 第五轮审查
 
 - **_cleanup_expired_trash 死锁**：遍历 `_trash` 未持锁，并发修改可致 `RuntimeError`；整个操作移入 `_lock` 内

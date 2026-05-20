@@ -1146,6 +1146,7 @@
             cloudflare: { name: 'Cloudflare', icon: 'F', color: 'icon-google', desc: 'Workers AI 每日万次免费', url: 'https://ai.cloudflare.com/', guide: 'Dashboard > AI > Workers AI\n获取 Account ID 和 API Token\n\nAPI Key 格式: account_id:api_token\n\n每日 10,000 neurons 免费（约数千次请求）' },
             huggingface: { name: 'HuggingFace', icon: 'H', color: 'icon-github', desc: '免费推理数千开源模型', url: 'https://huggingface.co/inference-api', guide: 'https://huggingface.co/settings/tokens 创建 Token\n\n支持数千个开源模型免费推理\n有速率限制但无需付费\n支持 OpenAI 兼容 /v1/chat/completions' },
             mistral: { name: 'Mistral AI', icon: 'M', color: 'icon-groq', desc: '官方平台免费层', url: 'https://console.mistral.ai/', guide: 'https://console.mistral.ai/api-keys/ 获取 Key\n\n兼容 OpenAI SDK:\nbase_url = https://api.mistral.ai/v1\n\nCodestral 代码模型免费（非商业用途）' },
+            ollama: { name: 'Ollama 本地', icon: 'O', color: 'icon-cursor', desc: '本地模型，无需 API Key', url: 'https://ollama.com/', guide: '无需 API Key，运行 Ollama 后自动发现本地已安装模型\n\n安装: https://ollama.com/download\n拉取模型: ollama pull qwen3:8b\n\n可在 API Key 字段填写自定义 base_url\n默认: http://localhost:11434' },
         };
 
         async function loadProviderCards() {
@@ -1198,6 +1199,7 @@
                                 <div class="stat-item"><span class="label">已启用</span><span class="value">${enabledCount}</span></div>
                                 <div class="stat-item"><span class="label">Key</span><span class="value" style="color:${prov.has_api_key ? 'var(--accent-green)' : 'var(--accent-red)'}">${prov.has_api_key ? '✓' : '—'}</span></div>
                             </div>
+                            ${id === 'ollama' ? '<button class="guide-btn" title="刷新本地模型" style="margin-right:4px" onclick="event.stopPropagation();refreshOllamaModels()">↻</button>' : ''}
                             <button class="guide-btn" title="接入说明" onclick="event.stopPropagation();showGuide('${id}')">?</button>
                         </div>
                     </div>`;
@@ -1489,6 +1491,25 @@
             const data = await resp.json();
             toast(data.message || `${provider} 已${enabled ? '启用' : '禁用'}`, 'success');
             loadProviderCards();
+        }
+
+        async function refreshOllamaModels() {
+            toast('正在刷新 Ollama 本地模型…', 'info');
+            try {
+                const resp = await apiFetch(API + '/api/provider/ollama/refresh', {method:'POST'});
+                const data = await resp.json();
+                if (resp.ok) {
+                    const msg = data.new > 0
+                        ? `发现 ${data.new} 个新模型（共 ${data.total} 个）: ${data.new_models.join(', ')}`
+                        : `已是最新（共 ${data.total} 个本地模型）`;
+                    toast(msg, 'success');
+                    loadProviderCards();
+                } else {
+                    toast(data.detail || '刷新失败', 'error');
+                }
+            } catch (e) {
+                toast('无法连接 Ollama 服务', 'error');
+            }
         }
 
         async function saveKey(provider) {

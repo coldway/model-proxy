@@ -808,3 +808,17 @@ groq/whisper-large-v3-turbo:
   tested_at: '2026-05-13 17:32:52'
   tool_calling: false
   vision: false
+cursor/cursor-agent:
+  provider: cursor
+  model: cursor-agent
+  available: false
+  tool_calling: false
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: ''
+  tested_at: '2026-05-21 00:38:52'

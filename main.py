@@ -28,6 +28,7 @@ from src.providers.github import GitHubProvider
 from src.providers.google import GoogleProvider
 from src.providers.groq import GroqProvider
 from src.providers.huggingface import HuggingFaceProvider
+from src.providers.ollama import OllamaProvider
 from src.providers.openai_compat import create_openai_provider
 from src.scheduler.dispatcher import Dispatcher
 from src.scheduler.history import RequestHistory
@@ -103,11 +104,18 @@ def create_app() -> FastAPI:
         "sambanova": lambda key: create_openai_provider("sambanova", key),
         "openrouter": lambda key: create_openai_provider("openrouter", key),
         "mistral": lambda key: create_openai_provider("mistral", key),
+        "ollama": lambda key: OllamaProvider(key),
     }
+
+    _NO_KEY_PROVIDERS = {"ollama"}
 
     for name, factory in provider_factories.items():
         api_key = config_manager.get_api_key(name)
-        if api_key:
+        if name in _NO_KEY_PROVIDERS:
+            if catalog.get_provider(name) is None or catalog.is_provider_enabled(name):
+                dispatcher.register_provider(name, factory(api_key))
+                logger.info("已注册 %s 厂商（本地，无需 API Key）", name)
+        elif api_key:
             dispatcher.register_provider(name, factory(api_key))
             logger.info("已注册 %s 厂商", name)
 
@@ -155,6 +163,15 @@ def create_app() -> FastAPI:
             all_caps = capability_cache.get_all()
             if all_caps:
                 logger.info("已加载 %d 个模型的能力缓存（预热）", len(all_caps))
+
+        ollama_prov = dispatcher.get_provider("ollama")
+        if isinstance(ollama_prov, OllamaProvider):
+            try:
+                added = await ollama_prov.discover_and_register(catalog)
+                if added:
+                    logger.info("Ollama 启动发现 %d 个本地模型", len(added))
+            except Exception as exc:
+                logger.warning("Ollama 启动模型发现失败（服务可能未运行）: %s", exc)
 
         yield
         flush_task.cancel()

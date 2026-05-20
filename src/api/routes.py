@@ -525,15 +525,29 @@ async def toggle_provider(provider: str, enabled: bool):
     if _deps.catalog:
         _deps.catalog.set_provider_enabled(provider, enabled)
 
+    _NO_KEY_PROVIDERS = {"cursor", "ollama"}
+
     if enabled and not _deps.dispatcher.has_provider(provider):
         if provider == "cursor":
             from src.providers.cursor import CursorProvider
             _deps.dispatcher.register_provider("cursor", CursorProvider())
             logger.info("动态注册 Cursor 厂商")
             return {"status": "ok", "message": f"{provider} 已启用并加载"}
+        elif provider == "ollama":
+            api_key = _deps.config_manager.get_api_key(provider) if _deps.config_manager else ""
+            try:
+                prov_instance = _deps.provider_factories["ollama"](api_key)
+                _deps.dispatcher.register_provider("ollama", prov_instance)
+                logger.info("动态注册 Ollama 厂商")
+                added = await prov_instance.discover_and_register(_deps.catalog)
+                msg = f"ollama 已启用并加载，发现 {len(added)} 个本地模型" if added else "ollama 已启用并加载"
+                return {"status": "ok", "message": msg}
+            except Exception as e:
+                logger.error("动态注册 Ollama 失败: %s", e)
+                return {"status": "ok", "message": f"ollama 已启用，但连接失败: {e}"}
         elif provider in _deps.provider_factories:
             api_key = _deps.config_manager.get_api_key(provider) if _deps.config_manager else ""
-            if api_key.strip():
+            if api_key.strip() or provider in _NO_KEY_PROVIDERS:
                 try:
                     _deps.dispatcher.register_provider(provider, _deps.provider_factories[provider](api_key))
                     logger.info("动态注册厂商 %s", provider)
@@ -549,6 +563,31 @@ async def toggle_provider(provider: str, enabled: bool):
         return {"status": "ok", "message": f"{provider} 已禁用并卸载"}
 
     return {"status": "ok", "message": f"{provider} 已{'启用' if enabled else '禁用'}"}
+
+
+@router.post("/api/provider/ollama/refresh")
+async def refresh_ollama_models():
+    """刷新 Ollama 本地模型列表 — 查询已安装模型并自动注册到目录"""
+    from src.providers.ollama import OllamaProvider
+
+    prov = _deps.dispatcher.get_provider("ollama")
+    if not isinstance(prov, OllamaProvider):
+        raise HTTPException(status_code=400, detail="Ollama 厂商未启用或未注册")
+    if not _deps.catalog:
+        raise HTTPException(status_code=500, detail="目录未初始化")
+
+    try:
+        added = await prov.discover_and_register(_deps.catalog)
+        all_models = await prov.list_models()
+        return {
+            "status": "ok",
+            "total": len(all_models),
+            "new": len(added),
+            "new_models": added,
+            "all_models": all_models,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"无法连接 Ollama: {e}") from e
 
 
 @router.post("/api/provider/priority")

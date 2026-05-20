@@ -13,6 +13,7 @@ class ProviderName(str, Enum):
     GOOGLE = "google"
     GROQ = "groq"
     GITHUB = "github"
+    OLLAMA = "ollama"
     CURSOR = "cursor"
 
 

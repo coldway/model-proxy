@@ -125,9 +125,14 @@ class GroqProvider(BaseProvider):
         }
 
     def _build_payload(self, model: str, request: ChatCompletionRequest, stream: bool = False) -> dict:
+        messages = [msg_to_dict(m) for m in request.messages]
+        if request.response_format and request.response_format.type in ("json_object", "json_schema"):
+            has_json_hint = any("json" in (m.get("content") or "").lower() for m in messages)
+            if not has_json_hint:
+                messages.insert(0, {"role": "system", "content": "Output valid JSON only."})
         payload: dict = {
             "model": model,
-            "messages": [msg_to_dict(m) for m in request.messages],
+            "messages": messages,
             "temperature": request.temperature,
             "stream": stream,
         }
@@ -143,6 +148,11 @@ class GroqProvider(BaseProvider):
             payload["tools"] = relaxed
         if request.tool_choice is not None:
             payload["tool_choice"] = request.tool_choice
+        if request.response_format:
+            rf_type = request.response_format.type
+            if rf_type == "json_schema":
+                rf_type = "json_object"
+            payload["response_format"] = {"type": rf_type}
         return payload
 
     async def chat_completion(

@@ -55,6 +55,11 @@ class GitHubProvider(BaseProvider):
             payload["tools"] = [t.model_dump() for t in request.tools]
         if request.tool_choice is not None:
             payload["tool_choice"] = request.tool_choice
+        if request.response_format:
+            rf = {"type": request.response_format.type}
+            if request.response_format.type == "json_schema" and request.response_format.json_schema:
+                rf["json_schema"] = request.response_format.json_schema
+            payload["response_format"] = rf
         return payload
 
     async def chat_completion(

@@ -50,6 +50,14 @@ class GoogleProvider(BaseProvider):
             payload["generationConfig"]["maxOutputTokens"] = request.max_tokens
         if request.tools:
             payload["tools"] = [self._convert_tools(request.tools)]
+        if request.response_format:
+            if request.response_format.type in ("json_object", "json_schema"):
+                payload["generationConfig"]["responseMimeType"] = "application/json"
+            if request.response_format.type == "json_schema" and request.response_format.json_schema:
+                schema = request.response_format.json_schema
+                if "schema" in schema:
+                    schema = schema["schema"]
+                payload["generationConfig"]["responseSchema"] = self._clean_json_schema(schema)
         return payload
 
     def _convert_tools(self, tools) -> dict:

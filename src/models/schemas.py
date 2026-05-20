@@ -121,6 +121,18 @@ class ChatMessage(BaseModel):
         return v
 
 
+class ResponseFormat(BaseModel):
+    """结构化输出格式控制（兼容 OpenAI response_format）"""
+    type: str = Field(
+        default="text",
+        description="输出格式：text（默认）、json_object（强制 JSON）、json_schema（严格 schema）",
+    )
+    json_schema: dict[str, Any] | None = Field(
+        default=None,
+        description="当 type=json_schema 时，指定 JSON Schema 定义",
+    )
+
+
 class ChatCompletionRequest(BaseModel):
     model: str = "auto"
     messages: list[ChatMessage] = Field(..., min_length=1)
@@ -129,6 +141,10 @@ class ChatCompletionRequest(BaseModel):
     stream: bool = False
     tools: list[ToolDefinition] | None = None
     tool_choice: str | dict | None = None
+    response_format: ResponseFormat | None = Field(
+        default=None,
+        description="输出格式控制：{type: 'json_object'} 强制 JSON 输出，{type: 'json_schema', json_schema: {...}} 严格 schema 约束",
+    )
     session_id: str | None = Field(
         default=None,
         description="会话标识：首次请求成功后自动绑定模型，后续携带相同 session_id 的请求将路由到同一模型",

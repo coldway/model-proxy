@@ -19,7 +19,7 @@ Model Proxy 采用分层架构，将推理请求的接收、调度、执行三�
 ├──────────┴──────────────────┴───────────────┤
 │               厂商适配层                      │
 │  google │ groq │ github │ huggingface │ ... │
-│  openai_compat │ cloudflare │ cursor        │
+│  openai_compat │ cloudflare │ cursor │ollama│
 └─────────────────────────────────────────────┘
 ```
 
@@ -27,11 +27,11 @@ Model Proxy 采用分层架构，将推理请求的接收、调度、执行三�
 
 | 模块 | 路径 | 职责 |
 |------|------|------|
-| **API 层** | `src/api/` | 接收 HTTP 请求，返回推理结果和管理操作 |
+| **API 层** | `src/api/` | 接收 HTTP 请求，返回推理结果和管理操作。含内部工具系统（`internal_tools.py`）：5 个 LLM 可调用工具（`add_model`、`list_provider_models` 等） |
 | **配置层** | `src/config/` | 管理 API Key（config.yaml）和厂商目录（providers_catalog.yaml） |
 | **调度层** | `src/scheduler/` | 模型选择、速率限制、熔断器、payload 追踪、会话管理、请求历史 |
 | **记忆层** | `src/scheduler/memory.py` | L1 会话记忆 + L2 跨会话长期记忆，规则/LLM 提取 + bigram 检索，详见 [memory.md](memory.md) |
-| **厂商层** | `src/providers/` | 各厂商 API 的具体适配实现 |
+| **厂商层** | `src/providers/` | 各厂商 API 的具体适配实现。含 Ollama 本地模型 Provider（`ollama.py`）：自动模型发现、一键安装、abliterated 推断 |
 | **数据模型** | `src/models/` | Pydantic 数据结构定义 |
 
 ## 请求流程

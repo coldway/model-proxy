@@ -15,6 +15,18 @@
   - 启动时自动发现已安装模型，新增 `POST /api/provider/ollama/refresh` 端点手动刷新
   - base_url 可通过 config.yaml 自定义（默认 `http://localhost:11434`）
   - 智能推断 tool calling 支持（llama3.1+, qwen2.5+, mistral 等）
+  - abliterated/uncensored/raw 模型自动排除 tool calling 推断
+- **Ollama 模型安装检测与一键下载**：能力测试前自动检查模型是否本地已安装
+  - 未安装时 UI 弹出确认框提供下载选项
+  - 新增 `POST /api/provider/ollama/pull` SSE 端点，流式推送下载进度
+  - 下载完成后自动注册到 Catalog
+- **聊天内置工具 — 自然语言模型管理**
+  - `add_model`：通过聊天添加模型（如"为我的 ollama 增加 qwen3:8b"）
+    - Ollama 厂商：检查安装状态 → 自动下载 → 注册到 Catalog
+    - 远程厂商：查询支持列表 → 添加配置 → 自动能力测试
+  - `list_provider_models`：通过聊天查询厂商模型（如"groq 支持哪些模型"）
+    - 调用厂商 API 拉取全量模型列表
+    - 分三组返回：未添加 / 已启用 / 已禁用
 
 ### 修复（Bug Fix）— 第六轮审查（14项）
 

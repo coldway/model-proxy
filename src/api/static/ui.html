@@ -436,6 +436,9 @@
             <button class="tab" onclick="switchTab('logs', this)">
                 <span>📋</span> 实时日志
             </button>
+            <button class="tab" onclick="switchTab('memory', this)">
+                <span>🧠</span> 记忆
+            </button>
             <button class="tab" onclick="switchTab('integration', this)">
                 <span>📖</span> 接入指南
             </button>
@@ -566,6 +569,38 @@
                     </div>
                 </div>
                 <div id="log-container" style="height:calc(100vh - 260px);overflow-y:auto;font-family:'JetBrains Mono','Fira Code','SF Mono',Menlo,Consolas,monospace;font-size:0.72rem;line-height:1.55;background:var(--bg-primary);border-radius:var(--radius-xs);padding:8px 12px;border:1px solid var(--border)">
+                </div>
+            </div>
+        </div>
+
+        <!-- 记忆管理 -->
+        <div id="panel-memory" class="panel">
+            <div class="card">
+                <div class="card-header">
+                    <h3>长期记忆管理</h3>
+                    <div style="display:flex;gap:8px">
+                        <button class="btn btn-sm" onclick="loadMemory()">刷新</button>
+                        <button class="btn btn-sm" onclick="exportMemory()">导出 JSON</button>
+                        <label class="btn btn-sm" style="cursor:pointer">导入 JSON<input type="file" accept=".json" onchange="importMemory(event)" style="display:none"></label>
+                    </div>
+                </div>
+                <div id="memory-stats" style="padding:8px 0;font-size:0.85rem;color:var(--text-muted)"></div>
+                <div id="memory-list" style="display:flex;flex-direction:column;gap:8px"></div>
+                <div id="memory-empty" style="padding:32px;text-align:center;color:var(--text-muted);display:none">
+                    暂无长期记忆。在聊天中表达偏好或做出决策后，系统会自动记录。
+                </div>
+            </div>
+
+            <div class="card" style="margin-top:16px">
+                <div class="card-header"><h3>手动添加记忆</h3></div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;padding:4px 0">
+                    <select id="memory-add-type" style="padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg-secondary);color:var(--text-primary)">
+                        <option value="preference">偏好</option>
+                        <option value="semantic">知识</option>
+                        <option value="episodic">经验</option>
+                    </select>
+                    <input id="memory-add-content" type="text" placeholder="输入记忆内容..." style="flex:1;min-width:200px;padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg-secondary);color:var(--text-primary)">
+                    <button class="btn btn-sm" onclick="addMemory()" style="background:var(--accent);color:#fff">添加</button>
                 </div>
             </div>
         </div>
@@ -889,6 +924,7 @@
             document.getElementById('panel-' + name).classList.add('active');
             location.hash = name;
             if (name === 'routing') loadRoutingLog();
+            if (name === 'memory') loadMemory();
             if (name === 'logs') startLogPolling();
             else stopLogPolling();
         }
@@ -2484,6 +2520,93 @@ for await (const chunk of stream) {
                 }
             }
         })();
+
+        // --- Memory 管理 ---
+        async function loadMemory() {
+            try {
+                const [statsResp, entriesResp] = await Promise.all([
+                    apiFetch('/api/memory/stats'),
+                    apiFetch('/api/memory/entries?limit=100')
+                ]);
+                const stats = await statsResp.json();
+                const data = await entriesResp.json();
+
+                document.getElementById('memory-stats').innerHTML =
+                    `共 <strong>${stats.total_entries}</strong> 条记忆 | ` +
+                    Object.entries(stats.by_type || {}).map(([k,v]) => `${k}: ${v}`).join(', ') +
+                    ` | 活跃会话: ${stats.active_sessions}`;
+
+                const list = document.getElementById('memory-list');
+                const empty = document.getElementById('memory-empty');
+                if (!data.entries || data.entries.length === 0) {
+                    list.innerHTML = '';
+                    empty.style.display = 'block';
+                    return;
+                }
+                empty.style.display = 'none';
+                list.innerHTML = data.entries.map(e => {
+                    const typeLabel = {preference:'偏好',semantic:'知识',episodic:'经验'}[e.type] || e.type;
+                    const date = new Date(e.created_at * 1000).toLocaleString('zh-CN', {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+                    const imp = (e.importance * 100).toFixed(0);
+                    return `<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--bg-secondary);border-radius:8px;border:1px solid var(--border)">
+                        <span style="font-size:0.7rem;padding:2px 6px;border-radius:4px;background:var(--accent);color:#fff;white-space:nowrap">${typeLabel}</span>
+                        <span style="flex:1;font-size:0.88rem">${e.content}</span>
+                        <span style="font-size:0.72rem;color:var(--text-muted);white-space:nowrap">${date}</span>
+                        <span style="font-size:0.72rem;color:var(--text-muted)" title="重要性">⚡${imp}%</span>
+                        <button onclick="deleteMemory('${e.id}')" style="border:none;background:none;cursor:pointer;color:var(--text-muted);font-size:1rem" title="删除">×</button>
+                    </div>`;
+                }).join('');
+            } catch (err) {
+                console.error('loadMemory error:', err);
+            }
+        }
+
+        async function addMemory() {
+            const type = document.getElementById('memory-add-type').value;
+            const content = document.getElementById('memory-add-content').value.trim();
+            if (!content) { toast('请输入记忆内容', 'warning'); return; }
+            try {
+                await apiFetch('/api/memory/add', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({type, content}) });
+                document.getElementById('memory-add-content').value = '';
+                toast('记忆已添加', 'success');
+                loadMemory();
+            } catch (err) { toast('添加失败: ' + err.message, 'error'); }
+        }
+
+        async function deleteMemory(id) {
+            if (!confirm('确定删除这条记忆？')) return;
+            try {
+                await apiFetch('/api/memory/entries/' + id, { method: 'DELETE' });
+                toast('已删除', 'success');
+                loadMemory();
+            } catch (err) { toast('删除失败: ' + err.message, 'error'); }
+        }
+
+        async function exportMemory() {
+            try {
+                const resp = await apiFetch('/api/memory/entries?limit=9999');
+                const data = await resp.json();
+                const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url; a.download = 'model_proxy_memory_' + new Date().toISOString().slice(0,10) + '.json';
+                a.click(); URL.revokeObjectURL(url);
+                toast('导出成功', 'success');
+            } catch (err) { toast('导出失败: ' + err.message, 'error'); }
+        }
+
+        async function importMemory(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            try {
+                const text = await file.text();
+                const data = JSON.parse(text);
+                await apiFetch('/api/memory/import', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(data) });
+                toast(`导入成功`, 'success');
+                loadMemory();
+            } catch (err) { toast('导入失败: ' + err.message, 'error'); }
+            event.target.value = '';
+        }
     </script>
     <!-- endregion JavaScript 主逻辑 -->
 </body>

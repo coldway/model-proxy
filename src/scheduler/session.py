@@ -59,11 +59,17 @@ class ChatSession:
         self.updated_at: float = time.time()
         self.total_tokens_est: int = 0
 
-    def add_message(self, role: str, content: str, model: str | None = None) -> None:
+    def add_message(self, role: str, content: str, model: str | None = None, tool_calls: list | None = None, tool_call_id: str | None = None, name: str | None = None) -> None:
         with self._lock:
             msg: dict[str, Any] = {"role": role, "content": content}
             if model:
                 msg["model"] = model
+            if tool_calls:
+                msg["tool_calls"] = tool_calls
+            if tool_call_id:
+                msg["tool_call_id"] = tool_call_id
+            if name:
+                msg["name"] = name
             self.messages.append(msg)
             self.updated_at = time.time()
             self._update_token_estimate()
@@ -94,7 +100,15 @@ class ChatSession:
             if selected and selected[0]["role"] == "assistant" and not selected[0].get("tool_calls"):
                 selected = selected[1:]
 
-            result.extend({"role": m["role"], "content": m["content"]} for m in selected)
+            for m in selected:
+                entry: dict[str, Any] = {"role": m["role"], "content": m["content"]}
+                if m.get("tool_calls"):
+                    entry["tool_calls"] = m["tool_calls"]
+                if m.get("tool_call_id"):
+                    entry["tool_call_id"] = m["tool_call_id"]
+                if m.get("name"):
+                    entry["name"] = m["name"]
+                result.append(entry)
             return result
 
     def auto_title(self) -> None:

@@ -1054,9 +1054,14 @@ async def get_chat_session(session_id: str):
 
 @router.delete("/api/chat/sessions/{session_id}")
 async def delete_chat_session(session_id: str):
-    """删除聊天会话"""
+    """删除聊天会话（触发记忆巩固）"""
+    from src.scheduler.memory import get_memory_manager
+    memory_mgr = get_memory_manager()
+    consolidated = memory_mgr.on_session_end(session_id)
+    if consolidated:
+        logger.info("[Memory] session=%s 巩固 %d 条到长期记忆", session_id, consolidated)
     if _deps.session_mgr.delete(session_id):
-        return {"status": "ok"}
+        return {"status": "ok", "memory_consolidated": consolidated}
     raise HTTPException(status_code=404, detail="会话不存在")
 
 
@@ -1070,8 +1075,13 @@ async def rename_chat_session(session_id: str, title: str):
 
 @router.post("/api/chat/sessions/{session_id}/send")
 async def send_chat_message(session_id: str, request: ChatCompletionRequest):
-    """向指定会话发送消息并获取回复（自动管理上下文）"""
+    """向指定会话发送消息并获取回复（支持内部 tool calling 自动执行 + Memory 系统）"""
+    from src.api.internal_tools import get_tool_definitions, execute_tool
+    from src.models.schemas import ToolDefinition, ToolFunction
+    from src.scheduler.memory import get_memory_manager
+
     trace_id = uuid.uuid4().hex[:12]
+    memory_mgr = get_memory_manager()
 
     session = _deps.session_mgr.get(session_id)
     if not session:
@@ -1088,17 +1098,13 @@ async def send_chat_message(session_id: str, request: ChatCompletionRequest):
 
     session.add_message("user", user_msg)
 
-    if len(session.messages) == 1:
+    is_first_message = len(session.messages) == 1
+    long_term_ctx = ""
+    if is_first_message:
         session.auto_title()
-
-    context_messages = session.get_context_messages()
-    ctx_request = ChatCompletionRequest(
-        model=request.model or session.model,
-        messages=[ChatMessage(role=m["role"], content=m["content"]) for m in context_messages],
-        temperature=request.temperature,
-        max_tokens=request.max_tokens,
-        stream=False,
-    )
+        long_term_ctx = memory_mgr.on_session_start(session_id, user_msg)
+        if long_term_ctx:
+            logger.info("[Memory] trace=%s 注入长期记忆上下文 (%d chars)", trace_id, len(long_term_ctx))
 
     enabled_models = _deps.config_manager.get_enabled_models()
     if not enabled_models:
@@ -1106,9 +1112,69 @@ async def send_chat_message(session_id: str, request: ChatCompletionRequest):
         await asyncio.to_thread(_deps.session_mgr.save)
         raise HTTPException(status_code=503, detail="没有可用模型")
 
+    tool_defs_raw = get_tool_definitions()
+    tools = [
+        ToolDefinition(
+            type="function",
+            function=ToolFunction(
+                name=td["function"]["name"],
+                description=td["function"]["description"],
+                parameters=td["function"]["parameters"],
+            ),
+        )
+        for td in tool_defs_raw
+    ]
+
+    max_tool_rounds = 3
     start_time = time.time()
+    tool_calls_log = []
+
     try:
-        provider_name, model_name, result = await _deps.dispatcher.dispatch(ctx_request, enabled_models, trace_id=trace_id)
+        for round_idx in range(max_tool_rounds + 1):
+            context_messages = session.get_context_messages()
+
+            session_memory_ctx = memory_mgr.get_context_injection(session_id)
+            full_memory_ctx = "\n\n".join(filter(None, [long_term_ctx, session_memory_ctx]))
+            if full_memory_ctx and context_messages and context_messages[0].get("role") == "system":
+                context_messages[0] = {
+                    **context_messages[0],
+                    "content": (context_messages[0]["content"] or "") + "\n\n" + full_memory_ctx,
+                }
+
+            ctx_request = ChatCompletionRequest(
+                model=request.model or session.model,
+                messages=[ChatMessage(role=m["role"], content=m["content"], tool_calls=m.get("tool_calls"), tool_call_id=m.get("tool_call_id"), name=m.get("name")) for m in context_messages],
+                temperature=request.temperature,
+                max_tokens=request.max_tokens,
+                stream=False,
+                tools=tools if round_idx < max_tool_rounds else None,
+            )
+
+            provider_name, model_name, result = await _deps.dispatcher.dispatch(ctx_request, enabled_models, trace_id=trace_id)
+
+            msg = result.choices[0].message if result.choices else None
+            if not msg:
+                break
+
+            if msg.tool_calls and round_idx < max_tool_rounds:
+                tc_data = [{"id": tc.id, "type": tc.type, "function": {"name": tc.function.name, "arguments": tc.function.arguments}} for tc in msg.tool_calls]
+                session.add_message("assistant", msg.content or "", tool_calls=tc_data)
+
+                for tc in msg.tool_calls:
+                    logger.info("[会话] trace=%s 调用工具: %s(%s)", trace_id, tc.function.name, tc.function.arguments[:100])
+                    tool_result = await execute_tool(tc.function.name, tc.function.arguments)
+                    tool_calls_log.append({"tool": tc.function.name, "result_len": len(tool_result)})
+                    session.add_message("tool", tool_result, tool_call_id=tc.id, name=tc.function.name)
+                continue
+
+            raw_reply = msg.content or ""
+            reply, thinking = _strip_thinking(raw_reply)
+            if thinking:
+                logger.info("[会话] trace=%s 模型思考过程:\n%s", trace_id, thinking[:500])
+            break
+        else:
+            reply = "⚠️ 工具调用轮次超限，请简化问题重试"
+
         latency = (time.time() - start_time) * 1000
         if _deps.history:
             _deps.history.record(
@@ -1121,32 +1187,33 @@ async def send_chat_message(session_id: str, request: ChatCompletionRequest):
                 route_strategy=_deps.dispatcher.last_route_strategy,
             )
 
-        raw_reply = result.choices[0].message.content or ""
-        reply, thinking = _strip_thinking(raw_reply)
-        if thinking:
-            logger.info(
-                "[会话] trace=%s 模型 %s 思考过程:\n%s",
-                trace_id, result.model,
-                thinking[:500] + ("…" if len(thinking) > 500 else ""),
-            )
         session.add_message("assistant", reply, model=result.model)
+        memory_mgr.on_turn_complete(session_id, user_msg, reply)
+
+        user_turn_count = sum(1 for m in session.messages if m.get("role") == "user")
+        if user_turn_count in (6, 12, 20):
+            asyncio.create_task(memory_mgr.llm_extract_memories(session_id, session.messages))
+
         await asyncio.to_thread(_deps.session_mgr.save)
 
         logger.info(
-            "[会话] trace=%s 完成 | session=%s provider=%s model=%s 耗时=%.0fms 回复长度=%d",
-            trace_id, session_id, provider_name, model_name, latency, len(reply),
+            "[会话] trace=%s 完成 | session=%s provider=%s model=%s 耗时=%.0fms 工具调用=%d",
+            trace_id, session_id, provider_name, model_name, latency, len(tool_calls_log),
         )
 
-        return {
+        resp = {
             "reply": reply,
             "model": result.model,
             "provider": provider_name,
             "usage": result.usage.model_dump(),
             "tokens_est": session.total_tokens_est,
-            "context_messages": len(context_messages),
+            "context_messages": len(session.get_context_messages()),
             "total_messages": len(session.messages),
             "title": session.title,
         }
+        if tool_calls_log:
+            resp["tool_calls"] = tool_calls_log
+        return resp
     except (RateLimitExceeded, ModelNotFound, AllModelsUnavailable) as e:
         _record_failure(start_time, str(e))
         await asyncio.to_thread(_deps.session_mgr.save)
@@ -1166,10 +1233,94 @@ async def send_chat_message(session_id: str, request: ChatCompletionRequest):
         raise HTTPException(status_code=500, detail="推理服务内部错误，请稍后重试")
 
 
+@router.get("/api/memory/stats")
+async def get_memory_stats():
+    """获取 Memory 系统统计信息"""
+    from src.scheduler.memory import get_memory_manager
+    return get_memory_manager().get_long_term_stats()
+
+
+@router.get("/api/memory/entries")
+async def list_memory_entries(limit: int = 50):
+    """列出长期记忆条目"""
+    from src.scheduler.memory import get_memory_manager
+    store = get_memory_manager()._store
+    entries = store.get_all()
+    entries.sort(key=lambda e: e.last_accessed, reverse=True)
+    return {"entries": [e.to_dict() for e in entries[:limit]], "total": store.size()}
+
+
+@router.post("/api/memory/consolidate/{session_id}")
+async def consolidate_session_memory(session_id: str):
+    """手动触发指定会话的记忆巩固"""
+    from src.scheduler.memory import get_memory_manager
+    mgr = get_memory_manager()
+    added = mgr.on_session_end(session_id)
+    return {"consolidated": added}
+
+
+@router.post("/api/memory/add")
+async def add_memory_entry(body: dict):
+    """手动添加一条长期记忆"""
+    from src.scheduler.memory import get_memory_manager, MemoryEntry
+    import time as _time
+    content = body.get("content", "").strip()
+    mem_type = body.get("type", "semantic")
+    if not content:
+        raise HTTPException(status_code=400, detail="content 不能为空")
+    mgr = get_memory_manager()
+    now = _time.time()
+    entry = MemoryEntry(
+        id=f"manual_{int(now)}",
+        type=mem_type,
+        content=content,
+        importance=0.8,
+        created_at=now,
+        last_accessed=now,
+        tags=[],
+        source_session="manual",
+    )
+    mgr._store.add(entry)
+    return {"status": "ok", "id": entry.id}
+
+
+@router.delete("/api/memory/entries/{entry_id}")
+async def delete_memory_entry(entry_id: str):
+    """删除一条长期记忆"""
+    from src.scheduler.memory import get_memory_manager
+    mgr = get_memory_manager()
+    store = mgr._store
+    before = len(store._entries)
+    store._entries = [e for e in store._entries if e.id != entry_id]
+    if len(store._entries) < before:
+        store._save()
+        return {"status": "ok"}
+    raise HTTPException(status_code=404, detail="记忆条目不存在")
+
+
+@router.post("/api/memory/import")
+async def import_memory(body: dict):
+    """导入记忆数据"""
+    from src.scheduler.memory import get_memory_manager, MemoryEntry
+    mgr = get_memory_manager()
+    entries = body.get("entries", [])
+    imported = 0
+    for e in entries:
+        if not e.get("content"):
+            continue
+        entry = MemoryEntry.from_dict(e)
+        mgr._store.add(entry)
+        imported += 1
+    return {"status": "ok", "imported": imported}
+
+
 @router.post("/api/chat/sessions/{session_id}/stream")
 async def stream_chat_message(session_id: str, request: ChatCompletionRequest):
-    """向指定会话发送消息（流式 SSE 响应 + 自动上下文管理）"""
+    """向指定会话发送消息（流式 SSE 响应 + 自动上下文管理 + Memory 系统）"""
+    from src.scheduler.memory import get_memory_manager
+
     trace_id = uuid.uuid4().hex[:12]
+    memory_mgr = get_memory_manager()
 
     session = _deps.session_mgr.get(session_id)
     if not session:
@@ -1185,13 +1336,25 @@ async def stream_chat_message(session_id: str, request: ChatCompletionRequest):
     )
 
     session.add_message("user", user_msg)
-    if len(session.messages) == 1:
+    is_first_message = len(session.messages) == 1
+    long_term_ctx = ""
+    if is_first_message:
         session.auto_title()
+        long_term_ctx = memory_mgr.on_session_start(session_id, user_msg)
 
     context_messages = session.get_context_messages()
+
+    session_memory_ctx = memory_mgr.get_context_injection(session_id)
+    full_memory_ctx = "\n\n".join(filter(None, [long_term_ctx, session_memory_ctx]))
+    if full_memory_ctx and context_messages and context_messages[0].get("role") == "system":
+        context_messages[0] = {
+            **context_messages[0],
+            "content": (context_messages[0]["content"] or "") + "\n\n" + full_memory_ctx,
+        }
+
     ctx_request = ChatCompletionRequest(
         model=request.model or session.model,
-        messages=[ChatMessage(role=m["role"], content=m["content"]) for m in context_messages],
+        messages=[ChatMessage(role=m["role"], content=m["content"], tool_calls=m.get("tool_calls"), tool_call_id=m.get("tool_call_id"), name=m.get("name")) for m in context_messages],
         temperature=request.temperature,
         max_tokens=request.max_tokens,
         stream=True,
@@ -1259,6 +1422,7 @@ async def stream_chat_message(session_id: str, request: ChatCompletionRequest):
         save_assistant = (not stream_broken) and len(reply_text.strip()) >= 10
         if save_assistant:
             session.add_message("assistant", reply_text, model=model_name)
+            memory_mgr.on_turn_complete(session_id, user_msg, reply_text)
         elif stream_broken:
             logger.info(
                 "[流式会话] trace=%s 流式中断，跳过写入助手消息（避免残缺上下文）",

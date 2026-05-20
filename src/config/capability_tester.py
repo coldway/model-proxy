@@ -472,6 +472,7 @@ class CapabilityTester:
 
         # ── 阶段 1：单轮 tool calling（同时测延迟） ──
         t0 = time.time()
+        tc_400 = False
         try:
             tc_result = await self._test_tool_calling(provider, model_id, tools)
             result["latency_ms"] = round((time.time() - t0) * 1000)
@@ -481,18 +482,27 @@ class CapabilityTester:
             err_str = str(e)
             if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
                 result["error"] = "rate_limited (429)"
+                self._cache.set(provider_name, model_id, result)
+                logger.info("测试 %s/%s: 阶段1失败 - %s", provider_name, model_id, result["error"])
+                return {**result, "cached": False}
             elif "503" in err_str or "UNAVAILABLE" in err_str:
                 result["error"] = "unavailable (503)"
+                self._cache.set(provider_name, model_id, result)
+                logger.info("测试 %s/%s: 阶段1失败 - %s", provider_name, model_id, result["error"])
+                return {**result, "cached": False}
             elif "400" in err_str:
                 result["available"] = True
-                result["error"] = f"bad_request (400): {err_str[:80]}"
+                result["tool_calling"] = False
+                result["tc_note"] = f"bad_request (400): {err_str[:80]}"
+                tc_400 = True
+                logger.info("测试 %s/%s: tool_calling 不支持 (400)，继续测试其他能力", provider_name, model_id)
             else:
                 result["error"] = err_str[:120]
-            self._cache.set(provider_name, model_id, result)
-            logger.info("测试 %s/%s: 阶段1失败 - %s", provider_name, model_id, result["error"])
-            return {**result, "cached": False}
+                self._cache.set(provider_name, model_id, result)
+                logger.info("测试 %s/%s: 阶段1失败 - %s", provider_name, model_id, result["error"])
+                return {**result, "cached": False}
 
-        if tc_result.get("probe_response") == "empty response":
+        if not tc_400 and tc_result.get("probe_response") == "empty response":
             result["error"] = "empty_response (模型返回 200 但无内容，可能是软限流)"
             logger.warning(
                 "测试 %s/%s: 模型返回空内容，跳过后续能力检测",
@@ -500,6 +510,21 @@ class CapabilityTester:
             )
             self._cache.set(provider_name, model_id, result)
             return {**result, "cached": False}
+
+        # ── 阶段 1b: 400 时测量延迟（用简单请求代替 tool calling） ──
+        if tc_400 and result["latency_ms"] == 0:
+            try:
+                from src.models.schemas import ChatCompletionRequest, ChatMessage
+                t1 = time.time()
+                lat_req = ChatCompletionRequest(
+                    model=model_id,
+                    messages=[ChatMessage(role="user", content="hi")],
+                    temperature=0.1, max_tokens=10,
+                )
+                await provider.chat_completion(model_id, lat_req)
+                result["latency_ms"] = round((time.time() - t1) * 1000)
+            except Exception:
+                pass
 
         # ── 阶段 2：多轮 tool calling（仅当单轮通过时） ──
         if result["tool_calling"]:

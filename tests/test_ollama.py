@@ -53,6 +53,15 @@ class TestInferToolCalling:
     def test_stable_diffusion_not_supported(self):
         assert _infer_tool_calling("stable-diffusion:latest", "") is False
 
+    def test_abliterated_no_tool_calling(self):
+        assert _infer_tool_calling("mannix/llama3.1-8b-abliterated:latest", "") is False
+
+    def test_uncensored_no_tool_calling(self):
+        assert _infer_tool_calling("llama3.1-uncensored:8b", "") is False
+
+    def test_raw_no_tool_calling(self):
+        assert _infer_tool_calling("qwen2.5-raw:14b", "") is False
+
 
 # ---------------------------------------------------------------------------
 # OllamaProvider 构造函数测试

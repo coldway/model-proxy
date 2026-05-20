@@ -1403,6 +1403,13 @@
                 const results = data.results || [];
                 if (results.length > 0) {
                     const r = results[0];
+                    if (r.not_installed) {
+                        loadingToast.remove();
+                        if (confirm(`模型 ${modelId} 未在本地安装。\n\n是否立即下载安装？（可能需要几分钟到几十分钟）`)) {
+                            pullOllamaModel(modelId);
+                        }
+                        return;
+                    }
                     const caps = [];
                     if (r.tool_calling) caps.push('工具调用');
                     if (r.multi_turn_tc) caps.push('多轮对话');
@@ -1422,6 +1429,49 @@
                 toast(`测试失败: ${e.message}`, 'error');
             } finally {
                 loadingToast.remove();
+            }
+        }
+
+        async function pullOllamaModel(modelId) {
+            const progressToast = toast(`正在下载 ${modelId}...`, 'info', true);
+            try {
+                const resp = await apiFetch(API + `/api/provider/ollama/pull?model=${encodeURIComponent(modelId)}`, {method: 'POST'});
+                const reader = resp.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+                while (true) {
+                    const {done, value} = await reader.read();
+                    if (done) break;
+                    buffer += decoder.decode(value, {stream: true});
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop();
+                    for (const line of lines) {
+                        if (!line.startsWith('data: ') || line.trim() === 'data: [DONE]') continue;
+                        try {
+                            const ev = JSON.parse(line.slice(6));
+                            if (ev.total && ev.completed) {
+                                const pct = Math.round(ev.completed / ev.total * 100);
+                                progressToast.querySelector('.toast-msg').textContent = `下载 ${modelId}: ${pct}%`;
+                            } else if (ev.status === 'success') {
+                                progressToast.remove();
+                                toast(`${modelId} 下载完成！正在刷新模型列表...`, 'success');
+                                await refreshOllamaModels();
+                                loadProviderModels('ollama');
+                                return;
+                            } else if (ev.status === 'error') {
+                                progressToast.remove();
+                                toast(`下载失败: ${ev.error}`, 'error');
+                                return;
+                            } else if (ev.status) {
+                                progressToast.querySelector('.toast-msg').textContent = `${modelId}: ${ev.status}`;
+                            }
+                        } catch(_) {}
+                    }
+                }
+                progressToast.remove();
+            } catch(e) {
+                progressToast.remove();
+                toast(`下载失败: ${e.message}`, 'error');
             }
         }
 

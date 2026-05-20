@@ -178,6 +178,33 @@ class OllamaProvider(BaseProvider):
             logger.warning("获取 Ollama 模型详情失败（%s）: %s", self._base_url, e)
             return []
 
+    async def is_model_installed(self, model: str) -> bool:
+        """检查指定模型是否已安装在本地 Ollama"""
+        installed = await self.list_models()
+        return any(model == m or model == m.split(":")[0] for m in installed)
+
+    async def pull_model(self, model: str) -> AsyncIterator[dict]:
+        """触发 Ollama 下载模型，流式返回进度。
+
+        使用独立 httpx client 避免与主 client 的超时/连接冲突。
+        """
+        url = f"{self._base_url}/api/pull"
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(3600, connect=10),
+        ) as client:
+            async with client.stream(
+                "POST", url,
+                json={"name": model, "stream": True},
+            ) as resp:
+                resp.raise_for_status()
+                async for line in resp.aiter_lines():
+                    if not line.strip():
+                        continue
+                    try:
+                        yield json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+
     # ------------------------------------------------------------------
     # 健康检查
     # ------------------------------------------------------------------
@@ -266,6 +293,11 @@ def _infer_tool_calling(model_id: str, family: str) -> bool:
     Ollama 中支持 tool calling 的模型族主要包括：
     llama3.1+, qwen2.5+, mistral, command-r, hermes, nemotron, firefunction 等。
     """
+    no_tc_markers = ("abliterated", "uncensored", "raw")
+    lower = model_id.lower()
+    if any(m in lower for m in no_tc_markers):
+        return False
+
     tc_patterns = (
         "llama3.1", "llama3.2", "llama3.3", "llama-3.1", "llama-3.2", "llama-3.3",
         "llama4", "llama-4",
@@ -275,7 +307,6 @@ def _infer_tool_calling(model_id: str, family: str) -> bool:
         "hermes", "nemotron", "firefunction",
         "granite", "phi4",
     )
-    lower = model_id.lower()
     if any(p in lower for p in tc_patterns):
         return True
     lower_family = family.lower()

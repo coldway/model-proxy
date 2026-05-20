@@ -573,6 +573,41 @@ async def refresh_ollama_models():
         raise HTTPException(status_code=502, detail=f"无法连接 Ollama: {e}") from e
 
 
+@router.post("/api/provider/ollama/pull")
+async def pull_ollama_model(model: str):
+    """拉取 Ollama 模型（SSE 流式进度）
+
+    触发 ollama pull，返回 SSE 事件流：
+    - {status, total, completed} 下载进度
+    - {status: "success"} 完成
+    """
+    from src.providers.ollama import OllamaProvider
+
+    prov = _deps.dispatcher.get_provider("ollama")
+    if not isinstance(prov, OllamaProvider):
+        raise HTTPException(status_code=400, detail="Ollama 厂商未启用或未注册")
+
+    async def _stream():
+        try:
+            async for progress in prov.pull_model(model):
+                yield f"data: {json.dumps(progress, ensure_ascii=False)}\n\n"
+                if progress.get("status") == "success":
+                    if _deps.catalog:
+                        added = await prov.discover_and_register(_deps.catalog)
+                        yield f"data: {json.dumps({'status': 'registered', 'new_models': added}, ensure_ascii=False)}\n\n"
+                    break
+        except Exception as e:
+            yield f"data: {json.dumps({'status': 'error', 'error': str(e)[:200]}, ensure_ascii=False)}\n\n"
+        yield "data: [DONE]\n\n"
+
+    from starlette.responses import StreamingResponse
+    return StreamingResponse(
+        _stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 @router.post("/api/provider/priority")
 async def update_provider_priority(provider: str, priority: int):
     """更新厂商优先级"""
@@ -759,6 +794,17 @@ async def test_capabilities(provider: str = "", model: str = "", force: bool = F
         prov_inst = _deps.dispatcher.get_provider(provider)
 
         if model:
+            if provider == "ollama" and hasattr(prov_inst, "is_model_installed"):
+                installed = await prov_inst.is_model_installed(model)
+                if not installed:
+                    return {
+                        "provider": provider,
+                        "results": [{
+                            "provider": provider, "model": model,
+                            "available": False, "not_installed": True,
+                            "error": f"模型 {model} 未安装，请先执行 ollama pull {model}",
+                        }],
+                    }
             models = [model]
         else:
             try:

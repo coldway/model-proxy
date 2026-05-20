@@ -1054,7 +1054,7 @@ async def get_chat_session(session_id: str):
 
 @router.delete("/api/chat/sessions/{session_id}")
 async def delete_chat_session(session_id: str):
-    """删除聊天会话（触发记忆巩固）"""
+    """软删除聊天会话（移入回收站 + 触发记忆巩固）"""
     from src.scheduler.memory import get_memory_manager
     memory_mgr = get_memory_manager()
     consolidated = memory_mgr.on_session_end(session_id)
@@ -1063,6 +1063,28 @@ async def delete_chat_session(session_id: str):
     if _deps.session_mgr.delete(session_id):
         return {"status": "ok", "memory_consolidated": consolidated}
     raise HTTPException(status_code=404, detail="会话不存在")
+
+
+@router.get("/api/chat/trash")
+async def list_trash_sessions():
+    """列出回收站中的会话"""
+    return {"sessions": _deps.session_mgr.list_trash()}
+
+
+@router.post("/api/chat/trash/{session_id}/restore")
+async def restore_trash_session(session_id: str):
+    """从回收站恢复会话"""
+    if _deps.session_mgr.restore(session_id):
+        return {"status": "ok"}
+    raise HTTPException(status_code=404, detail="回收站中无此会话")
+
+
+@router.delete("/api/chat/trash/{session_id}")
+async def permanent_delete_session(session_id: str):
+    """从回收站永久删除会话"""
+    if _deps.session_mgr.permanent_delete(session_id):
+        return {"status": "ok"}
+    raise HTTPException(status_code=404, detail="回收站中无此会话")
 
 
 @router.put("/api/chat/sessions/{session_id}/title")

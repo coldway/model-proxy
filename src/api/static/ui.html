@@ -397,6 +397,21 @@
         .intg-code-block { background: var(--bg-primary); border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
         .intg-code-header { display: flex; justify-content: space-between; align-items: center; padding: 6px 12px; background: var(--bg-tertiary); font-size: 0.75rem; color: var(--text-muted); border-bottom: 1px solid var(--border); }
         .intg-pre { margin: 0; padding: 12px 16px; font-family: 'JetBrains Mono','Fira Code',monospace; font-size: 0.78rem; line-height: 1.6; color: var(--text-primary); overflow-x: auto; white-space: pre;         }
+
+        .session-tab { flex:1; padding:6px 0; font-size:0.75rem; font-weight:500; border:none; background:transparent; color:var(--text-muted); cursor:pointer; transition:var(--transition); }
+        .session-tab.active { color:var(--accent-blue); border-bottom:2px solid var(--accent-blue); }
+        .session-tab:not(.active):hover { color:var(--text-primary); }
+        .session-item { position:relative; padding:8px 10px; border-radius:8px; margin-bottom:4px; cursor:pointer; transition:all 0.15s; }
+        .session-item:hover .session-delete-btn { opacity:1; }
+        .session-delete-btn { position:absolute; right:6px; top:50%; transform:translateY(-50%); opacity:0; width:20px; height:20px; border:none; background:rgba(239,68,68,0.15); color:var(--accent-red); border-radius:4px; cursor:pointer; font-size:0.75rem; display:flex; align-items:center; justify-content:center; transition:opacity 0.15s; }
+        .session-delete-btn:hover { background:rgba(239,68,68,0.3); }
+        .trash-item { position:relative; padding:8px 10px; border-radius:8px; margin-bottom:4px; background:rgba(239,68,68,0.05); border:1px solid rgba(239,68,68,0.1); }
+        .trash-item-actions { display:flex; gap:4px; margin-top:4px; }
+        .trash-item-actions button { padding:2px 8px; font-size:0.7rem; border-radius:4px; border:none; cursor:pointer; transition:var(--transition); }
+        .trash-restore-btn { background:rgba(16,185,129,0.15); color:var(--accent-green); }
+        .trash-restore-btn:hover { background:rgba(16,185,129,0.3); }
+        .trash-perm-del-btn { background:rgba(239,68,68,0.15); color:var(--accent-red); }
+        .trash-perm-del-btn:hover { background:rgba(239,68,68,0.3); }
     </style>
 </head>
 <!-- endregion 页面骨架与全局样式 -->
@@ -485,7 +500,12 @@
                         <span style="font-size:0.85rem;font-weight:600">会话列表</span>
                         <button class="btn btn-primary btn-sm" onclick="createNewSession()" style="padding:3px 8px;font-size:0.75rem">+ 新建</button>
                     </div>
+                    <div style="display:flex;border-bottom:1px solid var(--border)">
+                        <button id="tab-active-sessions" class="session-tab active" onclick="switchSessionTab('active')">会话</button>
+                        <button id="tab-trash-sessions" class="session-tab" onclick="switchSessionTab('trash')">回收站</button>
+                    </div>
                     <div id="session-list" style="flex:1;overflow-y:auto;padding:6px"></div>
+                    <div id="trash-list" style="flex:1;overflow-y:auto;padding:6px;display:none"></div>
                 </div>
                 <!-- 聊天主区域 -->
                 <div class="card" style="flex:1;display:flex;flex-direction:column;min-width:0">
@@ -1835,14 +1855,86 @@
                     const bg = isActive ? 'var(--accent-blue)' : 'transparent';
                     const color = isActive ? '#fff' : 'var(--text-primary)';
                     const t = new Date(s.updated_at * 1000).toLocaleString('zh-CN', {month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'});
-                    return '<div onclick="switchSession(\''+s.id+'\')" style="padding:8px 10px;border-radius:8px;margin-bottom:4px;cursor:pointer;background:'+bg+';color:'+color+';transition:all 0.15s">'
-                        + '<div style="font-size:0.82rem;font-weight:'+(isActive?'600':'400')+';overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+escapeHtml(s.title)+'</div>'
+                    return '<div class="session-item" onclick="switchSession(\''+s.id+'\')" style="background:'+bg+';color:'+color+'">'
+                        + '<div style="font-size:0.82rem;font-weight:'+(isActive?'600':'400')+';overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding-right:20px">'+escapeHtml(s.title)+'</div>'
                         + '<div style="font-size:0.65rem;color:'+(isActive?'rgba(255,255,255,0.7)':'var(--text-muted)')+';margin-top:2px;display:flex;justify-content:space-between">'
-                        + '<span>'+s.message_count+' 条</span><span>'+t+'</span></div></div>';
+                        + '<span>'+s.message_count+' 条</span><span>'+t+'</span></div>'
+                        + '<button class="session-delete-btn" onclick="event.stopPropagation();softDeleteSession(\''+s.id+'\')" title="删除会话">&times;</button>'
+                        + '</div>';
                 }).join('');
             } catch(e) {
                 document.getElementById('session-list').innerHTML = '<div style="padding:12px;color:var(--accent-red);font-size:0.8rem">加载失败</div>';
             }
+        }
+
+        async function loadTrashList() {
+            try {
+                const resp = await apiFetch(API + '/api/chat/trash');
+                const data = await resp.json();
+                const list = document.getElementById('trash-list');
+                const sessions = data.sessions || [];
+                if (!sessions.length) {
+                    list.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:0.8rem">回收站为空</div>';
+                    return;
+                }
+                list.innerHTML = sessions.map(s => {
+                    const delDate = new Date(s.deleted_at * 1000).toLocaleString('zh-CN', {month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'});
+                    return '<div class="trash-item">'
+                        + '<div style="font-size:0.82rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-secondary)">'+escapeHtml(s.title)+'</div>'
+                        + '<div style="font-size:0.65rem;color:var(--text-muted);margin-top:2px">'+s.message_count+' 条 · 删除于 '+delDate+' · '+s.expires_in_days+'天后过期</div>'
+                        + '<div class="trash-item-actions">'
+                        + '<button class="trash-restore-btn" onclick="restoreSession(\''+s.id+'\')">恢复</button>'
+                        + '<button class="trash-perm-del-btn" onclick="permanentDeleteSession(\''+s.id+'\')">永久删除</button>'
+                        + '</div></div>';
+                }).join('');
+            } catch(e) {
+                document.getElementById('trash-list').innerHTML = '<div style="padding:12px;color:var(--accent-red);font-size:0.8rem">加载失败</div>';
+            }
+        }
+
+        function switchSessionTab(tab) {
+            const activeBtn = document.getElementById('tab-active-sessions');
+            const trashBtn = document.getElementById('tab-trash-sessions');
+            const sessionList = document.getElementById('session-list');
+            const trashList = document.getElementById('trash-list');
+            if (tab === 'active') {
+                activeBtn.classList.add('active');
+                trashBtn.classList.remove('active');
+                sessionList.style.display = '';
+                trashList.style.display = 'none';
+                loadSessionList();
+            } else {
+                activeBtn.classList.remove('active');
+                trashBtn.classList.add('active');
+                sessionList.style.display = 'none';
+                trashList.style.display = '';
+                loadTrashList();
+            }
+        }
+
+        async function softDeleteSession(sessionId) {
+            await apiFetch(API + '/api/chat/sessions/' + sessionId, {method:'DELETE'});
+            if (sessionId === currentSessionId) {
+                currentSessionId = null;
+                localStorage.removeItem('mp_current_session');
+                document.getElementById('chat-messages').innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:40px 0"><p>会话已移至回收站</p></div>';
+                document.getElementById('chat-title').textContent = '新对话';
+            }
+            loadSessionList();
+            toast('会话已移至回收站', 'success');
+        }
+
+        async function restoreSession(sessionId) {
+            await apiFetch(API + '/api/chat/trash/' + sessionId + '/restore', {method:'POST'});
+            loadTrashList();
+            toast('会话已恢复', 'success');
+        }
+
+        async function permanentDeleteSession(sessionId) {
+            if (!confirm('确认永久删除？此操作不可恢复。')) return;
+            await apiFetch(API + '/api/chat/trash/' + sessionId, {method:'DELETE'});
+            loadTrashList();
+            toast('会话已永久删除', 'success');
         }
 
         async function createNewSession() {
@@ -1874,14 +1966,7 @@
 
         async function deleteCurrentSession() {
             if (!currentSessionId) return;
-            if (!confirm('确认删除当前会话？')) return;
-            await apiFetch(API + '/api/chat/sessions/' + currentSessionId, {method:'DELETE'});
-            currentSessionId = null;
-            localStorage.removeItem('mp_current_session');
-            await loadSessionList();
-            renderSessionMessages([]);
-            document.getElementById('chat-title').textContent = '新对话';
-            updateContextInfo(0, 0);
+            await softDeleteSession(currentSessionId);
         }
 
         async function renameCurrentSession() {

@@ -149,8 +149,11 @@ class ChatSession:
 _SAVE_DEBOUNCE_SECONDS = 5
 
 
+TRASH_RETENTION_DAYS = 30
+
+
 class SessionManager:
-    """管理所有聊天会话"""
+    """管理所有聊天会话（含回收站）"""
 
     def __init__(
         self,
@@ -160,11 +163,13 @@ class SessionManager:
     ):
         self._lock = threading.Lock()
         self._sessions: dict[str, ChatSession] = {}
+        self._trash: dict[str, dict] = {}  # {session_id: {"session": ChatSession, "deleted_at": float}}
         self._max_context_tokens = max_context_tokens
         self._max_sessions = max_sessions
         self._dirty = False
         self._save_timer: threading.Timer | None = None
         self._load()
+        self._cleanup_expired_trash()
 
     def create(self, model: str = "auto", title: str = "新对话") -> ChatSession:
         with self._lock:
@@ -196,12 +201,68 @@ class SessionManager:
             return self._sessions.get(session_id)
 
     def delete(self, session_id: str) -> bool:
+        """软删除：移入回收站"""
         with self._lock:
             if session_id in self._sessions:
-                del self._sessions[session_id]
+                session = self._sessions.pop(session_id)
+                self._trash[session_id] = {"session": session, "deleted_at": time.time()}
                 self._save_unlocked()
                 return True
             return False
+
+    def restore(self, session_id: str) -> bool:
+        """从回收站恢复会话"""
+        with self._lock:
+            if session_id in self._trash:
+                entry = self._trash.pop(session_id)
+                self._sessions[session_id] = entry["session"]
+                self._save_unlocked()
+                return True
+            return False
+
+    def permanent_delete(self, session_id: str) -> bool:
+        """从回收站永久删除"""
+        with self._lock:
+            if session_id in self._trash:
+                del self._trash[session_id]
+                self._save_unlocked()
+                return True
+            return False
+
+    def list_trash(self) -> list[dict]:
+        """列出回收站中的会话"""
+        with self._lock:
+            items = sorted(
+                self._trash.items(),
+                key=lambda x: x[1]["deleted_at"],
+                reverse=True,
+            )
+            now = time.time()
+            return [
+                {
+                    "id": sid,
+                    "title": entry["session"].title,
+                    "model": entry["session"].model,
+                    "message_count": len(entry["session"].messages),
+                    "deleted_at": entry["deleted_at"],
+                    "expires_in_days": max(0, TRASH_RETENTION_DAYS - int((now - entry["deleted_at"]) / 86400)),
+                }
+                for sid, entry in items
+            ]
+
+    def _cleanup_expired_trash(self) -> None:
+        """清理超过保留期限的回收站会话"""
+        now = time.time()
+        expired = [
+            sid for sid, entry in self._trash.items()
+            if now - entry["deleted_at"] > TRASH_RETENTION_DAYS * 86400
+        ]
+        if expired:
+            for sid in expired:
+                del self._trash[sid]
+            logger.info("清理 %d 个过期回收站会话", len(expired))
+            with self._lock:
+                self._save_unlocked()
 
     def list_sessions(self) -> list[dict]:
         with self._lock:
@@ -260,11 +321,14 @@ class SessionManager:
 
     def _persist_unlocked(self) -> None:
         """实际执行磁盘写入（须在 _lock 内调用）"""
-        if not self._dirty and not self._sessions:
+        if not self._dirty and not self._sessions and not self._trash:
             return
         self._dirty = False
         DATA_DIR.mkdir(parents=True, exist_ok=True)
-        data = {sid: s.to_dict() for sid, s in self._sessions.items()}
+        data = {
+            "_active": {sid: s.to_dict() for sid, s in self._sessions.items()},
+            "_trash": {sid: {"session": entry["session"].to_dict(), "deleted_at": entry["deleted_at"]} for sid, entry in self._trash.items()},
+        }
         try:
             SESSION_FILE.write_text(
                 yaml.dump(data, allow_unicode=True, default_flow_style=False),
@@ -281,11 +345,23 @@ class SessionManager:
             if not isinstance(data, dict):
                 return
             with self._lock:
-                for sid, sdata in data.items():
-                    self._sessions[sid] = ChatSession.from_dict(
-                        sdata, max_context_tokens=self._max_context_tokens,
-                    )
+                if "_active" in data:
+                    for sid, sdata in data["_active"].items():
+                        self._sessions[sid] = ChatSession.from_dict(
+                            sdata, max_context_tokens=self._max_context_tokens,
+                        )
+                    for sid, tdata in data.get("_trash", {}).items():
+                        session = ChatSession.from_dict(
+                            tdata["session"], max_context_tokens=self._max_context_tokens,
+                        )
+                        self._trash[sid] = {"session": session, "deleted_at": tdata["deleted_at"]}
+                else:
+                    for sid, sdata in data.items():
+                        self._sessions[sid] = ChatSession.from_dict(
+                            sdata, max_context_tokens=self._max_context_tokens,
+                        )
                 n = len(self._sessions)
-            logger.info("已加载 %d 个聊天会话", n)
+                t = len(self._trash)
+            logger.info("已加载 %d 个聊天会话, %d 个回收站会话", n, t)
         except Exception as e:
             logger.error("加载会话数据失败: %s", e)

@@ -182,8 +182,8 @@ async def chat_completions(request: ChatCompletionRequest):
                 model=model_name,
                 success=True,
                 latency_ms=latency,
-                prompt_tokens=result.usage.prompt_tokens,
-                completion_tokens=result.usage.completion_tokens,
+                prompt_tokens=result.usage.prompt_tokens if result.usage else 0,
+                completion_tokens=result.usage.completion_tokens if result.usage else 0,
                 route_strategy=route_strategy,
             )
         bound = _deps.dispatcher.get_session_binding(request.session_id) if request.session_id else None
@@ -292,7 +292,12 @@ def _map_dispatch_error(e: Exception, trace_id: str = "") -> HTTPException:
 
 @router.get("/v1/models", response_model=ModelListResponse)
 async def list_models():
-    """列出所有已配置模型（含已探测的能力信息）"""
+    """列出所有已配置模型（含已探测的能力信息）
+
+    注意：此端点遍历 config.providers（静态配置），而 dispatch 使用
+    get_enabled_models()（catalog 动态源）。两者可能存在差异——
+    此处展示的模型不保证 dispatch 时可用。
+    """
 
     models = []
     for prov_name, prov in _deps.config_manager.config.providers.items():
@@ -537,7 +542,7 @@ async def toggle_provider(provider: str, enabled: bool):
                     return {"status": "ok", "message": f"{provider} 已启用并加载"}
                 except Exception as e:
                     logger.error("动态注册 %s 失败: %s", provider, e)
-                    return {"status": "ok", "message": f"{provider} 已启用，但加载失败: {e}"}
+                    return {"status": "ok", "message": f"{provider} 已启用，但加载失败，请检查 API Key 是否正确"}
             else:
                 return {"status": "ok", "message": f"{provider} 已启用，但 API Key 未配置，请先填写 API Key"}
     elif not enabled and _deps.dispatcher.has_provider(provider):
@@ -1262,8 +1267,8 @@ async def send_chat_message(session_id: str, request: ChatCompletionRequest):
                 model=model_name,
                 success=True,
                 latency_ms=latency,
-                prompt_tokens=result.usage.prompt_tokens,
-                completion_tokens=result.usage.completion_tokens,
+                prompt_tokens=result.usage.prompt_tokens if result.usage else 0,
+                completion_tokens=result.usage.completion_tokens if result.usage else 0,
                 route_strategy=_deps.dispatcher.last_route_strategy,
             )
 
@@ -1285,7 +1290,7 @@ async def send_chat_message(session_id: str, request: ChatCompletionRequest):
             "reply": reply,
             "model": result.model,
             "provider": provider_name,
-            "usage": result.usage.model_dump(),
+            "usage": result.usage.model_dump() if result.usage else {},
             "tokens_est": session.total_tokens_est,
             "context_messages": len(session.get_context_messages()),
             "total_messages": len(session.messages),
@@ -1348,10 +1353,15 @@ async def add_memory_entry(body: dict):
     mem_type = body.get("type", "semantic")
     if not content:
         raise HTTPException(status_code=400, detail="content 不能为空")
+    if len(content) > 1000:
+        raise HTTPException(status_code=400, detail="content 长度不能超过 1000 字符")
+    _VALID_TYPES = {"semantic", "episodic", "preference"}
+    if mem_type not in _VALID_TYPES:
+        raise HTTPException(status_code=400, detail=f"type 必须为 {', '.join(_VALID_TYPES)} 之一")
     mgr = get_memory_manager()
     now = _time.time()
     entry = MemoryEntry(
-        id=f"manual_{int(now)}",
+        id=f"manual_{int(now * 1000)}",
         type=mem_type,
         content=content,
         importance=0.8,
@@ -1376,13 +1386,19 @@ async def delete_memory_entry(entry_id: str):
 
 @router.post("/api/memory/import")
 async def import_memory(body: dict):
-    """导入记忆数据"""
+    """导入记忆数据（单次最多 500 条）"""
     from src.scheduler.memory import get_memory_manager, MemoryEntry
     mgr = get_memory_manager()
     entries = body.get("entries", [])
+    if not isinstance(entries, list):
+        raise HTTPException(status_code=400, detail="entries 必须为数组")
+    _IMPORT_MAX = 500
+    if len(entries) > _IMPORT_MAX:
+        raise HTTPException(status_code=400, detail=f"单次最多导入 {_IMPORT_MAX} 条")
     imported = 0
     for e in entries:
-        if not e.get("content"):
+        content = (e.get("content") or "").strip()
+        if not content or len(content) > 1000:
             continue
         entry = MemoryEntry.from_dict(e)
         mgr._store.add(entry)

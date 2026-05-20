@@ -13,7 +13,9 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
+import tempfile
 import threading
 import time
 from dataclasses import dataclass, field
@@ -220,10 +222,19 @@ class LongTermMemoryStore:
         except Exception as e:
             logger.warning("加载长期记忆失败: %s", e)
 
+    def save(self) -> None:
+        """持久化长期记忆到磁盘（原子写入）"""
+        self._save()
+
     def _save(self) -> None:
         try:
             data = {"memories": [e.to_dict() for e in self._entries], "updated_at": time.time()}
-            self._file.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+            content = json.dumps(data, ensure_ascii=False, indent=2)
+            self._file.parent.mkdir(parents=True, exist_ok=True)
+            fd, tmp_path = tempfile.mkstemp(dir=str(self._file.parent), suffix=".tmp")
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(content)
+            os.replace(tmp_path, str(self._file))
         except Exception as e:
             logger.error("保存长期记忆失败: %s", e)
 
@@ -284,11 +295,13 @@ class LongTermMemoryStore:
 
         scored.sort(key=lambda x: x[0], reverse=True)
 
+        result_ids = {id(entry) for _, entry in scored[:max_results]}
         results = [entry for _, entry in scored[:max_results]]
         with self._lock:
-            for entry in results:
-                entry.access_count += 1
-                entry.last_accessed = now
+            for entry in self._entries:
+                if id(entry) in result_ids:
+                    entry.access_count += 1
+                    entry.last_accessed = now
             if results:
                 self._save()
 
@@ -303,7 +316,8 @@ class LongTermMemoryStore:
 
     def get_recent(self, n: int = 5) -> list[MemoryEntry]:
         """获取最近的 N 条记忆"""
-        sorted_entries = sorted(self._entries, key=lambda e: e.created_at, reverse=True)
+        with self._lock:
+            sorted_entries = sorted(self._entries, key=lambda e: e.created_at, reverse=True)
         return sorted_entries[:n]
 
     def get_all(self) -> list[MemoryEntry]:
@@ -388,7 +402,7 @@ class MemoryConsolidator:
                 added += 1
 
         if added > 0:
-            self._store._save()
+            self._store.save()
             logger.info("记忆巩固: session=%s 写入 %d 条到长期记忆", session_id, added)
             self._store.decay()
 
@@ -406,6 +420,7 @@ class MemoryManager:
         self._consolidator = MemoryConsolidator(self._store)
         self._extractor = SessionMemoryExtractor()
         self._lock = threading.Lock()
+        self._closed = False
         self._session_memories: dict[str, SessionMemoryStore] = {}
         self._session_last_active: dict[str, float] = {}
         self._auto_consolidate_timer: threading.Timer | None = None
@@ -556,12 +571,14 @@ class MemoryManager:
         except Exception as e:
             logger.warning("[Memory] 自动巩固检查异常: %s", e)
         finally:
-            self._auto_consolidate_timer = threading.Timer(60.0, self._check_idle_sessions)
-            self._auto_consolidate_timer.daemon = True
-            self._auto_consolidate_timer.start()
+            if not self._closed:
+                self._auto_consolidate_timer = threading.Timer(60.0, self._check_idle_sessions)
+                self._auto_consolidate_timer.daemon = True
+                self._auto_consolidate_timer.start()
 
     def close(self) -> None:
         """停止自动巩固定时器（用于优雅关闭）"""
+        self._closed = True
         if self._auto_consolidate_timer:
             self._auto_consolidate_timer.cancel()
             self._auto_consolidate_timer = None

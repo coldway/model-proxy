@@ -255,7 +255,9 @@ class Dispatcher:
                 self._bind_save_timer.start()
 
     def _persist_bindings(self) -> None:
-        """实际写入会话绑定到磁盘"""
+        """实际写入会话绑定到磁盘（原子写入）"""
+        import os
+        import tempfile
         try:
             with self._session_lock:
                 snapshot = {
@@ -263,10 +265,13 @@ class Dispatcher:
                     for sid, (prov, model, ts) in self._session_bindings.items()
                 }
             self._SESSION_BIND_FILE.parent.mkdir(parents=True, exist_ok=True)
-            self._SESSION_BIND_FILE.write_text(
-                yaml.dump(snapshot, allow_unicode=True, default_flow_style=False),
-                encoding="utf-8",
+            content = yaml.dump(snapshot, allow_unicode=True, default_flow_style=False)
+            fd, tmp_path = tempfile.mkstemp(
+                dir=str(self._SESSION_BIND_FILE.parent), suffix=".tmp",
             )
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(content)
+            os.replace(tmp_path, str(self._SESSION_BIND_FILE))
         except Exception as e:
             logger.warning("保存会话绑定文件失败: %s", e)
 
@@ -736,8 +741,8 @@ class Dispatcher:
             return None
 
     async def _set_cached_route_async(self, feature_hash: str, model_name: str) -> None:
-        """写入路由缓存（异步安全）"""
-        async with self._route_cache_lock:
+        """写入路由缓存（异步安全，统一使用 threading.Lock）"""
+        with self._route_cache_sync_lock:
             if len(self._route_cache) >= ROUTE_CACHE_MAX:
                 oldest_key = min(self._route_cache, key=lambda k: self._route_cache[k][1])
                 del self._route_cache[oldest_key]
@@ -753,7 +758,7 @@ class Dispatcher:
 
     async def purge_expired_cache(self) -> int:
         """清理所有 TTL 过期的路由缓存条目，返回清理数量"""
-        async with self._route_cache_lock:
+        with self._route_cache_sync_lock:
             now = time.time()
             expired = [k for k, (_, ts) in self._route_cache.items() if now - ts >= self._route_cache_ttl]
             for k in expired:

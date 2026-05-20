@@ -28,6 +28,28 @@
     - 调用厂商 API 拉取全量模型列表
     - 分三组返回：未添加 / 已启用 / 已禁用
 
+### 修复（Bug Fix）— 第八轮审查（14项）
+
+**P0 安全/数据正确性：**
+- **result.usage 空指针崩溃**：`chat_completions`、`send_chat_message` 端点直接访问 `result.usage.prompt_tokens` 等属性，当 provider 不返回 usage 时触发 `AttributeError`（500）；3 处均添加 `if result.usage` 保护
+- **session 会话持久化非原子写入**：`SessionManager._persist_unlocked()` 直接 `write_text()`，进程崩溃时文件半写导致全部会话数据损坏；改为 `tempfile.mkstemp()` + `os.replace()` 原子写入
+- **长期记忆持久化非原子写入**：`LongTermMemoryStore._save()` 同上风险；改为原子写入
+- **会话绑定持久化非原子写入**：`Dispatcher._persist_bindings()` 同上风险；改为原子写入
+
+**P1 逻辑缺陷：**
+- **/v1/models 与 dispatch 数据源不一致**：`/v1/models` 遍历 `config.providers`（静态配置），`dispatch` 使用 `get_enabled_models()`（catalog 动态源），用户看到的模型在 dispatch 时可能 404；添加文档注释说明差异
+- **LongTermMemoryStore.get_recent() 未加锁**：在无锁状态下排序 `_entries`，并发修改可导致 `RuntimeError`；添加 `with self._lock`
+- **MemoryManager close 后 Timer 仍重启**：`_check_idle_sessions` 的 finally 无条件创建新 Timer，close() 调用无效；新增 `_closed` 标志阻止重启
+- **retrieve() 修改 snapshot 内共享对象**：浅拷贝后修改 entry 属性在锁外生效，可能与 `_save()` 竞态；改为在锁内通过 `id()` 匹配原始对象进行更新
+- **/api/memory/import 无条目限制**：可一次性导入数万条记忆导致内存暴涨；添加 500 条上限 + 单条 1000 字符限制
+
+**P2 设计改进：**
+- **/api/memory/add 无输入验证**：未验证 content 长度和 type 合法性，id 秒级时间戳高并发碰撞；添加长度限制(1000)、type 白名单、毫秒级 id
+- **toggle_provider 错误回显未脱敏**：动态注册失败时返回 `str(e)` 可能泄露内部信息；改为泛化提示
+- **路由缓存双重锁风险**：`asyncio.Lock` + `threading.Lock` 保护同一 dict 互不知晓；统一使用 `threading.Lock`
+- **MemoryConsolidator 调用 _store._save()**：跨越封装边界调用私有方法；新增 `save()` public 方法
+- **/v1/models 端点文档补充**：添加与 dispatch 数据源差异的说明注释
+
 ### 修复（Bug Fix）— 第六轮审查（14项）
 
 **P0 安全/数据正确性：**

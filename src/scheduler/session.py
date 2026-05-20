@@ -105,7 +105,13 @@ class ChatSession:
             while selected and selected[0].get("role") == "tool":
                 selected = selected[1:]
 
-            if selected and selected[0]["role"] == "assistant" and not selected[0].get("tool_calls"):
+            # 如果截断后首条是带 tool_calls 但后续 tool 回复被截掉的 assistant 消息，也需移除
+            if (
+                selected
+                and selected[0]["role"] == "assistant"
+                and selected[0].get("tool_calls")
+                and (len(selected) < 2 or selected[1].get("role") != "tool")
+            ):
                 selected = selected[1:]
 
             for m in selected:

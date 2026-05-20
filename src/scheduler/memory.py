@@ -244,7 +244,9 @@ class LongTermMemoryStore:
 
     def retrieve(self, query: str, max_results: int = 10) -> list[MemoryEntry]:
         """基于 n-gram 相似度 + 关键词匹配 + 重要性 + 时效性的混合检索（线程安全）"""
-        if not self._entries:
+        with self._lock:
+            snapshot = list(self._entries)
+        if not snapshot:
             return []
 
         query_lower = query.lower()
@@ -254,7 +256,7 @@ class LongTermMemoryStore:
         scored: list[tuple[float, MemoryEntry]] = []
         now = time.time()
 
-        for entry in self._entries:
+        for entry in snapshot:
             content_lower = entry.content.lower()
             content_tokens = set(re.findall(r"[\w\u4e00-\u9fff]+", content_lower))
             tag_tokens = set(t.lower() for t in entry.tags)
@@ -327,6 +329,16 @@ class LongTermMemoryStore:
             self._save()
             logger.info("记忆衰减清理: 移除 %d 条低重要性记忆", removed)
             return removed
+
+    def remove_by_id(self, entry_id: str) -> bool:
+        """按 ID 删除记忆条目（线程安全）"""
+        with self._lock:
+            before = len(self._entries)
+            self._entries = [e for e in self._entries if e.id != entry_id]
+            if len(self._entries) < before:
+                self._save()
+                return True
+            return False
 
     @staticmethod
     def _is_similar(a: str, b: str) -> bool:
@@ -476,15 +488,16 @@ class MemoryManager:
 
         try:
             from src.models.schemas import ChatCompletionRequest, ChatMessage, ResponseFormat
-            from src.config.manager import get_config_manager
+            from src.api.routes import _deps
 
-            config_mgr = get_config_manager()
-            enabled = config_mgr.get_enabled_models()
+            if not _deps.config_manager or not _deps.dispatcher:
+                logger.debug("[Memory] LLM 提取跳过: 依赖未初始化")
+                return {}
+            enabled = _deps.config_manager.get_enabled_models()
             if not enabled:
                 return {}
 
-            from src.scheduler.dispatcher import get_dispatcher
-            dispatcher = get_dispatcher()
+            dispatcher = _deps.dispatcher
 
             req = ChatCompletionRequest(
                 model="auto",
@@ -547,6 +560,12 @@ class MemoryManager:
             self._auto_consolidate_timer.daemon = True
             self._auto_consolidate_timer.start()
 
+    def close(self) -> None:
+        """停止自动巩固定时器（用于优雅关闭）"""
+        if self._auto_consolidate_timer:
+            self._auto_consolidate_timer.cancel()
+            self._auto_consolidate_timer = None
+
     def get_context_injection(self, session_id: str) -> str:
         """获取当前会话需要注入 system prompt 的完整 memory 文本"""
         parts = []
@@ -573,11 +592,14 @@ class MemoryManager:
 
 
 _memory_manager: MemoryManager | None = None
+_memory_manager_lock = threading.Lock()
 
 
 def get_memory_manager() -> MemoryManager:
-    """获取全局 MemoryManager 单例"""
+    """获取全局 MemoryManager 单例（线程安全双重检查锁）"""
     global _memory_manager
     if _memory_manager is None:
-        _memory_manager = MemoryManager()
+        with _memory_manager_lock:
+            if _memory_manager is None:
+                _memory_manager = MemoryManager()
     return _memory_manager

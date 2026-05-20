@@ -16,6 +16,26 @@
   - base_url 可通过 config.yaml 自定义（默认 `http://localhost:11434`）
   - 智能推断 tool calling 支持（llama3.1+, qwen2.5+, mistral 等）
 
+### 修复（Bug Fix）— 第六轮审查（14项）
+
+**P0 安全/数据正确性：**
+- **Memory LLM 提取完全失效**：`llm_extract_memories()` 引用了不存在的 `get_dispatcher()`/`get_config_manager()` 函数，导致对话轮次达 6/12/20 时 LLM 记忆提取必定失败；改为通过 `_deps` 获取已初始化的依赖
+- **MemoryManager 单例竞态**：`get_memory_manager()` 无锁惰性初始化，多线程可创建多个实例导致记忆数据不一致；新增双重检查锁（`threading.Lock`）
+- **delete_memory_entry 绕过锁竞态**：直接操作 `store._entries` 私有属性绕过 `_lock`；新增 `LongTermMemoryStore.remove_by_id()` 线程安全方法
+
+**P1 逻辑缺陷：**
+- **get_context_messages 误删有效 assistant 回复**：截断后首条 assistant 消息若不含 tool_calls 会被删除，但该消息可能是正常回复；改为只删除带 tool_calls 但后续 tool 回复缺失的 assistant 消息
+- **流式路由策略 contextvars 部分分支未设置**：`dispatch_stream` 的快速路径、LLM 路由、规则遍历分支均缺少 `_route_strategy_var.set()`；补全所有分支
+- **流式会话保存阈值 >=10 导致短回复丢失**：回复如 "是的"(2字符) 不会保存到会话；阈值从 `>= 10` 降至 `>= 1`
+- **LongTermMemoryStore.retrieve() 遍历未加锁**：评分遍历在 `_lock` 外进行，其他线程修改 `_entries` 可致 `RuntimeError`；改为先取快照再遍历
+- **_schedule_bindings_save Timer 竞态**：Timer 创建不在 `_session_lock` 内，多个调用者可能创建多个 Timer；移入锁内
+- **_map_dispatch_error 死代码**：定义了统一异常映射函数但未使用；重构 `_handle_stream` 使用该函数消除重复 except 块
+
+**P2 设计缺陷：**
+- **Memory 自调度 Timer 无法停止**：`_check_idle_sessions` 在 finally 中无条件创建下一个 Timer；新增 `MemoryManager.close()` 方法
+- **internal_tools CapabilityCache 每次新建空实例**：`_handle_model_capabilities` 每次创建新的空缓存而非使用运行时缓存；改为引用 `_deps.capability_tester.cache`
+- **send_chat_message 异常时 provider_name 未定义**：dispatch() 首轮抛异常时变量未赋值致 `NameError`；添加默认值 `"unknown"`
+
 ### 修复（Bug Fix）— 第五轮审查
 
 - **_cleanup_expired_trash 死锁**：遍历 `_trash` 未持锁，并发修改可致 `RuntimeError`；整个操作移入 `_lock` 内

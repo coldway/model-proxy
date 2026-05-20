@@ -237,26 +237,9 @@ async def _handle_stream(request: ChatCompletionRequest, enabled_models, trace_i
     start_time = time.time()
     try:
         provider_name, model_name, content_iter = await _deps.dispatcher.dispatch_stream(request, enabled_models, trace_id=trace_id)
-    except RateLimitExceeded as e:
-        _record_failure(start_time, str(e))
-        logger.warning("[API] trace=%s%s 流式限流: %s", trace_id, sid_tag, e)
-        raise HTTPException(status_code=429, detail=str(e))
-    except ModelNotFound as e:
-        _record_failure(start_time, str(e))
-        logger.warning("[API] trace=%s%s 流式模型未找到: %s", trace_id, sid_tag, e)
-        raise HTTPException(status_code=404, detail=str(e))
-    except AllModelsUnavailable as e:
-        _record_failure(start_time, str(e))
-        logger.error("[API] trace=%s 流式所有模型不可用: %s", trace_id, e)
-        raise HTTPException(status_code=503, detail="所有模型均不可用，请稍后重试")
-    except ProviderCallError as e:
-        _record_failure(start_time, str(e))
-        logger.warning("[API] trace=%s 流式厂商调用失败（可恢复）: %s", trace_id, e)
-        raise HTTPException(status_code=503, detail="模型服务暂时不可用，请稍后重试")
     except Exception as e:
         _record_failure(start_time, str(e))
-        logger.error("[API] trace=%s 流式请求异常: %s", trace_id, e, exc_info=True)
-        raise HTTPException(status_code=500, detail="推理服务内部错误，请稍后重试")
+        raise _map_dispatch_error(e, trace_id)
 
     latency = (time.time() - start_time) * 1000
     route_strategy = _deps.dispatcher.last_route_strategy or ""
@@ -1177,6 +1160,8 @@ async def send_chat_message(session_id: str, request: ChatCompletionRequest):
     max_tool_rounds = 3
     start_time = time.time()
     tool_calls_log = []
+    provider_name = "unknown"
+    model_name = "unknown"
 
     try:
         for round_idx in range(max_tool_rounds + 1):
@@ -1338,11 +1323,7 @@ async def delete_memory_entry(entry_id: str):
     """删除一条长期记忆"""
     from src.scheduler.memory import get_memory_manager
     mgr = get_memory_manager()
-    store = mgr._store
-    before = len(store._entries)
-    store._entries = [e for e in store._entries if e.id != entry_id]
-    if len(store._entries) < before:
-        store._save()
+    if mgr._store.remove_by_id(entry_id):
         return {"status": "ok"}
     raise HTTPException(status_code=404, detail="记忆条目不存在")
 
@@ -1468,7 +1449,7 @@ async def stream_chat_message(session_id: str, request: ChatCompletionRequest):
         if thinking:
             logger.info("[流式会话] trace=%s 模型 %s 思考过程:\n%s", trace_id, model_name, thinking[:500])
 
-        save_assistant = (not stream_broken) and len(reply_text.strip()) >= 10
+        save_assistant = (not stream_broken) and len(reply_text.strip()) >= 1
         if save_assistant:
             session.add_message("assistant", reply_text, model=model_name)
             memory_mgr.on_turn_complete(session_id, user_msg, reply_text)

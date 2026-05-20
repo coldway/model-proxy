@@ -248,10 +248,11 @@ class Dispatcher:
 
     def _schedule_bindings_save(self) -> None:
         """延迟保存会话绑定到磁盘"""
-        if self._bind_save_timer is None or not self._bind_save_timer.is_alive():
-            self._bind_save_timer = threading.Timer(self._SESSION_BIND_SAVE_DEBOUNCE, self._persist_bindings)
-            self._bind_save_timer.daemon = True
-            self._bind_save_timer.start()
+        with self._session_lock:
+            if self._bind_save_timer is None or not self._bind_save_timer.is_alive():
+                self._bind_save_timer = threading.Timer(self._SESSION_BIND_SAVE_DEBOUNCE, self._persist_bindings)
+                self._bind_save_timer.daemon = True
+                self._bind_save_timer.start()
 
     def _persist_bindings(self) -> None:
         """实际写入会话绑定到磁盘"""
@@ -986,6 +987,7 @@ class Dispatcher:
         if self._can_skip_routing(ordered, request):
             prov_name, model_cfg = ordered[0]
             try:
+                _route_strategy_var.set("规则快速路径")
                 return _bind_on_success(await self._try_stream(prov_name, model_cfg, request, trace_id=trace_id))
             except ProviderCallError as e:
                 logger.warning("流式快速路径 %s 失败: %s，继续尝试", model_cfg.name, e)
@@ -997,6 +999,7 @@ class Dispatcher:
                 for i, (prov_name, model_cfg) in enumerate(ordered):
                     if model_cfg.name == recommended:
                         try:
+                            _route_strategy_var.set("LLM 智能路由")
                             return _bind_on_success(await self._try_stream(prov_name, model_cfg, request, trace_id=trace_id))
                         except ProviderCallError as e:
                             logger.warning("流式推荐模型 %s 失败: %s，回退遍历", recommended, e)
@@ -1006,6 +1009,7 @@ class Dispatcher:
         errors: list[str] = []
         for prov_name, model_cfg in ordered:
             try:
+                _route_strategy_var.set("规则遍历回退")
                 return _bind_on_success(await self._try_stream(prov_name, model_cfg, request, trace_id=trace_id))
             except ProviderCallError as e:
                 errors.append(f"{prov_name}:{model_cfg.name} {e}")

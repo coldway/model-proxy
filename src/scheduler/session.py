@@ -6,6 +6,8 @@
 from __future__ import annotations
 
 import logging
+import os
+import tempfile
 import threading
 import time
 import uuid
@@ -344,10 +346,11 @@ class SessionManager:
             "_trash": {sid: {"session": entry["session"].to_dict(), "deleted_at": entry["deleted_at"]} for sid, entry in self._trash.items()},
         }
         try:
-            SESSION_FILE.write_text(
-                yaml.dump(data, allow_unicode=True, default_flow_style=False),
-                encoding="utf-8",
-            )
+            content = yaml.dump(data, allow_unicode=True, default_flow_style=False)
+            fd, tmp_path = tempfile.mkstemp(dir=str(DATA_DIR), suffix=".tmp")
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(content)
+            os.replace(tmp_path, str(SESSION_FILE))
         except Exception as e:
             logger.error("保存会话数据失败: %s", e)
 

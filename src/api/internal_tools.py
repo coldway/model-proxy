@@ -11,7 +11,11 @@ from __future__ import annotations
 
 import json
 import logging
+import re
+import urllib.parse
 from typing import Any, Callable, Awaitable
+
+import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -299,6 +303,180 @@ def _register_builtin_tools():
             "required": ["provider"],
         },
         handler=_handle_list_provider_models,
+    )
+
+    # ---- search_ollama_library ----
+
+    _VRAM_TIERS = [
+        (8, "推荐 (完全载入 VRAM)"),
+        (14, "可用 (VRAM 足够)"),
+        (27, "可用 (需部分 CPU 辅助)"),
+        (35, "勉强可用 (大量 CPU 辅助)"),
+    ]
+
+    def _estimate_suitability(size_b: float, vram_gb: float) -> str:
+        """根据参数量和 VRAM 估算 Q4 量化下的适合度"""
+        q4_gb = size_b * 0.6
+        if q4_gb <= vram_gb * 0.85:
+            return "推荐 (完全载入 VRAM)"
+        if q4_gb <= vram_gb:
+            return "可用 (VRAM 刚好)"
+        if q4_gb <= vram_gb + 16:
+            return "可用 (需 CPU 辅助, 速度较慢)"
+        return "不适合 (显存和内存不足)"
+
+    async def _handle_search_ollama_library(args: dict) -> str:
+        """搜索 Ollama 模型库并按本机硬件筛选"""
+        from src.api.routes import _deps
+
+        query = args.get("query", "").strip()
+        if not query:
+            return json.dumps({"error": "必须指定 query 搜索词"}, ensure_ascii=False)
+
+        vram_gb = args.get("vram_gb", 12.0)
+        max_results = min(args.get("max_results", 20), 40)
+
+        encoded_q = urllib.parse.quote(query, safe="")
+        url = f"https://ollama.com/search?q={encoded_q}"
+
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.get(url)
+                resp.raise_for_status()
+                html = resp.text
+        except httpx.HTTPError as e:
+            return json.dumps({"error": f"搜索请求失败: {str(e)[:200]}"}, ensure_ascii=False)
+
+        card_re = re.compile(
+            r'<a\s+href="(/([^"/]+/[^"]+))"[^>]*>(.*?)</a>',
+            re.DOTALL,
+        )
+
+        installed_names: set[str] = set()
+        try:
+            if _deps.dispatcher and _deps.dispatcher.has_provider("ollama"):
+                prov = _deps.dispatcher.get_provider("ollama")
+                tags_resp = await prov._client.get("/api/tags")
+                if tags_resp.status_code == 200:
+                    for m in tags_resp.json().get("models", []):
+                        installed_names.add(m["name"].split(":")[0].lower())
+                        installed_names.add(m["name"].lower())
+        except Exception:
+            pass
+
+        models: list[dict] = []
+        seen: set[str] = set()
+
+        for match in card_re.finditer(html):
+            if len(models) >= max_results:
+                break
+            href = match.group(2)
+            inner_html = match.group(3)
+            text = re.sub(r"<[^>]+>", " ", inner_html)
+            text = text.replace("\xa0", " ").replace("&nbsp;", " ")
+            text = re.sub(r"\s+", " ", text).strip()
+
+            name = href
+            if name in seen or "/" not in name:
+                continue
+            seen.add(name)
+
+            caps = [c for c in ("tools", "thinking", "vision", "audio")
+                    if c in text.lower()]
+
+            sizes_raw = re.findall(r"\b(\d+(?:\.\d+)?)[bB]\b", text)
+            sizes_b = sorted(set(float(s) for s in sizes_raw if float(s) >= 0.5))
+
+            pulls_m = re.search(r"([\d,.]+)\s*([KkMm])?\s*Pulls?", text)
+            pulls = ""
+            if pulls_m:
+                pulls = pulls_m.group(1).replace(",", "")
+                suffix = (pulls_m.group(2) or "").upper()
+                if suffix == "K":
+                    pulls = str(int(float(pulls) * 1000))
+                elif suffix == "M":
+                    pulls = str(int(float(pulls) * 1_000_000))
+
+            is_installed = (name.lower() in installed_names
+                           or name.split("/")[-1].lower() in installed_names)
+
+            suitable_sizes: list[dict] = []
+            for sb in sizes_b:
+                suitable_sizes.append({
+                    "params": f"{sb}B",
+                    "est_vram_q4_gb": round(sb * 0.6, 1),
+                    "suitability": _estimate_suitability(sb, vram_gb),
+                })
+
+            if not sizes_b:
+                name_lower = name.lower()
+                inferred = None
+                for pattern, sz in [("8b", 8), ("9b", 9), ("4b", 4), ("2b", 2),
+                                    ("0.6b", 0.6), ("27b", 27), ("35b", 35),
+                                    ("12b", 12), ("14b", 14), ("31b", 31),
+                                    ("e2b", 4), ("e4b", 8)]:
+                    if pattern in name_lower:
+                        inferred = sz
+                        break
+                if inferred:
+                    suitable_sizes.append({
+                        "params": f"~{inferred}B (从名称推断)",
+                        "est_vram_q4_gb": round(inferred * 0.6, 1),
+                        "suitability": _estimate_suitability(inferred, vram_gb),
+                    })
+
+            has_suitable = any(
+                "不适合" not in s["suitability"] for s in suitable_sizes
+            ) if suitable_sizes else True
+
+            models.append({
+                "name": name,
+                "capabilities": caps,
+                "sizes": suitable_sizes,
+                "pulls": int(pulls) if pulls.isdigit() else 0,
+                "installed": is_installed,
+                "has_suitable_size": has_suitable,
+                "url": f"https://ollama.com/{name}",
+            })
+
+        suitable = [m for m in models if m["has_suitable_size"]]
+        unsuitable = [m for m in models if not m["has_suitable_size"]]
+
+        return json.dumps({
+            "query": query,
+            "vram_gb": vram_gb,
+            "total_found": len(models),
+            "suitable_count": len(suitable),
+            "suitable_models": suitable,
+            "unsuitable_models": unsuitable[:5],
+        }, ensure_ascii=False, indent=2)
+
+    register_tool(
+        name="search_ollama_library",
+        description=(
+            "搜索 Ollama 模型库（ollama.com），返回匹配的模型列表并根据本机显存"
+            "（默认 12GB）评估每个模型的硬件适合度。标记已安装的模型。"
+            "适用于查询如 abliterated、vision、coding 等场景。"
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "搜索关键词（如 abliterated, vision, coding）",
+                },
+                "vram_gb": {
+                    "type": "number",
+                    "description": "本机 GPU 显存大小（GB），默认 12",
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": "最大返回数量，默认 20",
+                },
+            },
+            "required": ["query"],
+        },
+        handler=_handle_search_ollama_library,
     )
 
 

@@ -1,13 +1,9 @@
-# Created by model-proxy on 2026/05/20
+# Created by model-proxy on 2026/05/21
 # Copyright © 2026
 
-"""
-Agent Memory System — 向后兼容入口
+"""Memory 子包 — 从 _impl.py 重导出所有公共类，保持 import 兼容。"""
 
-实现已迁移到 memory_pkg/ 子包。此文件保留以确保现有 import 正常工作。
-"""
-
-from src.scheduler.memory_pkg import (  # noqa: F401
+from src.scheduler.memory_pkg._impl import (
     EntityGraph,
     EntityRelation,
     LongTermMemoryStore,

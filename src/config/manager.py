@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 import yaml
 
+from src.config.key_rotator import KeyRotator
 from src.models.schemas import AppConfig, AppSettings, ModelConfig, ProviderConfig, RateLimit
 
 if TYPE_CHECKING:
@@ -32,6 +33,7 @@ class ConfigManager:
         self._path = config_path or CONFIG_FILE
         self._catalog = catalog
         self._api_keys: dict[str, str] = {}
+        self._key_rotators: dict[str, KeyRotator] = {}
         self._settings = AppSettings()
         self._enabled_models_cache: list[tuple[str, ModelConfig]] | None = None
         self._enabled_models_cache_ts: float = 0.0
@@ -52,7 +54,14 @@ class ConfigManager:
                     raw = yaml.safe_load(f) or {}
                 for name, prov_data in raw.get("providers", {}).items():
                     if isinstance(prov_data, dict):
-                        self._api_keys[name] = prov_data.get("api_key", "")
+                        key_val = prov_data.get("api_key", "") or prov_data.get("api_keys", "")
+                        if isinstance(key_val, list):
+                            keys = [k for k in key_val if k and k.strip()]
+                            self._api_keys[name] = keys[0] if keys else ""
+                            if len(keys) > 1:
+                                self._key_rotators[name] = KeyRotator(name, keys)
+                        else:
+                            self._api_keys[name] = key_val
                 settings_data = raw.get("settings", {})
                 if settings_data:
                     self._settings = AppSettings(**settings_data)
@@ -78,7 +87,13 @@ class ConfigManager:
     # --- API Key 管理 ---
 
     def get_api_key(self, provider: str) -> str:
+        rotator = self._key_rotators.get(provider)
+        if rotator:
+            return rotator.get_key()
         return self._api_keys.get(provider, "")
+
+    def get_key_rotator(self, provider: str) -> KeyRotator | None:
+        return self._key_rotators.get(provider)
 
     def update_api_key(self, provider: str, api_key: str) -> None:
         self._api_keys[provider] = api_key

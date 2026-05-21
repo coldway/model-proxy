@@ -1329,6 +1329,7 @@ async def _do_send_chat(session, request, trace_id: str, memory_mgr):
     """send_chat_message 的核心逻辑（在 session async lock 内执行）"""
     from src.api.internal_tools import get_tool_definitions, execute_tool
     from src.models.schemas import ToolDefinition, ToolFunction
+    from src.scheduler.context_manager import AutoCompactManager, FullContextArchive
 
     session_id = session.id
     user_msg = ""
@@ -1377,8 +1378,13 @@ async def _do_send_chat(session, request, trace_id: str, memory_mgr):
     model_name = "unknown"
 
     try:
+        compact_mgr = AutoCompactManager(context_window=session._max_context_tokens)
+
         for round_idx in range(max_tool_rounds + 1):
             context_messages = session.get_context_messages()
+
+            if compact_mgr.monitor.estimate_utilization(context_messages) >= 0.55:
+                context_messages = await compact_mgr.maybe_compact(context_messages)
 
             session_memory_ctx = memory_mgr.get_context_injection(session_id, user_msg=user_msg)
             full_memory_ctx = "\n\n".join(filter(None, [long_term_ctx, session_memory_ctx]))
@@ -1437,6 +1443,16 @@ async def _do_send_chat(session, request, trace_id: str, memory_mgr):
         session.add_message("assistant", reply, model=result.model)
         session.clear_checkpoint()
         memory_mgr.on_turn_complete(session_id, user_msg, reply)
+
+        try:
+            archive = FullContextArchive(session_id)
+            archive.archive_turn(
+                user_msg=user_msg,
+                assistant_msg=reply,
+                tool_names=[tc["tool"] for tc in tool_calls_log],
+            )
+        except Exception as arc_err:
+            logger.debug("[Archive] 归档失败(非关键): %s", arc_err)
 
         user_turn_count = session.count_role("user")
         if user_turn_count in (6, 12, 20):

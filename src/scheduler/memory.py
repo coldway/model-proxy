@@ -2,17 +2,21 @@
 # Copyright © 2026
 
 """
-Agent Memory System — L1 Session Memory + L2 Long-term Memory
+Agent Memory System — L1 Session Memory + L2 Long-term Memory + Constitution + Procedural
 
 基于 agent-base/docs/agent_memory_system.md 设计实现：
 - L1: 规则化增量提取 (goals/decisions/preferences/tech_context)，注入 system prompt
 - L2: 跨会话持久化（JSON 文件），会话开始时检索相关记忆并注入
+- Constitution: 记忆宪法 — 定义什么该记、什么不记
+- Procedural Memory: 程序记忆 — 操作流程模板
+- Entity Graph: 实体关系图谱 — 增强跨话题检索
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import re
 import tempfile
@@ -26,6 +30,252 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 MEMORY_DIR = Path("data/memory")
+
+
+# ============================================================
+# Memory Constitution — 记忆宪法
+# ============================================================
+
+@dataclass
+class MemoryConstitution:
+    """记忆宪法：定义 Agent 的记忆行为原则（源自 Letta）"""
+
+    identity_principles: list[str] = field(default_factory=lambda: [
+        "保持跨会话的身份连续性：记得之前的交互和用户偏好",
+        "用户偏好和项目知识应被视为核心记忆，优先保留",
+        "历史决策和设计选择应被视为情景记忆，按重要性保留",
+    ])
+
+    storage_constraints: list[str] = field(default_factory=lambda: [
+        "不存储敏感信息（密码、Token、API Key）",
+        "不存储临时调试信息（单次查询结果、中间变量值）",
+        "不存储可从代码/文档中直接获取的信息",
+        "工具调用的完整输出应压缩为摘要而非原文存储",
+    ])
+
+    priority_rules: list[str] = field(default_factory=lambda: [
+        "用户显式纠正 > 历史推断",
+        "最新偏好 > 旧偏好",
+        "多次重复出现的模式 > 单次提及",
+        "决策原因 > 决策结果",
+    ])
+
+    def to_system_section(self) -> str:
+        """生成注入 system prompt 的宪法文本"""
+        sections = ["## Memory Constitution"]
+        sections.append("### 记忆原则")
+        for p in self.identity_principles:
+            sections.append(f"- {p}")
+        sections.append("### 存储约束")
+        for c in self.storage_constraints:
+            sections.append(f"- {c}")
+        sections.append("### 优先级")
+        for r in self.priority_rules:
+            sections.append(f"- {r}")
+        return "\n".join(sections)
+
+    def should_store(self, content: str) -> bool:
+        """判断内容是否应该存储（简单规则过滤）"""
+        sensitive_patterns = [
+            r"(?:api[_-]?key|token|password|secret)\s*[:=]\s*\S+",
+            r"sk-[a-zA-Z0-9]{20,}",
+            r"(?:bearer|authorization)\s+\S{20,}",
+        ]
+        for pattern in sensitive_patterns:
+            if re.search(pattern, content, re.IGNORECASE):
+                return False
+        return True
+
+
+# ============================================================
+# Procedural Memory — 程序记忆
+# ============================================================
+
+@dataclass
+class ProceduralMemoryEntry:
+    """一条程序记忆 — 操作流程模板"""
+    id: str
+    name: str
+    trigger: str
+    steps: list[str]
+    tools_used: list[str] = field(default_factory=list)
+    success_count: int = 0
+    fail_count: int = 0
+    last_used: float = 0.0
+    created_at: float = field(default_factory=time.time)
+    tags: list[str] = field(default_factory=list)
+
+    @property
+    def success_rate(self) -> float:
+        total = self.success_count + self.fail_count
+        return self.success_count / total if total > 0 else 0.0
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "trigger": self.trigger,
+            "steps": self.steps,
+            "tools_used": self.tools_used,
+            "success_count": self.success_count,
+            "fail_count": self.fail_count,
+            "last_used": self.last_used,
+            "created_at": self.created_at,
+            "tags": self.tags,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> ProceduralMemoryEntry:
+        return cls(**{k: v for k, v in d.items() if k in cls.__dataclass_fields__})
+
+
+class ProceduralMemoryStore:
+    """程序记忆存储 — 操作流程模板库"""
+
+    def __init__(self, file_path: Path | None = None):
+        self._file = file_path or (MEMORY_DIR / "procedural.json")
+        self._file.parent.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.Lock()
+        self._entries: list[ProceduralMemoryEntry] = []
+        self._load()
+
+    def _load(self) -> None:
+        if not self._file.exists():
+            return
+        try:
+            data = json.loads(self._file.read_text(encoding="utf-8"))
+            self._entries = [ProceduralMemoryEntry.from_dict(e) for e in data.get("procedures", [])]
+        except Exception as e:
+            logger.warning("加载程序记忆失败: %s", e)
+
+    def _save(self) -> None:
+        try:
+            data = {"procedures": [e.to_dict() for e in self._entries]}
+            content = json.dumps(data, ensure_ascii=False, indent=2)
+            self._file.parent.mkdir(parents=True, exist_ok=True)
+            fd, tmp_path = tempfile.mkstemp(dir=str(self._file.parent), suffix=".tmp")
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(content)
+            os.replace(tmp_path, str(self._file))
+        except Exception as e:
+            logger.error("保存程序记忆失败: %s", e)
+
+    def add(self, entry: ProceduralMemoryEntry) -> None:
+        with self._lock:
+            for existing in self._entries:
+                if existing.name == entry.name:
+                    existing.steps = entry.steps
+                    existing.tools_used = entry.tools_used
+                    existing.last_used = time.time()
+                    self._save()
+                    return
+            self._entries.append(entry)
+            self._save()
+
+    def find_by_trigger(self, query: str, limit: int = 3) -> list[ProceduralMemoryEntry]:
+        """根据触发条件检索相关的程序记忆"""
+        query_lower = query.lower()
+        query_tokens = set(re.findall(r"[\w\u4e00-\u9fff]+", query_lower))
+
+        scored: list[tuple[float, ProceduralMemoryEntry]] = []
+        for entry in self._entries:
+            trigger_tokens = set(re.findall(r"[\w\u4e00-\u9fff]+", entry.trigger.lower()))
+            name_tokens = set(re.findall(r"[\w\u4e00-\u9fff]+", entry.name.lower()))
+            tag_tokens = set(t.lower() for t in entry.tags)
+            all_tokens = trigger_tokens | name_tokens | tag_tokens
+
+            overlap = len(query_tokens & all_tokens)
+            if overlap == 0:
+                continue
+            score = overlap / max(len(query_tokens), 1) + entry.success_rate * 0.2
+            scored.append((score, entry))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return [entry for _, entry in scored[:limit]]
+
+    def record_usage(self, entry_id: str, success: bool) -> None:
+        with self._lock:
+            for entry in self._entries:
+                if entry.id == entry_id:
+                    if success:
+                        entry.success_count += 1
+                    else:
+                        entry.fail_count += 1
+                    entry.last_used = time.time()
+                    self._save()
+                    return
+
+    def get_all(self) -> list[ProceduralMemoryEntry]:
+        with self._lock:
+            return list(self._entries)
+
+    def size(self) -> int:
+        return len(self._entries)
+
+
+# ============================================================
+# Entity Graph — 实体关系图谱
+# ============================================================
+
+@dataclass
+class EntityRelation:
+    """实体关系"""
+    subject: str
+    predicate: str
+    obj: str
+    weight: float = 1.0
+    source_memory_id: str = ""
+
+
+class EntityGraph:
+    """简易实体关系图谱 — 增强记忆检索"""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._entities: dict[str, set[str]] = {}
+        self._relations: list[EntityRelation] = []
+
+    def add_entity(self, entity: str, memory_ids: list[str]) -> None:
+        with self._lock:
+            key = entity.lower()
+            if key not in self._entities:
+                self._entities[key] = set()
+            self._entities[key].update(memory_ids)
+
+    def add_relation(self, relation: EntityRelation) -> None:
+        with self._lock:
+            self._relations.append(relation)
+
+    def find_related_memories(self, query: str, limit: int = 10) -> set[str]:
+        """通过实体匹配找到相关记忆 ID"""
+        query_tokens = set(re.findall(r"[\w\u4e00-\u9fff]+", query.lower()))
+        memory_ids: set[str] = set()
+        with self._lock:
+            for token in query_tokens:
+                if token in self._entities:
+                    memory_ids.update(self._entities[token])
+                for entity_key in self._entities:
+                    if token in entity_key or entity_key in token:
+                        memory_ids.update(self._entities[entity_key])
+        return set(list(memory_ids)[:limit])
+
+    def extract_and_index(self, text: str, memory_id: str) -> list[str]:
+        """从文本中提取实体并建立索引"""
+        entities: list[str] = []
+        code_ids = re.findall(r"[a-zA-Z_][\w]*(?:\.[a-zA-Z_][\w]*)+", text)
+        entities.extend(code_ids[:5])
+        cn_terms = re.findall(r"[\u4e00-\u9fff]{2,6}", text)
+        entities.extend(cn_terms[:5])
+        tech_terms = re.findall(r"\b(?:gRPC|Redis|Kafka|PostgreSQL|HTTP|API|Docker)\b", text, re.IGNORECASE)
+        entities.extend(tech_terms[:3])
+
+        for entity in entities:
+            self.add_entity(entity, [memory_id])
+        return entities
+
+    def size(self) -> tuple[int, int]:
+        """返回 (实体数, 关系数)"""
+        return len(self._entities), len(self._relations)
 
 
 def _compute_bigrams(text: str) -> set[str]:
@@ -329,21 +579,28 @@ class LongTermMemoryStore:
         with self._lock:
             return len(self._entries)
 
-    def decay(self, max_entries: int = 200) -> int:
-        """衰减清理：当超过上限时，移除最不重要且最久未访问的条目"""
+    def decay(self, max_entries: int = 200, half_life_days: float = 7.0) -> int:
+        """指数衰减清理（源自 CrewAI Recency Decay + Half-life 公式）
+
+        effective_score = importance * exp(-0.693 * days / half_life)
+        低于 min_score 阈值或超出上限的条目被移除。
+        """
         with self._lock:
             if len(self._entries) <= max_entries:
                 return 0
             now = time.time()
             for entry in self._entries:
-                age_days = (now - entry.last_accessed) / 86400
-                entry.importance *= max(0.1, 1.0 - age_days * 0.005)
+                days_ago = (now - entry.last_accessed) / 86400
+                recency = math.exp(-0.693 * days_ago / half_life_days)
+                entry.importance = entry.importance * recency
+                if entry.access_count > 10:
+                    entry.importance = max(entry.importance, 0.3)
 
             self._entries.sort(key=lambda e: e.importance, reverse=True)
             removed = len(self._entries) - max_entries
             self._entries = self._entries[:max_entries]
             self._save()
-            logger.info("记忆衰减清理: 移除 %d 条低重要性记忆", removed)
+            logger.info("记忆衰减清理: 移除 %d 条低重要性记忆 (half_life=%.1fd)", removed, half_life_days)
             return removed
 
     def remove_by_id(self, entry_id: str) -> bool:
@@ -415,12 +672,15 @@ AUTO_CONSOLIDATE_IDLE_SECONDS = 1800  # 30 分钟空闲后自动巩固（原 10 
 
 
 class MemoryManager:
-    """统一 Memory 管理器 — 集成 L1 + L2 + 自动巩固（线程安全）"""
+    """统一 Memory 管理器 — 集成 L1 + L2 + Constitution + Procedural + EntityGraph（线程安全）"""
 
     def __init__(self):
         self._store = LongTermMemoryStore()
         self._consolidator = MemoryConsolidator(self._store)
         self._extractor = SessionMemoryExtractor()
+        self._constitution = MemoryConstitution()
+        self._procedural = ProceduralMemoryStore()
+        self._entity_graph = EntityGraph()
         self._lock = threading.Lock()
         self._closed = False
         self._session_memories: dict[str, SessionMemoryStore] = {}
@@ -435,38 +695,59 @@ class MemoryManager:
             return self._session_memories[session_id]
 
     def on_session_start(self, session_id: str, first_message: str) -> str:
-        """会话开始 — 加载核心记忆 + 检索相关记忆，返回注入文本"""
+        """会话开始 — 加载核心记忆 + 检索相关记忆 + 程序记忆，返回注入文本"""
         with self._lock:
             self._session_memories[session_id] = SessionMemoryStore()
 
         core_memories = self._store.get_core_memories()
         relevant = self._store.retrieve(first_message, max_results=5)
 
+        entity_memory_ids = self._entity_graph.find_related_memories(first_message)
+        entity_entries: list[MemoryEntry] = []
+        if entity_memory_ids:
+            all_entries = self._store.get_all()
+            entity_entries = [e for e in all_entries if e.id in entity_memory_ids][:3]
+
         seen_ids = set()
         combined: list[MemoryEntry] = []
-        for entry in core_memories + relevant:
+        for entry in core_memories + relevant + entity_entries:
             if entry.id not in seen_ids:
                 seen_ids.add(entry.id)
                 combined.append(entry)
 
-        if not combined:
-            return ""
+        parts: list[str] = []
 
-        lines = ["## 用户历史记忆"]
-        for entry in combined[:8]:
-            prefix = {"preference": "偏好", "semantic": "知识", "episodic": "经验"}.get(entry.type, "记忆")
-            lines.append(f"- [{prefix}] {entry.content}")
+        if combined:
+            lines = ["## 用户历史记忆"]
+            for entry in combined[:8]:
+                prefix = {"preference": "偏好", "semantic": "知识", "episodic": "经验"}.get(entry.type, "记忆")
+                lines.append(f"- [{prefix}] {entry.content}")
+            parts.append("\n".join(lines))
 
-        return "\n".join(lines)
+        procedures = self._procedural.find_by_trigger(first_message, limit=2)
+        if procedures:
+            proc_lines = ["## 相关操作流程"]
+            for proc in procedures:
+                proc_lines.append(f"### {proc.name} (成功率:{proc.success_rate:.0%})")
+                for step in proc.steps[:5]:
+                    proc_lines.append(f"  {step}")
+            parts.append("\n".join(proc_lines))
+
+        return "\n\n".join(parts) if parts else ""
 
     def on_turn_complete(self, session_id: str, user_msg: str, assistant_msg: str) -> None:
-        """每轮对话后 — 增量提取 Session Memory"""
+        """每轮对话后 — 增量提取 Session Memory + 实体索引"""
         with self._lock:
             self._session_last_active[session_id] = time.time()
         new_entries = self._extractor.extract_from_turn(user_msg, assistant_msg)
         if new_entries:
             session_mem = self.get_session_memory(session_id)
             session_mem.merge(new_entries)
+
+        combined_text = user_msg + " " + (assistant_msg or "")
+        if len(combined_text) > 20:
+            mem_id = f"turn_{session_id}_{int(time.time())}"
+            self._entity_graph.extract_and_index(combined_text, mem_id)
 
     def on_session_end(self, session_id: str) -> int:
         """会话结束 — 巩固到长期记忆"""
@@ -627,11 +908,31 @@ class MemoryManager:
         type_counts: dict[str, int] = {}
         for e in entries:
             type_counts[e.type] = type_counts.get(e.type, 0) + 1
+        entity_count, relation_count = self._entity_graph.size()
         return {
             "total_entries": len(entries),
             "by_type": type_counts,
             "active_sessions": len(self._session_memories),
+            "procedural_count": self._procedural.size(),
+            "entity_count": entity_count,
+            "relation_count": relation_count,
         }
+
+    @property
+    def constitution(self) -> MemoryConstitution:
+        return self._constitution
+
+    @property
+    def procedural(self) -> ProceduralMemoryStore:
+        return self._procedural
+
+    @property
+    def entity_graph(self) -> EntityGraph:
+        return self._entity_graph
+
+    def should_store_memory(self, content: str) -> bool:
+        """使用 Constitution 判断内容是否应该存储"""
+        return self._constitution.should_store(content)
 
 
 _memory_manager: MemoryManager | None = None

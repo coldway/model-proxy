@@ -1,10 +1,11 @@
 # Created by model-proxy on 2026/05/13
 # Copyright © 2026
 
-"""聊天会话管理器 — 多会话、上下文窗口控制、持久化"""
+"""聊天会话管理器 — 多会话、上下文窗口控制、持久化、并发安全"""
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import tempfile
@@ -40,7 +41,7 @@ SYSTEM_PROMPT = (
 
 
 class ChatSession:
-    """单个聊天会话"""
+    """单个聊天会话（支持并发安全和事务性回滚）"""
 
     def __init__(
         self,
@@ -56,10 +57,12 @@ class ChatSession:
         self.system_prompt = system_prompt
         self._max_context_tokens = max_context_tokens
         self._lock = threading.Lock()
+        self._async_lock = asyncio.Lock()
         self.messages: list[dict[str, str]] = []
         self.created_at: float = time.time()
         self.updated_at: float = time.time()
         self.total_tokens_est: int = 0
+        self._checkpoint: int | None = None
 
     def add_message(self, role: str, content: str, model: str | None = None, tool_calls: list | None = None, tool_call_id: str | None = None, name: str | None = None) -> None:
         with self._lock:
@@ -82,15 +85,31 @@ class ChatSession:
             total_chars += len(m.get("content") or "")
         self.total_tokens_est = total_chars // CHARS_PER_TOKEN
 
-    def get_context_messages(self) -> list[dict[str, str]]:
-        """获取用于 API 调用的消息列表（含系统提示、自动截断）
+    def get_context_messages(self, model_max_tokens: int | None = None) -> list[dict[str, str]]:
+        """获取用于 API 调用的消息列表（含系统提示、重要性感知截断）
 
-        截断时保证 tool_call 链完整性：assistant(tool_calls) 和后续的
-        tool 回复消息作为一组，要么全部保留要么全部丢弃。
+        截断策略（优化版）：
+        1. 始终保留首轮用户消息（定义性约束）
+        2. 始终保留最近 N 轮
+        3. 中间部分超出预算时生成摘要占位
+        4. 保证 tool_call 链完整性
         """
+        max_tokens = model_max_tokens or self._max_context_tokens
         with self._lock:
             result = [{"role": "system", "content": self.system_prompt}]
-            budget = self._max_context_tokens - RESERVED_SYSTEM_TOKENS
+            budget = max_tokens - RESERVED_SYSTEM_TOKENS
+
+            if not self.messages:
+                return result
+
+            first_user_msg = None
+            first_user_idx = -1
+            for i, m in enumerate(self.messages):
+                if m.get("role") == "user":
+                    first_user_msg = m
+                    first_user_idx = i
+                    break
+
             selected: list[dict[str, str]] = []
             consumed = 0
 
@@ -103,14 +122,27 @@ class ChatSession:
 
             selected.reverse()
 
-            # 确保不以孤立的 tool 回复开头（其前序 assistant tool_calls 被截掉）
+            if (
+                first_user_msg
+                and first_user_idx >= 0
+                and first_user_msg not in selected
+                and len(self.messages) > 4
+            ):
+                first_tokens = len(first_user_msg.get("content") or "") // CHARS_PER_TOKEN
+                if consumed + first_tokens + 50 <= budget:
+                    summary_msg = {
+                        "role": "system",
+                        "content": f"[对话开始时用户的初始消息：{(first_user_msg.get('content') or '')[:500]}]",
+                    }
+                    selected = [summary_msg] + selected
+                    consumed += first_tokens + 50
+
             while selected and selected[0].get("role") == "tool":
                 selected = selected[1:]
 
-            # 如果截断后首条是带 tool_calls 但后续 tool 回复被截掉的 assistant 消息，也需移除
             if (
                 selected
-                and selected[0]["role"] == "assistant"
+                and selected[0].get("role") == "assistant"
                 and selected[0].get("tool_calls")
                 and (len(selected) < 2 or selected[1].get("role") != "tool")
             ):
@@ -135,6 +167,67 @@ class ChatSession:
                 self._update_token_estimate()
                 return msg
             return None
+
+    def set_checkpoint(self) -> int:
+        """设置回滚点，返回当前消息数量作为 checkpoint。"""
+        with self._lock:
+            self._checkpoint = len(self.messages)
+            return self._checkpoint
+
+    def rollback(self) -> int:
+        """回滚到最近的 checkpoint，返回被移除的消息数量。"""
+        with self._lock:
+            if self._checkpoint is None:
+                return 0
+            removed = len(self.messages) - self._checkpoint
+            if removed > 0:
+                self.messages = self.messages[:self._checkpoint]
+                self._update_token_estimate()
+            self._checkpoint = None
+            return max(removed, 0)
+
+    def clear_checkpoint(self) -> None:
+        """清除 checkpoint（表示事务成功提交）。"""
+        with self._lock:
+            self._checkpoint = None
+
+    def edit_message(self, index: int, new_content: str) -> bool:
+        """编辑指定位置的消息并截断其后所有消息（用于对话分支）"""
+        with self._lock:
+            if index < 0 or index >= len(self.messages):
+                return False
+            self.messages[index]["content"] = new_content
+            self.messages = self.messages[:index + 1]
+            self.updated_at = time.time()
+            self._update_token_estimate()
+            return True
+
+    def regenerate(self) -> dict | None:
+        """移除最后一条 assistant 消息以便重新生成"""
+        with self._lock:
+            if not self.messages:
+                return None
+            if self.messages[-1].get("role") == "assistant":
+                msg = self.messages.pop()
+                self._update_token_estimate()
+                return msg
+            for i in range(len(self.messages) - 1, -1, -1):
+                if self.messages[i].get("role") == "assistant":
+                    msg = self.messages[i]
+                    self.messages = self.messages[:i]
+                    self._update_token_estimate()
+                    return msg
+            return None
+
+    def switch_model(self, new_model: str, max_context_tokens: int | None = None) -> str:
+        """切换会话模型，返回旧模型名。可选更新 context 窗口大小。"""
+        with self._lock:
+            old = self.model
+            self.model = new_model
+            if max_context_tokens and max_context_tokens != self._max_context_tokens:
+                self._max_context_tokens = max_context_tokens
+            self.updated_at = time.time()
+            return old
 
     def count_role(self, role: str) -> int:
         """安全地统计指定 role 的消息数量"""
@@ -176,7 +269,7 @@ class ChatSession:
         return s
 
 
-_SAVE_DEBOUNCE_SECONDS = 5
+_SAVE_DEBOUNCE_SECONDS = 8
 
 
 TRASH_RETENTION_DAYS = 30

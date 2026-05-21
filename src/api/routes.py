@@ -1221,6 +1221,92 @@ async def rename_chat_session(session_id: str, title: str):
     raise HTTPException(status_code=404, detail="会话不存在")
 
 
+@router.put("/api/chat/sessions/{session_id}/model")
+async def switch_session_model(session_id: str, body: dict):
+    """切换会话使用的模型（自动适配 context 窗口）"""
+    session = _deps.session_mgr.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="会话不存在")
+
+    new_model = body.get("model", "").strip()
+    if not new_model:
+        raise HTTPException(status_code=400, detail="model 字段不能为空")
+
+    MODEL_CONTEXT_LIMITS = {
+        "gpt-4o": 128_000, "gpt-4o-mini": 128_000,
+        "claude-sonnet-4-20250514": 200_000, "claude-3-5-sonnet": 200_000,
+        "gemini-2.5-pro": 1_000_000, "gemini-2.5-flash": 1_000_000,
+        "deepseek-chat": 64_000, "deepseek-reasoner": 64_000,
+    }
+    max_ctx = MODEL_CONTEXT_LIMITS.get(new_model)
+    old_model = session.switch_model(new_model, max_context_tokens=max_ctx)
+    _deps.session_mgr.save()
+    return {
+        "status": "ok",
+        "old_model": old_model,
+        "new_model": new_model,
+        "max_context_tokens": session._max_context_tokens,
+    }
+
+
+@router.post("/api/chat/sessions/{session_id}/regenerate")
+async def regenerate_chat_message(session_id: str, request: ChatCompletionRequest | None = None):
+    """重新生成最后一条 assistant 回复（移除旧回复后重新请求模型）"""
+    from src.scheduler.memory import get_memory_manager
+
+    session = _deps.session_mgr.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="会话不存在")
+
+    async with session._async_lock:
+        removed = session.regenerate()
+        if not removed:
+            raise HTTPException(status_code=400, detail="没有可重新生成的 assistant 消息")
+
+        last_user_msg = ""
+        for m in reversed(session.messages):
+            if m.get("role") == "user":
+                last_user_msg = m.get("content", "")
+                break
+
+        if not request:
+            request = ChatCompletionRequest(
+                model=session.model,
+                messages=[ChatMessage(role="user", content=last_user_msg)],
+            )
+
+        trace_id = uuid.uuid4().hex[:12]
+        memory_mgr = get_memory_manager()
+        return await _do_send_chat(session, request, trace_id, memory_mgr)
+
+
+@router.post("/api/chat/sessions/{session_id}/edit/{msg_index}")
+async def edit_chat_message(session_id: str, msg_index: int, body: dict):
+    """编辑指定位置的消息内容并截断其后的所有消息（对话分支）。
+
+    请求体: {"content": "新内容"}
+    编辑后可重新发送消息继续对话。
+    """
+    session = _deps.session_mgr.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="会话不存在")
+
+    new_content = body.get("content", "").strip()
+    if not new_content:
+        raise HTTPException(status_code=400, detail="content 不能为空")
+
+    async with session._async_lock:
+        if not session.edit_message(msg_index, new_content):
+            raise HTTPException(status_code=400, detail=f"消息索引 {msg_index} 无效")
+
+    await asyncio.to_thread(_deps.session_mgr.save)
+    return {
+        "status": "ok",
+        "total_messages": len(session.messages),
+        "hint": "消息已编辑，后续对话已截断。可继续发送消息。",
+    }
+
+
 @router.post("/api/chat/sessions/{session_id}/send")
 async def send_chat_message(session_id: str, request: ChatCompletionRequest):
     """向指定会话发送消息并获取回复（支持内部 tool calling 自动执行 + Memory 系统）"""
@@ -1235,6 +1321,16 @@ async def send_chat_message(session_id: str, request: ChatCompletionRequest):
     if not session:
         raise HTTPException(status_code=404, detail="会话不存在")
 
+    async with session._async_lock:
+        return await _do_send_chat(session, request, trace_id, memory_mgr)
+
+
+async def _do_send_chat(session, request, trace_id: str, memory_mgr):
+    """send_chat_message 的核心逻辑（在 session async lock 内执行）"""
+    from src.api.internal_tools import get_tool_definitions, execute_tool
+    from src.models.schemas import ToolDefinition, ToolFunction
+
+    session_id = session.id
     user_msg = ""
     if request.messages:
         user_msg = request.messages[-1].content or ""
@@ -1244,6 +1340,7 @@ async def send_chat_message(session_id: str, request: ChatCompletionRequest):
         trace_id, session_id, user_msg[:200],
     )
 
+    session.set_checkpoint()
     session.add_message("user", user_msg)
 
     is_first_message = len(session.messages) == 1
@@ -1283,7 +1380,7 @@ async def send_chat_message(session_id: str, request: ChatCompletionRequest):
         for round_idx in range(max_tool_rounds + 1):
             context_messages = session.get_context_messages()
 
-            session_memory_ctx = memory_mgr.get_context_injection(session_id)
+            session_memory_ctx = memory_mgr.get_context_injection(session_id, user_msg=user_msg)
             full_memory_ctx = "\n\n".join(filter(None, [long_term_ctx, session_memory_ctx]))
             if full_memory_ctx and context_messages and context_messages[0].get("role") == "system":
                 context_messages[0] = {
@@ -1338,6 +1435,7 @@ async def send_chat_message(session_id: str, request: ChatCompletionRequest):
             )
 
         session.add_message("assistant", reply, model=result.model)
+        session.clear_checkpoint()
         memory_mgr.on_turn_complete(session_id, user_msg, reply)
 
         user_turn_count = session.count_role("user")
@@ -1365,23 +1463,23 @@ async def send_chat_message(session_id: str, request: ChatCompletionRequest):
             resp["tool_calls"] = tool_calls_log
         return resp
     except (RateLimitExceeded, ModelNotFound, AllModelsUnavailable) as e:
-        session.pop_last_message()
+        rolled = session.rollback()
         _record_failure(start_time, str(e), provider_name, model_name)
         await asyncio.to_thread(_deps.session_mgr.save)
-        logger.warning("[会话] trace=%s session=%s 失败: %s", trace_id, session_id, e)
+        logger.warning("[会话] trace=%s session=%s 失败（回滚 %d 条消息）: %s", trace_id, session_id, rolled, e)
         status = 429 if isinstance(e, RateLimitExceeded) else (404 if isinstance(e, ModelNotFound) else 503)
         _detail_map = {429: "请求过于频繁，请稍后重试", 404: "模型未找到", 503: "所有模型均不可用，请稍后重试"}
         raise HTTPException(status_code=status, detail=_detail_map.get(status, "服务异常"))
     except ProviderCallError as e:
-        session.pop_last_message()
+        rolled = session.rollback()
         _record_failure(start_time, str(e), provider_name, model_name)
         await asyncio.to_thread(_deps.session_mgr.save)
-        logger.warning("[会话] trace=%s session=%s 厂商调用失败（可恢复）: %s", trace_id, session_id, e)
+        logger.warning("[会话] trace=%s session=%s 厂商调用失败（回滚 %d 条）: %s", trace_id, session_id, rolled, e)
         raise HTTPException(status_code=503, detail="模型服务暂时不可用，请稍后重试")
     except Exception as e:
-        session.pop_last_message()
+        rolled = session.rollback()
         _record_failure(start_time, str(e), provider_name, model_name)
-        logger.error("[会话] trace=%s session=%s 异常: %s", trace_id, session_id, e, exc_info=True)
+        logger.error("[会话] trace=%s session=%s 异常（回滚 %d 条）: %s", trace_id, session_id, rolled, e, exc_info=True)
         await asyncio.to_thread(_deps.session_mgr.save)
         raise HTTPException(status_code=500, detail="推理服务内部错误，请稍后重试")
 
@@ -1476,12 +1574,14 @@ async def import_memory(body: dict):
 
 @router.post("/api/chat/sessions/{session_id}/stream")
 async def stream_chat_message(session_id: str, request: ChatCompletionRequest):
-    """向指定会话发送消息（流式 SSE 响应 + 自动上下文管理 + Memory 系统）
+    """向指定会话发送消息（流式 SSE 响应 + 自动上下文管理 + Memory 系统 + Tool Calling）
 
-    注意：流式端点不支持 tool calling 自动执行循环。
-    需要工具调用时请使用非流式端点 POST /api/chat/sessions/{session_id}/send
+    工具调用时流式输出暂停，执行工具后重新流式请求。
+    通过特殊 SSE event 通知前端 tool 执行状态。
     """
     from src.scheduler.memory import get_memory_manager
+    from src.api.internal_tools import get_tool_definitions, execute_tool
+    from src.models.schemas import ToolDefinition, ToolFunction
 
     trace_id = uuid.uuid4().hex[:12]
     memory_mgr = get_memory_manager()
@@ -1499,6 +1599,7 @@ async def stream_chat_message(session_id: str, request: ChatCompletionRequest):
         trace_id, session_id, user_msg[:200],
     )
 
+    session.set_checkpoint()
     session.add_message("user", user_msg)
     is_first_message = len(session.messages) == 1
     long_term_ctx = ""
@@ -1506,108 +1607,130 @@ async def stream_chat_message(session_id: str, request: ChatCompletionRequest):
         session.auto_title()
         long_term_ctx = memory_mgr.on_session_start(session_id, user_msg)
 
-    context_messages = session.get_context_messages()
-
-    session_memory_ctx = memory_mgr.get_context_injection(session_id)
-    full_memory_ctx = "\n\n".join(filter(None, [long_term_ctx, session_memory_ctx]))
-    if full_memory_ctx and context_messages and context_messages[0].get("role") == "system":
-        context_messages[0] = {
-            **context_messages[0],
-            "content": (context_messages[0]["content"] or "") + "\n\n" + full_memory_ctx,
-        }
-
-    ctx_request = ChatCompletionRequest(
-        model=request.model or session.model,
-        messages=[ChatMessage(role=m["role"], content=m["content"], tool_calls=m.get("tool_calls"), tool_call_id=m.get("tool_call_id"), name=m.get("name")) for m in context_messages],
-        temperature=request.temperature,
-        max_tokens=request.max_tokens,
-        stream=True,
-    )
-
     enabled_models = _deps.config_manager.get_enabled_models()
     if not enabled_models:
+        session.rollback()
         raise HTTPException(status_code=503, detail="没有可用模型")
 
+    tool_defs_raw = get_tool_definitions()
+    tools = [
+        ToolDefinition(
+            type="function",
+            function=ToolFunction(
+                name=td["function"]["name"],
+                description=td["function"]["description"],
+                parameters=td["function"]["parameters"],
+            ),
+        )
+        for td in tool_defs_raw
+    ]
+
     start_time = time.time()
+
+    def _build_context_request(stream: bool, include_tools: bool):
+        context_messages = session.get_context_messages()
+        session_memory_ctx = memory_mgr.get_context_injection(session_id, user_msg=user_msg)
+        full_memory_ctx = "\n\n".join(filter(None, [long_term_ctx, session_memory_ctx]))
+        if full_memory_ctx and context_messages and context_messages[0].get("role") == "system":
+            context_messages[0] = {
+                **context_messages[0],
+                "content": (context_messages[0]["content"] or "") + "\n\n" + full_memory_ctx,
+            }
+        return ChatCompletionRequest(
+            model=request.model or session.model,
+            messages=[ChatMessage(role=m["role"], content=m["content"], tool_calls=m.get("tool_calls"), tool_call_id=m.get("tool_call_id"), name=m.get("name")) for m in context_messages],
+            temperature=request.temperature,
+            max_tokens=request.max_tokens,
+            stream=stream,
+            tools=tools if include_tools else None,
+        )
+
     try:
-        provider_name, model_name, content_iter = await _deps.dispatcher.dispatch_stream(ctx_request, enabled_models, trace_id=trace_id)
+        ctx_request = _build_context_request(stream=False, include_tools=True)
+        provider_name, model_name, result = await _deps.dispatcher.dispatch(ctx_request, enabled_models, trace_id=trace_id)
     except (RateLimitExceeded, ModelNotFound, AllModelsUnavailable) as e:
-        session.pop_last_message()
+        session.rollback()
         _record_failure(start_time, str(e))
         logger.warning("[流式会话] trace=%s session=%s 失败: %s", trace_id, session_id, e)
         status = 429 if isinstance(e, RateLimitExceeded) else (404 if isinstance(e, ModelNotFound) else 503)
         _detail_map = {429: "请求过于频繁，请稍后重试", 404: "模型未找到", 503: "所有模型均不可用，请稍后重试"}
         raise HTTPException(status_code=status, detail=_detail_map.get(status, "服务异常"))
     except ProviderCallError as e:
-        session.pop_last_message()
+        session.rollback()
         _record_failure(start_time, str(e))
-        logger.warning("[流式会话] trace=%s session=%s 厂商调用失败（可恢复）: %s", trace_id, session_id, e)
+        logger.warning("[流式会话] trace=%s session=%s 厂商调用失败: %s", trace_id, session_id, e)
         raise HTTPException(status_code=503, detail="模型服务暂时不可用，请稍后重试")
     except Exception as e:
-        session.pop_last_message()
+        session.rollback()
         _record_failure(start_time, str(e))
         logger.error("[流式会话] trace=%s session=%s 异常: %s", trace_id, session_id, e, exc_info=True)
         raise HTTPException(status_code=500, detail="推理服务内部错误，请稍后重试")
+
+    max_tool_rounds = 3
+    tool_calls_log = []
+    msg = result.choices[0].message if result.choices else None
+
+    if msg and msg.tool_calls:
+        for round_idx in range(max_tool_rounds):
+            if not msg or not msg.tool_calls:
+                break
+            tc_data = [{"id": tc.id, "type": tc.type, "function": {"name": tc.function.name, "arguments": tc.function.arguments}} for tc in msg.tool_calls]
+            session.add_message("assistant", msg.content or "", tool_calls=tc_data)
+
+            for tc in msg.tool_calls:
+                logger.info("[流式会话] trace=%s 调用工具: %s", trace_id, tc.function.name)
+                tool_result = await execute_tool(tc.function.name, tc.function.arguments)
+                tool_calls_log.append({"tool": tc.function.name, "result_len": len(tool_result)})
+                session.add_message("tool", tool_result, tool_call_id=tc.id, name=tc.function.name)
+
+            include_tools = (round_idx < max_tool_rounds - 1)
+            try:
+                ctx_request = _build_context_request(stream=False, include_tools=include_tools)
+                provider_name, model_name, result = await _deps.dispatcher.dispatch(ctx_request, enabled_models, trace_id=trace_id)
+                msg = result.choices[0].message if result.choices else None
+            except Exception as e:
+                logger.warning("[流式会话] trace=%s tool 后续调用失败: %s", trace_id, e)
+                msg = None
+                break
 
     latency = (time.time() - start_time) * 1000
     if _deps.history:
         _deps.history.record(provider=provider_name, model=model_name, success=True, latency_ms=latency)
 
-    logger.info("[流式会话] trace=%s 流式连接建立 | provider=%s model=%s", trace_id, provider_name, model_name)
+    final_reply = (msg.content if msg else "") or ""
+    final_reply, thinking = _strip_thinking(final_reply)
+    if thinking:
+        logger.info("[流式会话] trace=%s 模型思考过程:\n%s", trace_id, thinking[:500])
 
-    async def _collect_and_stream():
-        """流式输出的同时收集完整回复写入会话"""
+    session.add_message("assistant", final_reply, model=model_name)
+    session.clear_checkpoint()
+    memory_mgr.on_turn_complete(session_id, user_msg, final_reply)
+    await asyncio.to_thread(_deps.session_mgr.save)
+
+    logger.info("[流式会话] trace=%s 完成 | provider=%s model=%s 耗时=%.0fms tools=%d", trace_id, provider_name, model_name, latency, len(tool_calls_log))
+
+    async def _stream_final_reply():
+        """以 SSE 流式输出最终回复（tool calling 已在上方完成）"""
         chat_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
         created = int(time.time())
-        full_reply: list[str | dict] = []
-        stream_broken = False
 
-        meta = {"model": model_name, "provider": provider_name, "title": session.title, "session_id": session.id}
+        meta = {
+            "model": model_name, "provider": provider_name,
+            "title": session.title, "session_id": session.id,
+        }
+        if tool_calls_log:
+            meta["tool_calls"] = tool_calls_log
         yield f"data: {json.dumps({'meta': meta}, ensure_ascii=False)}\n\n"
 
-        try:
-            async for chunk in content_iter:
-                full_reply.append(chunk)
-                delta = chunk if isinstance(chunk, dict) else {"content": chunk}
-                data = {
-                    "id": chat_id, "object": "chat.completion.chunk", "created": created,
-                    "model": model_name,
-                    "choices": [{"index": 0, "delta": delta, "finish_reason": None}],
-                }
-                yield f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
-        except Exception as ex:
-            stream_broken = True
-            logger.error("[流式会话] trace=%s 流式传输异常: %s", trace_id, ex)
-
-        raw_text = "".join(
-            (c.get("content", "") if isinstance(c, dict) else str(c)) for c in full_reply
-        )
-        reply_text, thinking = _strip_thinking(raw_text)
-        if thinking:
-            logger.info("[流式会话] trace=%s 模型 %s 思考过程:\n%s", trace_id, model_name, thinking[:500])
-
-        save_assistant = (not stream_broken) and len(reply_text.strip()) >= 1
-        if save_assistant:
-            session.add_message("assistant", reply_text, model=model_name)
-            memory_mgr.on_turn_complete(session_id, user_msg, reply_text)
-        elif stream_broken:
-            session.pop_last_message()
-            logger.info(
-                "[流式会话] trace=%s 流式中断，已弹出用户消息（避免悬空上下文）",
-                trace_id,
-            )
-        else:
-            session.pop_last_message()
-            logger.info(
-                "[流式会话] trace=%s 输出为空，已弹出用户消息",
-                trace_id,
-            )
-        await asyncio.to_thread(_deps.session_mgr.save)
-
-        logger.info(
-            "[流式会话] trace=%s 流式完成 | session=%s model=%s 回复长度=%d",
-            trace_id, session_id, model_name, len(reply_text),
-        )
+        chunk_size = 20
+        for i in range(0, len(final_reply), chunk_size):
+            segment = final_reply[i:i + chunk_size]
+            data = {
+                "id": chat_id, "object": "chat.completion.chunk", "created": created,
+                "model": model_name,
+                "choices": [{"index": 0, "delta": {"content": segment}, "finish_reason": None}],
+            }
+            yield f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
 
         end_data = {
             "id": chat_id, "object": "chat.completion.chunk", "created": created,
@@ -1621,8 +1744,9 @@ async def stream_chat_message(session_id: str, request: ChatCompletionRequest):
         yield f"data: {json.dumps(end_data, ensure_ascii=False)}\n\n"
         yield "data: [DONE]\n\n"
 
+    from starlette.responses import StreamingResponse
     return StreamingResponse(
-        _collect_and_stream(),
+        _stream_final_reply(),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
     )

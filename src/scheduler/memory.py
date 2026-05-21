@@ -590,14 +590,36 @@ class MemoryManager:
             self._auto_consolidate_timer.cancel()
             self._auto_consolidate_timer = None
 
-    def get_context_injection(self, session_id: str) -> str:
-        """获取当前会话需要注入 system prompt 的完整 memory 文本"""
+    def retrieve_for_turn(self, session_id: str, user_msg: str, max_results: int = 3) -> str:
+        """每轮检索相关长期记忆（轻量，仅在消息足够长时触发），返回注入文本"""
+        if len(user_msg) < 10:
+            return ""
+        relevant = self._store.retrieve(user_msg, max_results=max_results)
+        if not relevant:
+            return ""
+        lines = ["[相关记忆]"]
+        for entry in relevant:
+            prefix = {"preference": "偏好", "semantic": "知识", "episodic": "经验"}.get(entry.type, "记忆")
+            lines.append(f"- [{prefix}] {entry.content}")
+        return "\n".join(lines)
+
+    def get_context_injection(self, session_id: str, user_msg: str = "") -> str:
+        """获取当前会话需要注入 system prompt 的完整 memory 文本（含 L1 + L2 每轮检索）"""
         with self._lock:
             session_mem = self._session_memories.get(session_id)
-        if not session_mem:
-            return ""
-        section = session_mem.to_system_section()
-        return section or ""
+
+        parts: list[str] = []
+        if session_mem:
+            section = session_mem.to_system_section()
+            if section:
+                parts.append(section)
+
+        if user_msg:
+            turn_memory = self.retrieve_for_turn(session_id, user_msg)
+            if turn_memory:
+                parts.append(turn_memory)
+
+        return "\n\n".join(parts) if parts else ""
 
     def get_long_term_stats(self) -> dict[str, Any]:
         """获取长期记忆统计"""

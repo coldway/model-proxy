@@ -106,6 +106,7 @@ def create_app() -> FastAPI:
         "mistral": lambda key: create_openai_provider("mistral", key),
         "nvidia": lambda key: create_openai_provider("nvidia", key),
         "cohere": lambda key: create_openai_provider("cohere", key),
+        "dashscope": lambda key: create_openai_provider("dashscope", key),
         "ollama": lambda key: OllamaProvider(key),
     }
 

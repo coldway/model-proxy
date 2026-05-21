@@ -154,6 +154,7 @@ PROVIDER_BASE_URLS = {
     "mistral": "https://api.mistral.ai/v1",
     "nvidia": "https://integrate.api.nvidia.com/v1",
     "cohere": "https://api.cohere.ai/compatibility/v1",
+    "dashscope": "https://dashscope.aliyuncs.com/compatible-mode/v1",
 }
 
 

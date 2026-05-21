@@ -307,6 +307,7 @@ _DISCOVERY_FALLBACK: dict[str, dict[str, str]] = {
     "cursor": {"url": "https://www.cursor.com/", "guide": "通过 Cursor IDE 登录即可使用"},
     "nvidia": {"url": "https://build.nvidia.com/", "guide": "注册后在 Dashboard 获取 API Key，需手机验证"},
     "cohere": {"url": "https://cohere.com/", "guide": "https://dashboard.cohere.com/api-keys 注册获取 Key"},
+    "dashscope": {"url": "https://bailian.console.aliyun.com/", "guide": "阿里云百炼平台开通后在 API-KEY 管理页面创建 Key"},
 }
 
 

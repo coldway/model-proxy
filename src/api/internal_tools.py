@@ -105,8 +105,9 @@ def _register_builtin_tools():
 
     async def _handle_model_capabilities(args: dict) -> str:
         from src.api.routes import _deps
-        from src.config.capability_tester import CapabilityCache
-        cache = CapabilityCache()
+        if not _deps.capability_tester:
+            return json.dumps({"error": "能力测试器未初始化"}, ensure_ascii=False)
+        cache = _deps.capability_tester.cache
         model = args.get("model", "")
         if model:
             all_caps = cache.get_all()
@@ -130,4 +131,10 @@ def _register_builtin_tools():
     )
 
 
-_register_builtin_tools()
+def ensure_tools_registered():
+    """幂等注册：多次调用安全"""
+    if not _TOOLS:
+        _register_builtin_tools()
+
+
+ensure_tools_registered()

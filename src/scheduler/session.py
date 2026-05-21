@@ -111,11 +111,25 @@ class ChatSession:
                 result.append(entry)
             return result
 
+    def pop_last_message(self) -> dict | None:
+        """移除最后一条消息（用于 dispatch 失败时回滚用户消息）"""
+        with self._lock:
+            if self.messages:
+                msg = self.messages.pop()
+                self._update_token_estimate()
+                return msg
+            return None
+
+    def count_role(self, role: str) -> int:
+        """安全地统计指定 role 的消息数量"""
+        with self._lock:
+            return sum(1 for m in self.messages if m.get("role") == role)
+
     def auto_title(self) -> None:
         """从第一条用户消息自动生成标题"""
         for m in self.messages:
             if m["role"] == "user":
-                text = m["content"].strip()
+                text = (m.get("content") or "").strip()
                 self.title = text[:20] + ("..." if len(text) > 20 else "")
                 return
 
@@ -168,8 +182,10 @@ class SessionManager:
         self._max_sessions = max_sessions
         self._dirty = False
         self._save_timer: threading.Timer | None = None
+        self._trash_timer: threading.Timer | None = None
         self._load()
         self._cleanup_expired_trash()
+        self._start_trash_cleanup_timer()
 
     def create(self, model: str = "auto", title: str = "新对话") -> ChatSession:
         with self._lock:
@@ -245,24 +261,39 @@ class SessionManager:
                     "model": entry["session"].model,
                     "message_count": len(entry["session"].messages),
                     "deleted_at": entry["deleted_at"],
-                    "expires_in_days": max(0, TRASH_RETENTION_DAYS - int((now - entry["deleted_at"]) / 86400)),
+                    "expires_in_days": max(0, round(TRASH_RETENTION_DAYS - (now - entry["deleted_at"]) / 86400)),
                 }
                 for sid, entry in items
             ]
 
     def _cleanup_expired_trash(self) -> None:
-        """清理超过保留期限的回收站会话"""
-        now = time.time()
-        expired = [
-            sid for sid, entry in self._trash.items()
-            if now - entry["deleted_at"] > TRASH_RETENTION_DAYS * 86400
-        ]
-        if expired:
-            for sid in expired:
-                del self._trash[sid]
-            logger.info("清理 %d 个过期回收站会话", len(expired))
-            with self._lock:
+        """清理超过保留期限的回收站会话（须持有 _lock 或初始化时无竞争）"""
+        with self._lock:
+            now = time.time()
+            expired = [
+                sid for sid, entry in self._trash.items()
+                if now - entry["deleted_at"] > TRASH_RETENTION_DAYS * 86400
+            ]
+            if expired:
+                for sid in expired:
+                    del self._trash[sid]
+                logger.info("清理 %d 个过期回收站会话", len(expired))
                 self._save_unlocked()
+
+    def _start_trash_cleanup_timer(self) -> None:
+        """启动周期性回收站清理"""
+        self._trash_timer = threading.Timer(3600.0, self._periodic_trash_cleanup)
+        self._trash_timer.daemon = True
+        self._trash_timer.start()
+
+    def _periodic_trash_cleanup(self) -> None:
+        """Timer 回调：周期性清理过期回收站"""
+        try:
+            self._cleanup_expired_trash()
+        except Exception as e:
+            logger.warning("周期清理回收站异常: %s", e)
+        finally:
+            self._start_trash_cleanup_timer()
 
     def list_sessions(self) -> list[dict]:
         with self._lock:
@@ -320,22 +351,26 @@ class SessionManager:
         self._schedule_save()
 
     def _persist_unlocked(self) -> None:
-        """实际执行磁盘写入（须在 _lock 内调用）"""
+        """实际执行磁盘写入（原子写入：写临时文件 + rename，须在 _lock 内调用）"""
         if not self._dirty and not self._sessions and not self._trash:
             return
         self._dirty = False
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         data = {
+            "_version": 2,
             "_active": {sid: s.to_dict() for sid, s in self._sessions.items()},
             "_trash": {sid: {"session": entry["session"].to_dict(), "deleted_at": entry["deleted_at"]} for sid, entry in self._trash.items()},
         }
+        tmp_file = SESSION_FILE.with_suffix(".tmp")
         try:
-            SESSION_FILE.write_text(
+            tmp_file.write_text(
                 yaml.dump(data, allow_unicode=True, default_flow_style=False),
                 encoding="utf-8",
             )
+            tmp_file.replace(SESSION_FILE)
         except Exception as e:
             logger.error("保存会话数据失败: %s", e)
+            tmp_file.unlink(missing_ok=True)
 
     def _load(self) -> None:
         if not SESSION_FILE.exists():

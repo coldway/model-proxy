@@ -16,6 +16,7 @@ import logging
 import re
 import threading
 import time
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -201,11 +202,12 @@ class MemoryEntry:
 
 
 class LongTermMemoryStore:
-    """L2 Long-term Memory — JSON 文件持久化"""
+    """L2 Long-term Memory — JSON 文件持久化（线程安全）"""
 
     def __init__(self, memory_file: Path | None = None):
         self._file = memory_file or (MEMORY_DIR / "long_term.json")
         self._file.parent.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.Lock()
         self._entries: list[MemoryEntry] = []
         self._load()
 
@@ -228,97 +230,104 @@ class LongTermMemoryStore:
 
     def add(self, entry: MemoryEntry) -> None:
         """添加新记忆（去重：相同内容不重复添加，但提升重要性）"""
-        for existing in self._entries:
-            if self._is_similar(existing.content, entry.content):
-                existing.importance = min(1.0, existing.importance + 0.1)
-                existing.access_count += 1
-                existing.last_accessed = time.time()
-                self._save()
-                return
-        self._entries.append(entry)
-        self._save()
+        with self._lock:
+            for existing in self._entries:
+                if self._is_similar(existing.content, entry.content):
+                    existing.importance = min(1.0, existing.importance + 0.1)
+                    existing.access_count += 1
+                    existing.last_accessed = time.time()
+                    self._save()
+                    return
+            self._entries.append(entry)
+            self._save()
 
     def retrieve(self, query: str, max_results: int = 10) -> list[MemoryEntry]:
         """基于 n-gram 相似度 + 关键词匹配 + 重要性 + 时效性的混合检索"""
-        if not self._entries:
-            return []
+        with self._lock:
+            if not self._entries:
+                return []
 
-        query_lower = query.lower()
-        query_tokens = set(re.findall(r"[\w\u4e00-\u9fff]+", query_lower))
-        query_bigrams = _compute_bigrams(query_lower)
+            query_lower = query.lower()
+            query_tokens = set(re.findall(r"[\w\u4e00-\u9fff]+", query_lower))
+            query_bigrams = _compute_bigrams(query_lower)
 
-        scored: list[tuple[float, MemoryEntry]] = []
-        now = time.time()
+            scored: list[tuple[float, MemoryEntry]] = []
+            now = time.time()
 
-        for entry in self._entries:
-            content_lower = entry.content.lower()
-            content_tokens = set(re.findall(r"[\w\u4e00-\u9fff]+", content_lower))
-            tag_tokens = set(t.lower() for t in entry.tags)
+            for entry in self._entries:
+                content_lower = entry.content.lower()
+                content_tokens = set(re.findall(r"[\w\u4e00-\u9fff]+", content_lower))
+                tag_tokens = set(t.lower() for t in entry.tags)
 
-            overlap = query_tokens & (content_tokens | tag_tokens)
-            keyword_score = len(overlap) / max(len(query_tokens), 1)
+                overlap = query_tokens & (content_tokens | tag_tokens)
+                keyword_score = len(overlap) / max(len(query_tokens), 1)
 
-            content_bigrams = _compute_bigrams(content_lower)
-            bigram_score = _bigram_similarity(query_bigrams, content_bigrams)
+                content_bigrams = _compute_bigrams(content_lower)
+                bigram_score = _bigram_similarity(query_bigrams, content_bigrams)
 
-            substring_score = 0.0
-            for token in query_tokens:
-                if len(token) > 1 and token in content_lower:
-                    substring_score += 0.15
+                substring_score = 0.0
+                for token in query_tokens:
+                    if len(token) > 1 and token in content_lower:
+                        substring_score += 0.15
 
-            relevance = max(keyword_score, bigram_score) + min(substring_score, 0.3)
+                relevance = max(keyword_score, bigram_score) + min(substring_score, 0.3)
 
-            if relevance < 0.05:
-                continue
+                if relevance < 0.05:
+                    continue
 
-            recency = max(0, 1.0 - (now - entry.last_accessed) / (30 * 86400))
-            score = relevance * 0.4 + entry.importance * 0.35 + recency * 0.25
+                recency = max(0, 1.0 - (now - entry.last_accessed) / (30 * 86400))
+                score = relevance * 0.4 + entry.importance * 0.35 + recency * 0.25
 
-            scored.append((score, entry))
+                scored.append((score, entry))
 
-        scored.sort(key=lambda x: x[0], reverse=True)
+            scored.sort(key=lambda x: x[0], reverse=True)
 
-        results = [entry for _, entry in scored[:max_results]]
-        for entry in results:
-            entry.access_count += 1
-            entry.last_accessed = now
-        if results:
-            self._save()
+            results = [entry for _, entry in scored[:max_results]]
+            for entry in results:
+                entry.access_count += 1
+                entry.last_accessed = now
+            if results:
+                self._save()
 
-        return results
+            return results
 
     def get_core_memories(self, importance_threshold: float = 0.6) -> list[MemoryEntry]:
         """获取核心记忆：高重要性偏好和语义知识，始终注入 system prompt"""
-        core = [e for e in self._entries if e.importance >= importance_threshold]
-        core.sort(key=lambda e: e.importance, reverse=True)
-        return core[:10]
+        with self._lock:
+            core = [e for e in self._entries if e.importance >= importance_threshold]
+            core.sort(key=lambda e: e.importance, reverse=True)
+            return core[:10]
 
     def get_recent(self, n: int = 5) -> list[MemoryEntry]:
         """获取最近的 N 条记忆"""
-        sorted_entries = sorted(self._entries, key=lambda e: e.created_at, reverse=True)
-        return sorted_entries[:n]
+        with self._lock:
+            sorted_entries = sorted(self._entries, key=lambda e: e.created_at, reverse=True)
+            return sorted_entries[:n]
 
     def get_all(self) -> list[MemoryEntry]:
-        return list(self._entries)
+        with self._lock:
+            return list(self._entries)
 
     def size(self) -> int:
-        return len(self._entries)
+        with self._lock:
+            return len(self._entries)
 
     def decay(self, max_entries: int = 200) -> int:
         """衰减清理：当超过上限时，移除最不重要且最久未访问的条目"""
-        if len(self._entries) <= max_entries:
-            return 0
-        now = time.time()
-        for entry in self._entries:
-            age_days = (now - entry.last_accessed) / 86400
-            entry.importance *= max(0.1, 1.0 - age_days * 0.005)
+        with self._lock:
+            if len(self._entries) <= max_entries:
+                return 0
+            now = time.time()
+            for entry in self._entries:
+                age_days = (now - entry.last_accessed) / 86400
+                entry.importance *= max(0.1, 1.0 - age_days * 0.005)
 
-        self._entries.sort(key=lambda e: e.importance, reverse=True)
-        removed = len(self._entries) - max_entries
-        self._entries = self._entries[:max_entries]
-        self._save()
-        logger.info("记忆衰减清理: 移除 %d 条低重要性记忆", removed)
-        return removed
+            self._entries.sort(key=lambda e: e.importance, reverse=True)
+            removed = len(self._entries) - max_entries
+            self._entries = self._entries[:max_entries]
+            self._save()
+            logger.info("记忆衰减清理: 移除 %d 条低重要性记忆", removed)
+            return removed
 
     @staticmethod
     def _is_similar(a: str, b: str) -> bool:
@@ -355,7 +364,7 @@ class MemoryConsolidator:
                 if len(item) < 5:
                     continue
                 entry = MemoryEntry(
-                    id=f"{mem_type}_{int(now)}_{added}",
+                    id=f"{mem_type}_{uuid.uuid4().hex[:8]}",
                     type=mem_type,
                     content=item,
                     importance=base_importance,
@@ -374,29 +383,32 @@ class MemoryConsolidator:
         return added
 
 
-AUTO_CONSOLIDATE_IDLE_SECONDS = 600  # 10 分钟空闲后自动巩固
+AUTO_CONSOLIDATE_IDLE_SECONDS = 1800  # 30 分钟空闲后自动巩固（原 10 分钟过短）
 
 
 class MemoryManager:
-    """统一 Memory 管理器 — 集成 L1 + L2 + 自动巩固"""
+    """统一 Memory 管理器 — 集成 L1 + L2 + 自动巩固（线程安全）"""
 
     def __init__(self):
         self._store = LongTermMemoryStore()
         self._consolidator = MemoryConsolidator(self._store)
         self._extractor = SessionMemoryExtractor()
+        self._lock = threading.Lock()
         self._session_memories: dict[str, SessionMemoryStore] = {}
         self._session_last_active: dict[str, float] = {}
         self._auto_consolidate_timer: threading.Timer | None = None
         self._start_auto_consolidate()
 
     def get_session_memory(self, session_id: str) -> SessionMemoryStore:
-        if session_id not in self._session_memories:
-            self._session_memories[session_id] = SessionMemoryStore()
-        return self._session_memories[session_id]
+        with self._lock:
+            if session_id not in self._session_memories:
+                self._session_memories[session_id] = SessionMemoryStore()
+            return self._session_memories[session_id]
 
     def on_session_start(self, session_id: str, first_message: str) -> str:
         """会话开始 — 加载核心记忆 + 检索相关记忆，返回注入文本"""
-        self._session_memories[session_id] = SessionMemoryStore()
+        with self._lock:
+            self._session_memories[session_id] = SessionMemoryStore()
 
         core_memories = self._store.get_core_memories()
         relevant = self._store.retrieve(first_message, max_results=5)
@@ -420,7 +432,8 @@ class MemoryManager:
 
     def on_turn_complete(self, session_id: str, user_msg: str, assistant_msg: str) -> None:
         """每轮对话后 — 增量提取 Session Memory"""
-        self._session_last_active[session_id] = time.time()
+        with self._lock:
+            self._session_last_active[session_id] = time.time()
         new_entries = self._extractor.extract_from_turn(user_msg, assistant_msg)
         if new_entries:
             session_mem = self.get_session_memory(session_id)
@@ -428,11 +441,13 @@ class MemoryManager:
 
     def on_session_end(self, session_id: str) -> int:
         """会话结束 — 巩固到长期记忆"""
-        session_mem = self._session_memories.get(session_id)
-        if not session_mem:
-            return 0
+        with self._lock:
+            session_mem = self._session_memories.get(session_id)
+            if not session_mem:
+                return 0
+            self._session_memories.pop(session_id, None)
+            self._session_last_active.pop(session_id, None)
         added = self._consolidator.consolidate(session_id, session_mem)
-        self._session_memories.pop(session_id, None)
         return added
 
     async def llm_extract_memories(self, session_id: str, messages: list[dict]) -> dict[str, list[str]]:
@@ -511,19 +526,25 @@ class MemoryManager:
         self._auto_consolidate_timer.start()
 
     def _check_idle_sessions(self) -> None:
-        """检查空闲会话并自动巩固"""
+        """检查空闲会话并自动巩固（巩固后保留记忆，不清除 session_memories）"""
         try:
             now = time.time()
-            idle_sessions = [
-                sid for sid, last_active in list(self._session_last_active.items())
-                if now - last_active > AUTO_CONSOLIDATE_IDLE_SECONDS
-                and sid in self._session_memories
-            ]
+            with self._lock:
+                idle_sessions = [
+                    sid for sid, last_active in list(self._session_last_active.items())
+                    if now - last_active > AUTO_CONSOLIDATE_IDLE_SECONDS
+                    and sid in self._session_memories
+                ]
             for sid in idle_sessions:
-                added = self.on_session_end(sid)
+                with self._lock:
+                    session_mem = self._session_memories.get(sid)
+                    if not session_mem:
+                        continue
+                added = self._consolidator.consolidate(sid, session_mem)
                 if added > 0:
-                    logger.info("[Memory] 自动巩固空闲会话 %s: %d 条", sid, added)
-                self._session_last_active.pop(sid, None)
+                    logger.info("[Memory] 自动巩固空闲会话 %s: %d 条（记忆保留）", sid, added)
+                with self._lock:
+                    self._session_last_active.pop(sid, None)
         except Exception as e:
             logger.warning("[Memory] 自动巩固检查异常: %s", e)
         finally:
@@ -533,15 +554,12 @@ class MemoryManager:
 
     def get_context_injection(self, session_id: str) -> str:
         """获取当前会话需要注入 system prompt 的完整 memory 文本"""
-        parts = []
-
-        session_mem = self._session_memories.get(session_id)
-        if session_mem:
-            section = session_mem.to_system_section()
-            if section:
-                parts.append(section)
-
-        return "\n\n".join(parts)
+        with self._lock:
+            session_mem = self._session_memories.get(session_id)
+        if not session_mem:
+            return ""
+        section = session_mem.to_system_section()
+        return section or ""
 
     def get_long_term_stats(self) -> dict[str, Any]:
         """获取长期记忆统计"""

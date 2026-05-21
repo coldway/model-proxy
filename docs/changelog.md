@@ -6,6 +6,37 @@
 
 ## [Unreleased]
 
+### 代码审查修复（PR #4 深度审查 — 21 项缺陷）
+
+#### HIGH（4 项）
+
+- **`_cleanup_expired_trash` 死锁风险**：将垃圾回收逻辑移入 `with self._lock` 保护区域内，消除获取锁后二次竞争窗口
+- **`MemoryManager` 无线程安全**：新增 `threading.Lock` 保护 `_session_memories` 和 `_session_last_active` 的所有读写路径
+- **`LongTermMemoryStore` 无并发保护**：新增 `threading.Lock` 保护 `_entries` 的 `add`/`retrieve`/`get_core_memories`/`get_recent`/`get_all`/`size`/`decay` 全部方法
+- **Google API Key 暴露于 URL query params**：从 `params={"key": ...}` 改为 `x-goog-api-key` HTTP Header，防止 Key 泄漏到访问日志
+
+#### MEDIUM（8 项）
+
+- **`provider_name`/`model_name` 可能未定义**：tool calling 循环前初始化为 `"unknown"`，防止异常路径 `UnboundLocalError`
+- **Memory ID 冲突**：`MemoryConsolidator` 中 ID 生成从时间戳改为 `uuid4().hex[:8]`
+- **`add_memory_entry` API ID 碰撞**：手动添加记忆条目的 ID 生成同样改为 `uuid4().hex[:8]`
+- **持久化格式增加版本标记**：会话 YAML 写入 `_version: 2`，支持未来向后兼容升级
+- **`_cleanup_expired_trash` 仅执行一次**：新增周期 `threading.Timer` 每小时自动触发过期垃圾清理
+- **dispatch 失败时用户消息不回滚**：异常 handler 中调用 `session.pop_last_message()` 撤销已追加的用户消息
+- **`_route_cache` 读写路径锁不一致**：从 `asyncio.Lock` 统一为 `threading.Lock`，所有读写操作加锁保护
+- **Groq 流式 400 处理未先读 body**：`await resp.aread()` 后再 raise `HTTPStatusError`，确保错误信息完整且连接正确归还
+- **Session 持久化非原子写入**：改为写 `.tmp` 临时文件 + `Path.replace()` 原子重命名，防止进程崩溃时文件截断
+
+#### LOW（5 项）
+
+- **自动巩固清除活跃会话记忆**：空闲阈值提升至 30min，巩固后保留 `SessionMemoryStore` 实例允许继续对话
+- **`expires_in_days` 精度**：`int()` 改为 `round()` 保证到期天数显示更准确
+- **`session.messages` 无锁访问**：新增线程安全方法 `pop_last_message()` 和 `count_role()`
+- **`_register_builtin_tools` 隐式依赖**：改为幂等的 `ensure_tools_registered()` 函数
+- **`CapabilityCache` 每次新建实例**：复用 `_deps.capability_tester.cache` 已有单例
+- **Google system 消息当 user 处理**：提取 system 消息到 Gemini `systemInstruction` 字段，`_convert_messages` 跳过 system role
+- **流式端点不支持 tool calling**：在 `stream_chat_message` 添加 docstring 明确说明限制
+
 ### 修复（Bug Fix）
 
 - **SessionManager 竞态条件修复（MP-52）**：`save()` 方法将 timer cancellation 移入 `_lock` 内，消除 cancel 与 lock acquisition 之间的 race window；timer 回调改为独立的 `_timer_flush()` 方法，避免 `save()` → `_lock` 的间接递归风险

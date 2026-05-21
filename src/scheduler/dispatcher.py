@@ -88,7 +88,7 @@ class Dispatcher:
         self._payload_tracker = payload_tracker or PayloadTracker()
         self._breaker = CircuitBreaker(threshold=breaker_threshold, cooldown=breaker_cooldown)
         self._route_cache: dict[str, tuple[str, float]] = {}
-        self._route_cache_lock = asyncio.Lock()
+        self._route_cache_lock = threading.Lock()
         self._route_log: deque[dict[str, Any]] = deque(maxlen=ROUTE_LOG_MAX)
         self._session_bindings: dict[str, tuple[str, str, float]] = {}
         self._session_lock = threading.Lock()
@@ -722,35 +722,29 @@ class Dispatcher:
     # region 路由缓存与 LLM 路由
 
     def _get_cached_route(self, feature_hash: str) -> str | None:
-        """查找路由缓存（同步快速路径，仅读操作）"""
-        entry = self._route_cache.get(feature_hash)
-        if entry is None:
+        """查找路由缓存（线程安全）"""
+        with self._route_cache_lock:
+            entry = self._route_cache.get(feature_hash)
+            if entry is None:
+                return None
+            model_name, ts = entry
+            if time.time() - ts < self._route_cache_ttl:
+                logger.info("路由缓存命中: %s → %s", feature_hash, model_name)
+                return model_name
+            self._route_cache.pop(feature_hash, None)
             return None
-        model_name, ts = entry
-        if time.time() - ts < self._route_cache_ttl:
-            logger.info("路由缓存命中: %s → %s", feature_hash, model_name)
-            return model_name
-        self._route_cache.pop(feature_hash, None)
-        return None
 
-    async def _set_cached_route_async(self, feature_hash: str, model_name: str) -> None:
-        """写入路由缓存（异步安全）"""
-        async with self._route_cache_lock:
+    def _set_cached_route(self, feature_hash: str, model_name: str) -> None:
+        """写入路由缓存（线程安全）"""
+        with self._route_cache_lock:
             if len(self._route_cache) >= ROUTE_CACHE_MAX:
                 oldest_key = min(self._route_cache, key=lambda k: self._route_cache[k][1])
                 del self._route_cache[oldest_key]
             self._route_cache[feature_hash] = (model_name, time.time())
 
-    def _set_cached_route(self, feature_hash: str, model_name: str) -> None:
-        """写入路由缓存（同步版本，保留向后兼容；高并发场景应使用 _set_cached_route_async）"""
-        if len(self._route_cache) >= ROUTE_CACHE_MAX:
-            oldest_key = min(self._route_cache, key=lambda k: self._route_cache[k][1])
-            del self._route_cache[oldest_key]
-        self._route_cache[feature_hash] = (model_name, time.time())
-
     async def purge_expired_cache(self) -> int:
         """清理所有 TTL 过期的路由缓存条目，返回清理数量"""
-        async with self._route_cache_lock:
+        with self._route_cache_lock:
             now = time.time()
             expired = [k for k, (_, ts) in self._route_cache.items() if now - ts >= self._route_cache_ttl]
             for k in expired:

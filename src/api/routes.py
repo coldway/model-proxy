@@ -1150,6 +1150,8 @@ async def send_chat_message(session_id: str, request: ChatCompletionRequest):
     max_tool_rounds = 3
     start_time = time.time()
     tool_calls_log = []
+    provider_name = "unknown"
+    model_name = "unknown"
 
     try:
         for round_idx in range(max_tool_rounds + 1):
@@ -1212,7 +1214,7 @@ async def send_chat_message(session_id: str, request: ChatCompletionRequest):
         session.add_message("assistant", reply, model=result.model)
         memory_mgr.on_turn_complete(session_id, user_msg, reply)
 
-        user_turn_count = sum(1 for m in session.messages if m.get("role") == "user")
+        user_turn_count = session.count_role("user")
         if user_turn_count in (6, 12, 20):
             asyncio.create_task(memory_mgr.llm_extract_memories(session_id, session.messages))
 
@@ -1237,19 +1239,22 @@ async def send_chat_message(session_id: str, request: ChatCompletionRequest):
             resp["tool_calls"] = tool_calls_log
         return resp
     except (RateLimitExceeded, ModelNotFound, AllModelsUnavailable) as e:
-        _record_failure(start_time, str(e))
+        session.pop_last_message()
+        _record_failure(start_time, str(e), provider_name, model_name)
         await asyncio.to_thread(_deps.session_mgr.save)
         logger.warning("[会话] trace=%s session=%s 失败: %s", trace_id, session_id, e)
         status = 429 if isinstance(e, RateLimitExceeded) else (404 if isinstance(e, ModelNotFound) else 503)
         _detail_map = {429: "请求过于频繁，请稍后重试", 404: "模型未找到", 503: "所有模型均不可用，请稍后重试"}
         raise HTTPException(status_code=status, detail=_detail_map.get(status, "服务异常"))
     except ProviderCallError as e:
-        _record_failure(start_time, str(e))
+        session.pop_last_message()
+        _record_failure(start_time, str(e), provider_name, model_name)
         await asyncio.to_thread(_deps.session_mgr.save)
         logger.warning("[会话] trace=%s session=%s 厂商调用失败（可恢复）: %s", trace_id, session_id, e)
         raise HTTPException(status_code=503, detail="模型服务暂时不可用，请稍后重试")
     except Exception as e:
-        _record_failure(start_time, str(e))
+        session.pop_last_message()
+        _record_failure(start_time, str(e), provider_name, model_name)
         logger.error("[会话] trace=%s session=%s 异常: %s", trace_id, session_id, e, exc_info=True)
         await asyncio.to_thread(_deps.session_mgr.save)
         raise HTTPException(status_code=500, detail="推理服务内部错误，请稍后重试")
@@ -1293,7 +1298,7 @@ async def add_memory_entry(body: dict):
     mgr = get_memory_manager()
     now = _time.time()
     entry = MemoryEntry(
-        id=f"manual_{int(now)}",
+        id=f"manual_{uuid.uuid4().hex[:8]}",
         type=mem_type,
         content=content,
         importance=0.8,
@@ -1338,7 +1343,11 @@ async def import_memory(body: dict):
 
 @router.post("/api/chat/sessions/{session_id}/stream")
 async def stream_chat_message(session_id: str, request: ChatCompletionRequest):
-    """向指定会话发送消息（流式 SSE 响应 + 自动上下文管理 + Memory 系统）"""
+    """向指定会话发送消息（流式 SSE 响应 + 自动上下文管理 + Memory 系统）
+
+    注意：流式端点不支持 tool calling 自动执行循环。
+    需要工具调用时请使用非流式端点 POST /api/chat/sessions/{session_id}/send
+    """
     from src.scheduler.memory import get_memory_manager
 
     trace_id = uuid.uuid4().hex[:12]
@@ -1390,16 +1399,19 @@ async def stream_chat_message(session_id: str, request: ChatCompletionRequest):
     try:
         provider_name, model_name, content_iter = await _deps.dispatcher.dispatch_stream(ctx_request, enabled_models, trace_id=trace_id)
     except (RateLimitExceeded, ModelNotFound, AllModelsUnavailable) as e:
+        session.pop_last_message()
         _record_failure(start_time, str(e))
         logger.warning("[流式会话] trace=%s session=%s 失败: %s", trace_id, session_id, e)
         status = 429 if isinstance(e, RateLimitExceeded) else (404 if isinstance(e, ModelNotFound) else 503)
         _detail_map = {429: "请求过于频繁，请稍后重试", 404: "模型未找到", 503: "所有模型均不可用，请稍后重试"}
         raise HTTPException(status_code=status, detail=_detail_map.get(status, "服务异常"))
     except ProviderCallError as e:
+        session.pop_last_message()
         _record_failure(start_time, str(e))
         logger.warning("[流式会话] trace=%s session=%s 厂商调用失败（可恢复）: %s", trace_id, session_id, e)
         raise HTTPException(status_code=503, detail="模型服务暂时不可用，请稍后重试")
     except Exception as e:
+        session.pop_last_message()
         _record_failure(start_time, str(e))
         logger.error("[流式会话] trace=%s session=%s 异常: %s", trace_id, session_id, e, exc_info=True)
         raise HTTPException(status_code=500, detail="推理服务内部错误，请稍后重试")
@@ -1441,7 +1453,7 @@ async def stream_chat_message(session_id: str, request: ChatCompletionRequest):
         if thinking:
             logger.info("[流式会话] trace=%s 模型 %s 思考过程:\n%s", trace_id, model_name, thinking[:500])
 
-        save_assistant = (not stream_broken) and len(reply_text.strip()) >= 10
+        save_assistant = (not stream_broken) and len(reply_text.strip()) >= 1
         if save_assistant:
             session.add_message("assistant", reply_text, model=model_name)
             memory_mgr.on_turn_complete(session_id, user_msg, reply_text)

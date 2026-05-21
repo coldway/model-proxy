@@ -35,10 +35,15 @@ class GoogleProvider(BaseProvider):
         super().__init__(api_key)
         self._client = httpx.AsyncClient(timeout=120.0)
 
+    def _auth_headers(self) -> dict:
+        """使用 Header 传递 API Key（避免 Key 泄露到 URL 日志）"""
+        return {"x-goog-api-key": self._api_key, "Content-Type": "application/json"}
+
     async def close(self) -> None:
         await self._client.aclose()
 
     def _build_payload(self, request: ChatCompletionRequest) -> dict:
+        system_text = self._extract_system_instruction(request.messages)
         contents = self._convert_messages(request.messages)
         payload: dict = {
             "contents": contents,
@@ -46,6 +51,8 @@ class GoogleProvider(BaseProvider):
                 "temperature": request.temperature,
             },
         }
+        if system_text:
+            payload["systemInstruction"] = {"parts": [{"text": system_text}]}
         if request.max_tokens:
             payload["generationConfig"]["maxOutputTokens"] = request.max_tokens
         if request.tools:
@@ -89,9 +96,8 @@ class GoogleProvider(BaseProvider):
         self, model: str, request: ChatCompletionRequest
     ) -> ChatCompletionResponse:
         url = f"{GOOGLE_API_BASE}/models/{model}:generateContent"
-        params = {"key": self._api_key}
 
-        resp = await self._client.post(url, params=params, json=self._build_payload(request))
+        resp = await self._client.post(url, headers=self._auth_headers(), json=self._build_payload(request))
         resp.raise_for_status()
         data = resp.json()
 
@@ -124,10 +130,10 @@ class GoogleProvider(BaseProvider):
         self, model: str, request: ChatCompletionRequest
     ) -> AsyncIterator[dict]:
         url = f"{GOOGLE_API_BASE}/models/{model}:streamGenerateContent"
-        params = {"key": self._api_key, "alt": "sse"}
+        params = {"alt": "sse"}
 
         async with self._client.stream(
-            "POST", url, params=params, json=self._build_payload(request),
+            "POST", url, params=params, headers=self._auth_headers(), json=self._build_payload(request),
         ) as resp:
             if resp.status_code != 200:
                 await resp.aread()
@@ -154,9 +160,8 @@ class GoogleProvider(BaseProvider):
 
     async def list_models(self) -> list[str]:
         url = f"{GOOGLE_API_BASE}/models"
-        params = {"key": self._api_key}
         try:
-            resp = await self._client.get(url, params=params)
+            resp = await self._client.get(url, headers=self._auth_headers())
             resp.raise_for_status()
             data = resp.json()
             return [
@@ -175,8 +180,17 @@ class GoogleProvider(BaseProvider):
         except Exception:
             return False
 
+    @staticmethod
+    def _extract_system_instruction(messages: list[ChatMessage]) -> str:
+        """提取所有 system 消息拼接为 systemInstruction"""
+        parts = []
+        for msg in messages:
+            if msg.role == "system" and isinstance(msg.content, str) and msg.content.strip():
+                parts.append(msg.content.strip())
+        return "\n\n".join(parts)
+
     def _convert_messages(self, messages: list[ChatMessage]) -> list[dict]:
-        """将 OpenAI 格式消息转换为 Gemini 格式。
+        """将 OpenAI 格式消息转换为 Gemini 格式（跳过 system 消息，已通过 systemInstruction 传递）。
 
         对于 tool_call 历史：由于 Gemini 3+ 要求 functionCall 必须携带
         thought_signature（仅 Gemini 自身产生），而跨模型路由时 tool_call
@@ -185,6 +199,8 @@ class GoogleProvider(BaseProvider):
         """
         contents = []
         for msg in messages:
+            if msg.role == "system":
+                continue
             if msg.role == "tool":
                 tool_name = msg.name or "unknown"
                 result_text = msg.content or ""
@@ -210,7 +226,7 @@ class GoogleProvider(BaseProvider):
                 parts.append({"text": "\n".join(call_descs)})
                 contents.append({"role": "model", "parts": parts})
             else:
-                role = "user" if msg.role in ("user", "system") else "model"
+                role = "user" if msg.role == "user" else "model"
                 if isinstance(msg.content, list):
                     parts = []
                     for part in msg.content:

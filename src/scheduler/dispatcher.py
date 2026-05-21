@@ -102,6 +102,7 @@ class Dispatcher:
         self._session_bind_ttl = session_bind_ttl
         self._route_llm_timeout = route_llm_timeout
         self._request_semaphore = asyncio.Semaphore(max_concurrent_requests)
+        self._last_healthy_provider: str = ""
         self._load_session_bindings()
 
     def _record_provider_failure(self, provider_name: str, model_name: str | None = None) -> None:
@@ -617,13 +618,25 @@ class Dispatcher:
         payload_bytes: int = 0,
     ) -> list[tuple[str, ModelConfig]]:
         """过滤出未熔断、配额未耗尽且 payload 大小在限制内的模型"""
-        result = []
+        non_broken = []
         for prov_name, model_cfg in models:
             if self._breaker.is_open(prov_name, model_cfg.name):
                 logger.info("跳过 %s:%s — 处于熔断状态", prov_name, model_cfg.name)
                 continue
-            rpd, rpm, tpm, tpd = self._unpack_rate_limit(model_cfg)
-            if not self._rate_limiter.can_request(prov_name, model_cfg.name, rpd, rpm, tpm, tpd):
+            non_broken.append((prov_name, model_cfg))
+
+        if not non_broken:
+            return []
+
+        checks = [
+            (prov_name, model_cfg.name, *self._unpack_rate_limit(model_cfg))
+            for prov_name, model_cfg in non_broken
+        ]
+        can_flags = self._rate_limiter.batch_can_request(checks)
+
+        result = []
+        for i, (prov_name, model_cfg) in enumerate(non_broken):
+            if not can_flags[i]:
                 continue
             if payload_bytes and not self._payload_tracker.can_accept(prov_name, model_cfg.name, payload_bytes):
                 limit = self._payload_tracker.get_limit(prov_name, model_cfg.name)
@@ -737,6 +750,8 @@ class Dispatcher:
                 return True
         return False
 
+    _tools_sig_cache: dict[int, str] = {}
+
     def _compute_feature_hash(
         self,
         request: ChatCompletionRequest,
@@ -751,14 +766,21 @@ class Dispatcher:
         has_tools = bool(request.tools)
         tool_names = sorted(t.function.name for t in request.tools) if request.tools else []
         if request.tools:
-            tools_dump = json.dumps(
-                [t.model_dump() for t in request.tools],
-                ensure_ascii=False, sort_keys=True,
-            )
-            tools_sig = (
-                f"n={len(request.tools)}|h={hashlib.blake2b(tools_dump.encode(), digest_size=6).hexdigest()}"
-                f"|b={len(tools_dump.encode())}"
-            )
+            cache_key = id(request.tools)
+            tools_sig = self._tools_sig_cache.get(cache_key)
+            if tools_sig is None:
+                tools_dump = json.dumps(
+                    [t.model_dump() for t in request.tools],
+                    ensure_ascii=False, sort_keys=True,
+                )
+                tools_sig = (
+                    f"n={len(request.tools)}|h={hashlib.blake2b(tools_dump.encode(), digest_size=6).hexdigest()}"
+                    f"|b={len(tools_dump.encode())}"
+                )
+                self._tools_sig_cache[cache_key] = tools_sig
+                if len(self._tools_sig_cache) > 64:
+                    oldest = next(iter(self._tools_sig_cache))
+                    del self._tools_sig_cache[oldest]
         else:
             tools_sig = "n=0"
         has_chinese = self._detect_chinese(request)

@@ -51,12 +51,33 @@ class TurnUsage:
     timestamp: float = field(default_factory=time.time)
 
 
+MODEL_CONTEXT_WINDOWS: dict[str, int] = {
+    "gemini-2.5-pro": 1_048_576,
+    "gemini-2.5-flash": 1_048_576,
+    "gemini-2.0-flash": 1_048_576,
+    "llama-3.3-70b-versatile": 128_000,
+    "llama-3.1-8b-instant": 128_000,
+    "qwen-long": 10_000_000,
+    "qwen-max": 32_768,
+    "qwen-plus": 131_072,
+    "qwen-turbo": 131_072,
+    "qwen3-235b-a22b": 131_072,
+    "command-a-03-2025": 256_000,
+}
+
+
 class ContextMonitor:
     """上下文监控器 — 追踪 Token 使用率，判断何时需要压缩"""
 
     def __init__(self, model_context_window: int = 128_000):
         self.context_window = model_context_window
         self.history: list[TurnUsage] = []
+
+    def adapt_to_model(self, model_name: str) -> None:
+        """根据模型名动态调整上下文窗口大小"""
+        window = MODEL_CONTEXT_WINDOWS.get(model_name)
+        if window and window != self.context_window:
+            self.context_window = window
 
     def record_from_response(self, usage_dict: dict[str, int]) -> TurnUsage:
         """从 API 响应的 usage 字段记录"""

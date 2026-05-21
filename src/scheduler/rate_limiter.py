@@ -203,6 +203,16 @@ class RateLimiter:
         with self._lock:
             return self._can_request_unlocked(provider, model, rpd, rpm, tpm, tpd)
 
+    def batch_can_request(
+        self, checks: list[tuple[str, str, int, int, int, int]],
+    ) -> list[bool]:
+        """批量检查多个模型是否可请求（单次获取锁，减少争用）"""
+        with self._lock:
+            return [
+                self._can_request_unlocked(prov, model, rpd, rpm, tpm, tpd)
+                for prov, model, rpd, rpm, tpm, tpd in checks
+            ]
+
     def _record_request_unlocked(self, provider: str, model: str, tokens: int = 0) -> None:
         """在已持有 ``_lock`` 的前提下增加请求计数与可选 token"""
         key = self._key(provider, model)

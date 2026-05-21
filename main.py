@@ -139,6 +139,9 @@ def create_app() -> FastAPI:
             history.flush()
             catalog.flush()
             dispatcher.payload_tracker.flush()
+            from src.api.routes import _deps
+            if _deps.cost_tracker:
+                _deps.cost_tracker.flush()
 
         async def _periodic_flush():
             while True:

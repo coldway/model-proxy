@@ -484,6 +484,27 @@ async def update_priority(provider: str, model_name: str, priority: int):
     return {"status": "ok"}
 
 
+@router.post("/api/config/reload")
+async def reload_config():
+    """热重载配置（重新读取 catalog 和 config.yaml，无需重启服务）"""
+    try:
+        if _deps.catalog:
+            old_data = _deps.catalog._data
+            _deps.catalog._data = _deps.catalog._load()
+            logger.info("Catalog 热重载完成")
+        _deps.config_manager._load()
+        _deps.config_manager.invalidate_enabled_models_cache()
+        new_models = _deps.config_manager.get_enabled_models()
+        return {
+            "status": "ok",
+            "enabled_models": len(new_models),
+            "message": "配置已热重载",
+        }
+    except Exception as e:
+        logger.error("热重载配置失败: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"热重载失败: {str(e)[:200]}")
+
+
 @router.post("/api/config/model/add")
 async def add_model(
     provider: str,
@@ -1735,8 +1756,11 @@ async def _do_stream_chat(session, request, trace_id: str, memory_mgr, user_msg:
     if thinking:
         logger.info("[流式会话] trace=%s 模型思考过程:\n%s", trace_id, thinking[:500])
 
+    use_true_stream = not tool_calls_log and not final_reply
+
     async def _stream_real():
-        """SSE 流式输出（分块发送已有结果，避免重复调用 LLM）"""
+        """SSE 流式输出"""
+        nonlocal final_reply, provider_name, model_name
         chat_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
         created = int(time.time())
 
@@ -1748,16 +1772,48 @@ async def _do_stream_chat(session, request, trace_id: str, memory_mgr, user_msg:
             meta["tool_calls"] = tool_calls_log
         yield f"data: {json.dumps({'meta': meta}, ensure_ascii=False)}\n\n"
 
-        chunk_size = 20
-        for i in range(0, max(len(final_reply), 1), chunk_size):
-            segment = final_reply[i:i + chunk_size]
-            if segment:
-                data = {
-                    "id": chat_id, "object": "chat.completion.chunk", "created": created,
-                    "model": model_name,
-                    "choices": [{"index": 0, "delta": {"content": segment}, "finish_reason": None}],
-                }
-                yield f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+        if use_true_stream:
+            try:
+                stream_request = _build_context_request(stream=True, include_tools=False)
+                s_prov, s_model, content_iter = await _deps.dispatcher.dispatch_stream(
+                    stream_request, enabled_models, trace_id=trace_id,
+                )
+                provider_name, model_name = s_prov, s_model
+                collected = []
+                async for chunk in content_iter:
+                    delta_content = chunk.get("content", "")
+                    if delta_content:
+                        collected.append(delta_content)
+                        data = {
+                            "id": chat_id, "object": "chat.completion.chunk", "created": created,
+                            "model": model_name,
+                            "choices": [{"index": 0, "delta": {"content": delta_content}, "finish_reason": None}],
+                        }
+                        yield f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+                final_reply = "".join(collected)
+            except Exception as e:
+                logger.warning("[流式会话] trace=%s 真实流式失败，降级分块输出: %s", trace_id, e)
+                final_reply = final_reply or "⚠️ 流式输出异常"
+                for i in range(0, len(final_reply), 20):
+                    segment = final_reply[i:i + 20]
+                    if segment:
+                        data = {
+                            "id": chat_id, "object": "chat.completion.chunk", "created": created,
+                            "model": model_name,
+                            "choices": [{"index": 0, "delta": {"content": segment}, "finish_reason": None}],
+                        }
+                        yield f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+        else:
+            chunk_size = 20
+            for i in range(0, max(len(final_reply), 1), chunk_size):
+                segment = final_reply[i:i + chunk_size]
+                if segment:
+                    data = {
+                        "id": chat_id, "object": "chat.completion.chunk", "created": created,
+                        "model": model_name,
+                        "choices": [{"index": 0, "delta": {"content": segment}, "finish_reason": None}],
+                    }
+                    yield f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
 
         session.add_message("assistant", final_reply, model=model_name)
         session.clear_checkpoint()

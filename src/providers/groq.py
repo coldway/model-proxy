@@ -27,12 +27,17 @@ logger = logging.getLogger(__name__)
 GROQ_API_BASE = "https://api.groq.com/openai/v1"
 
 
+from src.providers import register_provider
+
+
+@register_provider("groq")
 class GroqProvider(BaseProvider):
     """Groq 适配器（兼容 OpenAI 格式，支持 tool calling）"""
 
     def __init__(self, api_key: str):
         super().__init__(api_key)
-        self._client = httpx.AsyncClient(timeout=60.0)
+        from src.providers.utils import create_http_client
+        self._client = create_http_client(timeout=60.0)
 
     async def close(self) -> None:
         await self._client.aclose()

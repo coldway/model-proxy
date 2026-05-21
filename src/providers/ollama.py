@@ -41,6 +41,10 @@ _TAGS_CACHE_TTL = 30
 _SHOW_TIMEOUT = 5
 
 
+from src.providers import register_provider
+
+
+@register_provider("ollama", requires_key=False)
 class OllamaProvider(BaseProvider):
     """Ollama 本地模型 Provider
 
@@ -52,7 +56,8 @@ class OllamaProvider(BaseProvider):
         super().__init__(api_key)
         raw = api_key.strip()
         self._base_url = (raw if raw.startswith("http") else _DEFAULT_BASE_URL).rstrip("/")
-        self._client = httpx.AsyncClient(
+        from src.providers.utils import create_http_client
+        self._client = create_http_client(
             timeout=httpx.Timeout(_REQUEST_TIMEOUT, connect=_CONNECT_TIMEOUT),
         )
         self._tags_cache: list[dict[str, Any]] | None = None

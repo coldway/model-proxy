@@ -32,10 +32,34 @@ class CatalogManager:
         if self._path.exists():
             try:
                 with open(self._path, "r", encoding="utf-8") as f:
-                    return yaml.safe_load(f) or {"providers": {}}
+                    data = yaml.safe_load(f) or {"providers": {}}
+                self._validate(data)
+                return data
             except Exception as e:
                 logger.error("加载模型目录失败: %s", e)
         return {"providers": {}}
+
+    @staticmethod
+    def _validate(data: dict[str, Any]) -> None:
+        """启动时校验 catalog 配置基本结构，异常则打警告但不阻断"""
+        providers = data.get("providers")
+        if not isinstance(providers, dict):
+            logger.warning("catalog 校验: providers 不是 dict，将使用空配置")
+            data["providers"] = {}
+            return
+        for prov_id, prov in list(providers.items()):
+            if not isinstance(prov, dict):
+                logger.warning("catalog 校验: providers.%s 不是 dict，跳过", prov_id)
+                del providers[prov_id]
+                continue
+            priority = prov.get("priority")
+            if priority is not None and not isinstance(priority, (int, float)):
+                logger.warning("catalog 校验: %s.priority 类型错误(%s)，重置为 99", prov_id, type(priority).__name__)
+                prov["priority"] = 99
+            models = prov.get("models")
+            if models is not None and not isinstance(models, list):
+                logger.warning("catalog 校验: %s.models 不是 list，重置为空", prov_id)
+                prov["models"] = []
 
     def save(self) -> None:
         """延迟写入：合并短时间内的多次变更为一次磁盘操作"""
@@ -82,13 +106,6 @@ class CatalogManager:
             if not provider:
                 return []
             return provider.get("models", [])
-
-    def get_model(self, provider_id: str, model_id: str) -> dict[str, Any] | None:
-        """按 id 查找目录中的单条模型记录（含 tool_calling 等人工标注）"""
-        for m in self.get_models(provider_id):
-            if m.get("id") == model_id:
-                return m
-        return None
 
     def get_model(self, provider_id: str, model_id: str) -> dict[str, Any] | None:
         """按 id 查找目录中的单条模型记录（含 tool_calling 等人工标注）"""

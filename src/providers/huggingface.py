@@ -26,6 +26,10 @@ HF_INFERENCE_BASE = "https://api-inference.huggingface.co/models"
 HF_CHAT_BASE = "https://api-inference.huggingface.co/v1"
 
 
+from src.providers import register_provider
+
+
+@register_provider("huggingface")
 class HuggingFaceProvider(BaseProvider):
     """
     HuggingFace Inference API 适配器。
@@ -36,7 +40,8 @@ class HuggingFaceProvider(BaseProvider):
 
     def __init__(self, api_key: str):
         super().__init__(api_key)
-        self._client = httpx.AsyncClient(timeout=120.0)
+        from src.providers.utils import create_http_client
+        self._client = create_http_client(timeout=120.0)
 
     async def close(self) -> None:
         await self._client.aclose()

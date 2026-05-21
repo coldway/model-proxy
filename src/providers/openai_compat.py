@@ -34,7 +34,8 @@ class OpenAICompatibleProvider(BaseProvider):
         super().__init__(api_key)
         self._base_url = base_url.rstrip("/")
         self._provider_name = provider_name
-        self._client = httpx.AsyncClient(timeout=120.0)
+        from src.providers.utils import create_http_client
+        self._client = create_http_client(timeout=120.0)
 
     async def close(self) -> None:
         await self._client.aclose()

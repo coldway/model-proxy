@@ -91,6 +91,8 @@ class Dispatcher:
         self._route_cache: dict[str, tuple[str, float]] = {}
         self._route_cache_lock = threading.Lock()
         self._route_log: deque[dict[str, Any]] = deque(maxlen=ROUTE_LOG_MAX)
+        self._route_hit_counter: dict[str, int] = {}
+        self._route_hit_threshold = 5
         self._session_bindings: dict[str, tuple[str, str, float]] = {}
         self._session_lock = threading.Lock()
         self._bind_save_timer: threading.Timer | None = None
@@ -181,20 +183,31 @@ class Dispatcher:
             binding = self.get_session_binding(request.session_id)
             if binding:
                 prov, model = binding
-                logger.info("会话绑定优先: session=%s → %s:%s", request.session_id, prov, model)
-                try:
-                    rlim = self._rate_limits_for(enabled_models, prov, model)
-                    result = await self._call_provider(
-                        prov, model, request, trace_id=trace_id, rate_limits=rlim,
-                    )
-                    _route_strategy_var.set("会话绑定")
-                    return prov, model, result
-                except Exception as e:
-                    logger.warning(
-                        "会话绑定模型 %s:%s 失败: %s，清除绑定并降级到正常路由",
-                        prov, model, e,
+                model_still_enabled = any(
+                    p == prov and m.name == model for p, m in enabled_models
+                )
+                if not model_still_enabled or self._breaker.is_open(prov, model):
+                    logger.info(
+                        "会话绑定过期(模型不可用): session=%s %s:%s enabled=%s broken=%s",
+                        request.session_id, prov, model, model_still_enabled,
+                        self._breaker.is_open(prov, model),
                     )
                     self.clear_session_binding(request.session_id)
+                else:
+                    logger.info("会话绑定优先: session=%s → %s:%s", request.session_id, prov, model)
+                    try:
+                        rlim = self._rate_limits_for(enabled_models, prov, model)
+                        result = await self._call_provider(
+                            prov, model, request, trace_id=trace_id, rate_limits=rlim,
+                        )
+                        _route_strategy_var.set("会话绑定")
+                        return prov, model, result
+                    except Exception as e:
+                        logger.warning(
+                            "会话绑定模型 %s:%s 失败: %s，清除绑定并降级到正常路由",
+                            prov, model, e,
+                        )
+                        self.clear_session_binding(request.session_id)
 
         if request.model != "auto":
             _route_strategy_var.set("指定模型")
@@ -392,6 +405,23 @@ class Dispatcher:
         if not available:
             raise AllModelsUnavailable("所有模型均不可用（配额耗尽或 payload 超出所有模型上限）")
 
+        has_image = any(
+            isinstance(m.content, list) and any(
+                isinstance(p, dict) and p.get("type") == "image_url" for p in m.content
+            )
+            for m in request.messages
+        )
+        if has_image:
+            vision_available = [
+                (prov, m) for prov, m in available
+                if self._model_supports_vision(prov, m)
+            ]
+            if vision_available:
+                available = vision_available
+                logger.debug("auto 路由: 请求含图片，限定为 %d 个 vision 模型", len(available))
+            else:
+                logger.warning("auto 路由: 请求含图片但无模型支持 vision，使用全部候选兜底")
+
         if request.tools:
             tc_available = [
                 (prov, m) for prov, m in available
@@ -510,10 +540,15 @@ class Dispatcher:
         - 2-3 个模型但请求无特殊需求（无 tool_calling 且无中文）
         - 最优模型在所有关键维度上都领先
         - 没有 capability_cache（无法构建有效的路由提示词）
+        - 最优模型是路由热点（历史 N 次连续被推荐）
         """
         if len(sorted_models) <= 1:
             return True
         if not self._capability_cache:
+            return True
+        top_model_name = sorted_models[0][1].name
+        if self._is_hot_model(top_model_name):
+            logger.debug("热点模型跳过 LLM 路由: %s (命中 %d 次)", top_model_name, self._route_hit_counter.get(top_model_name, 0))
             return True
         needs_tc = bool(request.tools)
         has_chinese = self._detect_chinese(request)
@@ -594,6 +629,11 @@ class Dispatcher:
             return True
         caps = self._get_caps(provider, model_cfg.name)
         return bool(caps.get("tool_calling"))
+
+    def _model_supports_vision(self, provider: str, model_cfg: ModelConfig) -> bool:
+        """判断模型是否支持图片输入（vision）"""
+        caps = self._get_caps(provider, model_cfg.name)
+        return bool(caps.get("vision"))
 
     def _sort_by_capability(
         self,
@@ -766,6 +806,11 @@ class Dispatcher:
                 oldest_key = min(self._route_cache, key=lambda k: self._route_cache[k][1])
                 del self._route_cache[oldest_key]
             self._route_cache[feature_hash] = (model_name, time.time())
+            self._route_hit_counter[model_name] = self._route_hit_counter.get(model_name, 0) + 1
+
+    def _is_hot_model(self, model_name: str) -> bool:
+        """判断模型是否为路由热点（连续多次被推荐 → 可跳过 LLM 路由）"""
+        return self._route_hit_counter.get(model_name, 0) >= self._route_hit_threshold
 
     async def purge_expired_cache(self) -> int:
         """清理所有 TTL 过期的路由缓存条目，返回清理数量"""
@@ -776,6 +821,7 @@ class Dispatcher:
                 del self._route_cache[k]
             if expired:
                 logger.debug("路由缓存过期清理: 删除 %d 条，剩余 %d 条", len(expired), len(self._route_cache))
+            self._route_hit_counter.clear()
             return len(expired)
 
     async def _route_with_llm(

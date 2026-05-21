@@ -22,18 +22,21 @@ from src.models.schemas import (
     UsageInfo,
 )
 from src.providers.base import BaseProvider
+from src.providers import register_provider
 
 logger = logging.getLogger(__name__)
 
 GOOGLE_API_BASE = "https://generativelanguage.googleapis.com/v1beta"
 
 
+@register_provider("google")
 class GoogleProvider(BaseProvider):
     """Google AI Studio (Gemini) 适配器（支持 tool calling）"""
 
     def __init__(self, api_key: str):
         super().__init__(api_key)
-        self._client = httpx.AsyncClient(timeout=120.0)
+        from src.providers.utils import create_http_client
+        self._client = create_http_client(timeout=120.0)
 
     def _auth_headers(self) -> dict:
         """使用 Header 传递 API Key（避免 Key 泄露到 URL 日志）"""

@@ -593,7 +593,11 @@ def _register_builtin_tools():
 
         provider_id = args.get("provider", "").strip().lower()
         model_id = args.get("model", "").strip()
-        enabled = args.get("enabled", True)
+        raw_enabled = args.get("enabled", True)
+        if isinstance(raw_enabled, str):
+            enabled = raw_enabled.lower() not in ("false", "0", "no", "off", "disabled")
+        else:
+            enabled = bool(raw_enabled)
 
         if not provider_id or not model_id:
             return json.dumps({"error": "必须指定 provider 和 model"}, ensure_ascii=False)

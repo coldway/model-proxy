@@ -1459,7 +1459,8 @@ class Dispatcher:
             return result
         except asyncio.TimeoutError:
             elapsed_ms = (time.monotonic_ns() - start_ns) / 1_000_000
-            self._record_provider_failure(provider_name, model_name)
+            if not is_routing:
+                self._record_provider_failure(provider_name, model_name)
             logger.error("[%s] trace=%s %s:%s 超时（%ds, 实际%.0fms）", tag, trace_id, provider_name, model_name, timeout, elapsed_ms)
             raise ProviderCallError(f"{provider_name}:{model_name} 请求超时（{timeout}s）")
         except httpx.HTTPStatusError as e:
@@ -1470,7 +1471,7 @@ class Dispatcher:
                 resp_body = e.response.text[:500]
             except Exception:
                 pass
-            if should_trigger_breaker(status):
+            if should_trigger_breaker(status) and not is_routing:
                 self._record_provider_failure(provider_name, model_name)
                 logger.error(
                     "[%s] trace=%s %s:%s HTTP %d (%.0fms) 响应: %s",
@@ -1484,7 +1485,8 @@ class Dispatcher:
                     status, elapsed_ms, resp_body,
                 )
             if status == 429:
-                self._rate_limiter.mark_429(provider_name, model_name)
+                if not is_routing:
+                    self._rate_limiter.mark_429(provider_name, model_name)
                 raise RateLimitExceeded(
                     f"{provider_name}:{model_name} 厂商返回 429 限流，已加入黑名单（指数退避后自动恢复）"
                 ) from e
@@ -1509,7 +1511,8 @@ class Dispatcher:
             raise
         except Exception as e:
             elapsed_ms = (time.monotonic_ns() - start_ns) / 1_000_000
-            self._record_provider_failure(provider_name, model_name)
+            if not is_routing:
+                self._record_provider_failure(provider_name, model_name)
             logger.error("[%s] trace=%s %s:%s 异常(%.0fms): %s", tag, trace_id, provider_name, model_name, elapsed_ms, e)
             raise ProviderCallError(str(e)) from e
 

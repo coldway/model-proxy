@@ -497,6 +497,147 @@ def _register_builtin_tools():
         handler=_handle_search_ollama_library,
     )
 
+    # ---- remove_model (卸载/删除模型) ----
+
+    async def _handle_remove_model(args: dict) -> str:
+        """删除/卸载模型。Ollama 会执行 ollama rm；其他厂商仅从配置中停用。"""
+        from src.api.routes import _deps
+
+        provider_id = args.get("provider", "").strip().lower()
+        model_id = args.get("model", "").strip()
+        if not provider_id or not model_id:
+            return json.dumps({"error": "必须指定 provider 和 model"}, ensure_ascii=False)
+
+        if not _deps.dispatcher or not _deps.catalog:
+            return json.dumps({"error": "系统未初始化"}, ensure_ascii=False)
+
+        if not _deps.dispatcher.has_provider(provider_id):
+            available = list(_deps.dispatcher.get_all_providers().keys())
+            return json.dumps({
+                "error": f"厂商 {provider_id} 未注册",
+                "available_providers": available,
+            }, ensure_ascii=False)
+
+        if provider_id == "ollama":
+            from src.providers.ollama import OllamaProvider
+            prov = _deps.dispatcher.get_provider(provider_id)
+            if not isinstance(prov, OllamaProvider):
+                return json.dumps({"error": "Ollama 厂商类型不匹配"}, ensure_ascii=False)
+
+            try:
+                success = await prov.delete_model(model_id)
+            except Exception as e:
+                return json.dumps({"error": f"卸载失败: {str(e)[:200]}"}, ensure_ascii=False)
+
+            if success:
+                _deps.catalog.remove_model(provider_id, model_id)
+                return json.dumps({
+                    "status": "ok",
+                    "action": "uninstalled",
+                    "provider": provider_id,
+                    "model": model_id,
+                    "message": f"模型 {model_id} 已从 Ollama 卸载并从配置中移除",
+                }, ensure_ascii=False)
+            else:
+                return json.dumps({
+                    "error": f"卸载模型 {model_id} 失败（可能模型不存在或 Ollama 服务异常）",
+                }, ensure_ascii=False)
+
+        existing = _deps.catalog.get_model(provider_id, model_id)
+        if not existing:
+            return json.dumps({
+                "error": f"模型 {model_id} 在厂商 {provider_id} 的配置中不存在",
+            }, ensure_ascii=False)
+
+        _deps.catalog.set_model_enabled(provider_id, model_id, False)
+        return json.dumps({
+            "status": "ok",
+            "action": "disabled",
+            "provider": provider_id,
+            "model": model_id,
+            "message": f"模型 {model_id} 已停用（可通过 toggle_model 重新启用）",
+        }, ensure_ascii=False)
+
+    register_tool(
+        name="remove_model",
+        description=(
+            "删除或停用模型。对 Ollama 模型执行 ollama rm 卸载命令并从配置移除；"
+            "对其他厂商（google/groq/github 等）仅关闭启用开关（不删除配置，可重新启用）。"
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "provider": {
+                    "type": "string",
+                    "description": "厂商ID（如 ollama, groq, google, github）",
+                },
+                "model": {
+                    "type": "string",
+                    "description": "模型ID（如 qwen3:8b, llama-3.3-70b-versatile）",
+                },
+            },
+            "required": ["provider", "model"],
+        },
+        handler=_handle_remove_model,
+    )
+
+    # ---- toggle_model (启用/停用模型开关) ----
+
+    async def _handle_toggle_model(args: dict) -> str:
+        """切换模型的启用/停用状态。"""
+        from src.api.routes import _deps
+
+        provider_id = args.get("provider", "").strip().lower()
+        model_id = args.get("model", "").strip()
+        enabled = args.get("enabled", True)
+
+        if not provider_id or not model_id:
+            return json.dumps({"error": "必须指定 provider 和 model"}, ensure_ascii=False)
+
+        if not _deps.catalog:
+            return json.dumps({"error": "系统未初始化"}, ensure_ascii=False)
+
+        existing = _deps.catalog.get_model(provider_id, model_id)
+        if not existing:
+            return json.dumps({
+                "error": f"模型 {model_id} 在厂商 {provider_id} 的配置中不存在",
+                "hint": "可使用 add_model 工具先添加模型",
+            }, ensure_ascii=False)
+
+        _deps.catalog.set_model_enabled(provider_id, model_id, enabled)
+        action = "已启用" if enabled else "已停用"
+        return json.dumps({
+            "status": "ok",
+            "provider": provider_id,
+            "model": model_id,
+            "enabled": enabled,
+            "message": f"模型 {model_id} {action}",
+        }, ensure_ascii=False)
+
+    register_tool(
+        name="toggle_model",
+        description="切换模型的启用/停用状态。启用后模型参与 auto 路由，停用后不再被选择。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "provider": {
+                    "type": "string",
+                    "description": "厂商ID（如 ollama, groq, google, github）",
+                },
+                "model": {
+                    "type": "string",
+                    "description": "模型ID",
+                },
+                "enabled": {
+                    "type": "boolean",
+                    "description": "true=启用, false=停用",
+                },
+            },
+            "required": ["provider", "model", "enabled"],
+        },
+        handler=_handle_toggle_model,
+    )
+
 
 def ensure_tools_registered():
     """幂等注册：多次调用安全"""

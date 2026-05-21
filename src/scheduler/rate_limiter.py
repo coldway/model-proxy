@@ -6,7 +6,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from collections import defaultdict
+from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -28,10 +28,10 @@ _BLACKLIST_MAX_COOLDOWN = 1800
 class ModelUsage:
     """单个模型的使用计数（含 token 维度）"""
     daily_count: int = 0
-    minute_counts: list[float] = field(default_factory=list)
+    minute_counts: deque = field(default_factory=deque)
     last_reset_day: str = ""
     daily_tokens: int = 0
-    minute_token_entries: list = field(default_factory=list)
+    minute_token_entries: deque = field(default_factory=deque)
 
     def reset_if_new_day(self, today: str) -> None:
         if self.last_reset_day != today:
@@ -42,11 +42,11 @@ class ModelUsage:
             self.last_reset_day = today
 
     def clean_minute_window(self) -> None:
-        now = time.time()
-        self.minute_counts = [t for t in self.minute_counts if now - t < 60]
-        self.minute_token_entries = [
-            (t, n) for t, n in self.minute_token_entries if now - t < 60
-        ]
+        cutoff = time.time() - 60
+        while self.minute_counts and self.minute_counts[0] < cutoff:
+            self.minute_counts.popleft()
+        while self.minute_token_entries and self.minute_token_entries[0][0] < cutoff:
+            self.minute_token_entries.popleft()
 
     @property
     def minute_tokens(self) -> int:

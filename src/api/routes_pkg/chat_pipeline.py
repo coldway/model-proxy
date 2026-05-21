@@ -48,13 +48,14 @@ class PipelineResult:
 class ChatPipeline:
     """统一的会话处理管道，消除 send/stream 两路代码的重复"""
 
-    MAX_TOOL_ROUNDS = 3
+    DEFAULT_MAX_TOOL_ROUNDS = 3
 
-    def __init__(self, session, request: ChatCompletionRequest, trace_id: str, memory_mgr):
+    def __init__(self, session, request: ChatCompletionRequest, trace_id: str, memory_mgr, *, max_tool_rounds: int = 0):
         self.session = session
         self.request = request
         self.trace_id = trace_id
         self.memory_mgr = memory_mgr
+        self.max_tool_rounds = max_tool_rounds or self.DEFAULT_MAX_TOOL_ROUNDS
         self._long_term_ctx = ""
         self._start_time = 0.0
 
@@ -123,13 +124,13 @@ class ChatPipeline:
 
         compact_mgr = AutoCompactManager(context_window=self.session._max_context_tokens)
 
-        for round_idx in range(self.MAX_TOOL_ROUNDS + 1):
+        for round_idx in range(self.max_tool_rounds + 1):
             context_messages = self.session.get_context_messages()
             if compact_mgr.monitor.estimate_utilization(context_messages) >= 0.55:
                 context_messages = await compact_mgr.maybe_compact(context_messages)
 
             ctx_request = self.build_context_request(
-                stream=False, include_tools=(round_idx < self.MAX_TOOL_ROUNDS), tools=tools, compact_mgr=None,
+                stream=False, include_tools=(round_idx < self.max_tool_rounds), tools=tools, compact_mgr=None,
             )
 
             provider_name, model_name, result = await _deps.dispatcher.dispatch(ctx_request, enabled_models, trace_id=self.trace_id)
@@ -138,7 +139,7 @@ class ChatPipeline:
             if not msg:
                 return PipelineResult(reply="⚠️ 模型返回空响应，请重试", provider_name=provider_name, model_name=model_name)
 
-            if msg.tool_calls and round_idx < self.MAX_TOOL_ROUNDS:
+            if msg.tool_calls and round_idx < self.max_tool_rounds:
                 tc_data = [{"id": tc.id, "type": tc.type, "function": {"name": tc.function.name, "arguments": tc.function.arguments}} for tc in msg.tool_calls]
                 self.session.add_message("assistant", msg.content or "", tool_calls=tc_data)
 

@@ -127,16 +127,13 @@ class OpenAICompatibleProvider(BaseProvider):
                     continue
 
     async def list_models(self) -> list[str]:
+        """拉取厂商模型列表。网络或认证错误时抛出异常（不再静默返回空列表）。"""
         url = f"{self._base_url}/models"
         headers = {"Authorization": f"Bearer {self._api_key}"}
-        try:
-            resp = await self._client.get(url, headers=headers)
-            resp.raise_for_status()
-            data = resp.json()
-            return [m["id"] for m in data.get("data", [])]
-        except Exception as e:
-            logger.error("获取 %s 模型列表失败: %s", self._provider_name, e)
-            return []
+        resp = await self._client.get(url, headers=headers)
+        resp.raise_for_status()
+        data = resp.json()
+        return [m["id"] for m in data.get("data", [])]
 
     async def health_check(self) -> bool:
         try:

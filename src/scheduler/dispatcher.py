@@ -80,6 +80,8 @@ class Dispatcher:
         breaker_cooldown: int = _DEFAULT_BREAKER_COOLDOWN,
         payload_tracker: PayloadTracker | None = None,
         session_bind_ttl: int = 3600,
+        route_llm_timeout: int = 10,
+        max_concurrent_requests: int = 50,
     ):
         self._rate_limiter = rate_limiter
         self._providers: dict[str, "BaseProvider"] = {}
@@ -98,6 +100,8 @@ class Dispatcher:
         self._bind_save_timer: threading.Timer | None = None
         self._route_cache_ttl = route_cache_ttl
         self._session_bind_ttl = session_bind_ttl
+        self._route_llm_timeout = route_llm_timeout
+        self._request_semaphore = asyncio.Semaphore(max_concurrent_requests)
         self._load_session_bindings()
 
     def _record_provider_failure(self, provider_name: str, model_name: str | None = None) -> None:
@@ -267,7 +271,7 @@ class Dispatcher:
                 self._bind_save_timer.start()
 
     def _persist_bindings(self) -> None:
-        """实际写入会话绑定到磁盘（原子写入）"""
+        """实际写入会话绑定到磁盘（原子写入，Windows 兼容）"""
         import os
         import tempfile
         try:
@@ -283,7 +287,15 @@ class Dispatcher:
             )
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 f.write(content)
-            os.replace(tmp_path, str(self._SESSION_BIND_FILE))
+            try:
+                os.replace(tmp_path, str(self._SESSION_BIND_FILE))
+            except OSError:
+                # Windows: os.replace 可能因目标文件被占用失败，回退到 remove+rename
+                try:
+                    os.remove(str(self._SESSION_BIND_FILE))
+                except FileNotFoundError:
+                    pass
+                os.rename(tmp_path, str(self._SESSION_BIND_FILE))
         except Exception as e:
             logger.warning("保存会话绑定文件失败: %s", e)
 
@@ -871,7 +883,7 @@ class Dispatcher:
                 max_tokens=50,
             )
             result = await self._call_provider(
-                router_prov, router_model, route_request, timeout=15, is_routing=True,
+                router_prov, router_model, route_request, timeout=self._route_llm_timeout, is_routing=True,
             )
             recommended = result.choices[0].message.content.strip()
             recommended = recommended.strip("`\"'").split("\n")[0].strip()
@@ -1241,6 +1253,12 @@ class Dispatcher:
                 full_text = "".join(text_parts)
                 estimated_tokens = len(full_text) // 2
                 rate_limiter.record_tokens(prov_name, model_cfg.name, estimated_tokens)
+                try:
+                    from src.api.routes_pkg.deps import _deps as _route_deps
+                    if _route_deps.cost_tracker:
+                        _route_deps.cost_tracker.record(model_cfg.name, estimated_tokens // 3, estimated_tokens * 2 // 3)
+                except Exception:
+                    pass
 
                 reasoning_text = "".join(reasoning_parts)
 
@@ -1445,10 +1463,11 @@ class Dispatcher:
 
         start_ns = time.monotonic_ns()
         try:
-            result = await asyncio.wait_for(
-                provider.chat_completion(model_name, request),
-                timeout=timeout,
-            )
+            async with self._request_semaphore:
+                result = await asyncio.wait_for(
+                    provider.chat_completion(model_name, request),
+                    timeout=timeout,
+                )
             elapsed_ms = (time.monotonic_ns() - start_ns) / 1_000_000
             total_tokens = result.usage.total_tokens if result.usage else 0
             if not is_routing:

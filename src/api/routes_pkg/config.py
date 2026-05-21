@@ -294,38 +294,29 @@ async def update_settings(log_level: str | None = None, default_provider: str | 
 
 # --- 模型发现 ---
 
-_DISCOVERY_FALLBACK: dict[str, dict[str, str]] = {
-    "google": {"url": "https://aistudio.google.com/", "guide": "获取 API Key: https://aistudio.google.com/apikey"},
-    "groq": {"url": "https://console.groq.com/", "guide": "注册后在 https://console.groq.com/keys 获取 API Key"},
-    "github": {"url": "https://github.com/marketplace/models", "guide": "使用 GitHub Personal Access Token"},
-    "cerebras": {"url": "https://cloud.cerebras.ai/", "guide": "注册后在 Dashboard 获取 API Key"},
-    "sambanova": {"url": "https://cloud.sambanova.ai/", "guide": "注册后在 API 页面获取 Key"},
-    "openrouter": {"url": "https://openrouter.ai/", "guide": "https://openrouter.ai/keys 获取 Key"},
-    "cloudflare": {"url": "https://ai.cloudflare.com/", "guide": "Dashboard > AI > Workers AI"},
-    "huggingface": {"url": "https://huggingface.co/inference-api", "guide": "https://huggingface.co/settings/tokens 创建 Token"},
-    "mistral": {"url": "https://console.mistral.ai/", "guide": "https://console.mistral.ai/api-keys/ 获取 Key"},
-    "cursor": {"url": "https://www.cursor.com/", "guide": "通过 Cursor IDE 登录即可使用"},
-    "nvidia": {"url": "https://build.nvidia.com/", "guide": "注册后在 Dashboard 获取 API Key，需手机验证"},
-    "cohere": {"url": "https://cohere.com/", "guide": "https://dashboard.cohere.com/api-keys 注册获取 Key"},
-    "dashscope": {"url": "https://bailian.console.aliyun.com/", "guide": "阿里云百炼平台开通后在 API-KEY 管理页面创建 Key"},
-}
+def _build_discovery_guide(prov_id: str, prov_data: dict) -> str:
+    """从 catalog 的 api_key_guide 字段获取接入指南，无需手动维护 fallback"""
+    guide = prov_data.get("api_key_guide", "")
+    if guide:
+        return guide
+    url = prov_data.get("url", "")
+    return f"请访问 {url} 获取 API Key" if url else "请查看厂商官网获取 API Key"
 
 
 @router.get("/api/discovery", response_model=list[ProviderDiscovery])
 async def discover_providers():
-    """查找可免费使用的大模型厂商"""
+    """查找可免费使用的大模型厂商（自动从 catalog 读取，无需手动维护列表）"""
     if not _deps.catalog:
         return []
     discoveries = []
     for prov_id, prov_data in _deps.catalog.get_all_providers().items():
-        fallback = _DISCOVERY_FALLBACK.get(prov_id, {})
         model_ids = [m["id"] for m in prov_data.get("models", [])[:5]]
         discoveries.append(ProviderDiscovery(
             name=prov_data.get("name", prov_id),
-            url=prov_data.get("url", fallback.get("url", "")),
+            url=prov_data.get("url", ""),
             description=prov_data.get("description", f"{prov_data.get('name', prov_id)} 免费模型推理"),
             free_models=model_ids,
-            integration_guide=fallback.get("guide", "请查看厂商官网获取 API Key"),
+            integration_guide=_build_discovery_guide(prov_id, prov_data),
             new_user_only=False,
         ))
     return discoveries

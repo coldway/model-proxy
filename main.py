@@ -104,6 +104,8 @@ def create_app() -> FastAPI:
         "sambanova": lambda key: create_openai_provider("sambanova", key),
         "openrouter": lambda key: create_openai_provider("openrouter", key),
         "mistral": lambda key: create_openai_provider("mistral", key),
+        "nvidia": lambda key: create_openai_provider("nvidia", key),
+        "cohere": lambda key: create_openai_provider("cohere", key),
         "ollama": lambda key: OllamaProvider(key),
     }
 

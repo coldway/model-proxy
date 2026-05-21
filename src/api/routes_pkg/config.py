@@ -305,6 +305,8 @@ _DISCOVERY_FALLBACK: dict[str, dict[str, str]] = {
     "huggingface": {"url": "https://huggingface.co/inference-api", "guide": "https://huggingface.co/settings/tokens 创建 Token"},
     "mistral": {"url": "https://console.mistral.ai/", "guide": "https://console.mistral.ai/api-keys/ 获取 Key"},
     "cursor": {"url": "https://www.cursor.com/", "guide": "通过 Cursor IDE 登录即可使用"},
+    "nvidia": {"url": "https://build.nvidia.com/", "guide": "注册后在 Dashboard 获取 API Key，需手机验证"},
+    "cohere": {"url": "https://cohere.com/", "guide": "https://dashboard.cohere.com/api-keys 注册获取 Key"},
 }
 
 

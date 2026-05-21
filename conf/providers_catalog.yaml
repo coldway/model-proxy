@@ -453,6 +453,92 @@ providers:
       default_rpd: 1000
       default_rpm: 10
       category: 通用
+  nvidia:
+    name: NVIDIA NIM
+    enabled: false
+    priority: 12
+    url: https://build.nvidia.com/explore/discover
+    description: NVIDIA NIM 免费推理 API（需手机验证）
+    api_key_guide: https://build.nvidia.com/ 注册后获取 API Key
+    models:
+    - id: meta/llama-3.3-70b-instruct
+      name: Llama 3.3 70B (NVIDIA)
+      description: Meta Llama 3.3 70B 通过 NVIDIA NIM 推理
+      default_rpd: 0
+      default_rpm: 40
+      category: 通用
+      tool_calling: true
+    - id: meta/llama-3.1-8b-instruct
+      name: Llama 3.1 8B (NVIDIA)
+      description: Meta Llama 3.1 8B 轻量模型
+      default_rpd: 0
+      default_rpm: 40
+      category: 快速
+      tool_calling: true
+    - id: nvidia/llama-3.1-nemotron-70b-instruct
+      name: Nemotron 70B
+      description: NVIDIA 调优的 Llama 3.1 70B
+      default_rpd: 0
+      default_rpm: 40
+      category: 推理
+      tool_calling: true
+    - id: deepseek-ai/deepseek-r1
+      name: DeepSeek R1 (NVIDIA)
+      description: DeepSeek R1 推理模型
+      default_rpd: 0
+      default_rpm: 40
+      category: 推理
+      tool_calling: false
+    - id: qwen/qwen2.5-72b-instruct
+      name: Qwen 2.5 72B (NVIDIA)
+      description: 阿里 Qwen 2.5 72B
+      default_rpd: 0
+      default_rpm: 40
+      category: 通用
+      tool_calling: true
+  cohere:
+    name: Cohere
+    enabled: false
+    priority: 13
+    url: https://cohere.com
+    description: Cohere 免费 API（20 RPM / 1000 请求/月）
+    api_key_guide: https://dashboard.cohere.com/api-keys 注册获取
+    models:
+    - id: command-a-03-2025
+      name: Command A
+      description: Cohere 最强模型 Command A（2025-03）
+      default_rpd: 33
+      default_rpm: 20
+      category: 通用
+      tool_calling: true
+    - id: command-r-plus-08-2024
+      name: Command R+
+      description: Cohere Command R+ 大模型
+      default_rpd: 33
+      default_rpm: 20
+      category: 推理
+      tool_calling: true
+    - id: command-r-08-2024
+      name: Command R
+      description: Cohere Command R 通用模型
+      default_rpd: 33
+      default_rpm: 20
+      category: 通用
+      tool_calling: true
+    - id: command-r7b-12-2024
+      name: Command R7B
+      description: Cohere 轻量 7B 模型
+      default_rpd: 33
+      default_rpm: 20
+      category: 快速
+      tool_calling: true
+    - id: c4ai-aya-expanse-32b
+      name: Aya Expanse 32B
+      description: Cohere 多语言 Aya 模型
+      default_rpd: 33
+      default_rpm: 20
+      category: 多语言
+      tool_calling: false
   cursor:
     name: Cursor Agent CLI
     enabled: false

@@ -152,6 +152,8 @@ PROVIDER_BASE_URLS = {
     "sambanova": "https://api.sambanova.ai/v1",
     "openrouter": "https://openrouter.ai/api/v1",
     "mistral": "https://api.mistral.ai/v1",
+    "nvidia": "https://integrate.api.nvidia.com/v1",
+    "cohere": "https://api.cohere.ai/compatibility/v1",
 }
 
 

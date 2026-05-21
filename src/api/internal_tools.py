@@ -164,13 +164,17 @@ def _register_builtin_tools():
 
             if not installed:
                 try:
+                    pull_success = False
                     async for progress in prov_inst.pull_model(model_id):
                         st = progress.get("status", "")
                         if st == "success":
+                            pull_success = True
                             break
                         elif "error" in st.lower() or progress.get("error"):
                             err = progress.get("error", st)
                             return json.dumps({"error": f"下载失败: {err}"}, ensure_ascii=False)
+                    if not pull_success:
+                        return json.dumps({"error": "下载流异常结束，模型可能未完整安装"}, ensure_ascii=False)
                 except Exception as e:
                     return json.dumps({"error": f"拉取模型失败: {str(e)[:200]}"}, ensure_ascii=False)
 
@@ -273,8 +277,9 @@ def _register_builtin_tools():
         except Exception as e:
             return json.dumps({"error": f"拉取模型列表失败: {str(e)[:200]}"}, ensure_ascii=False)
 
-        catalog_models = {m["id"] for m in (_deps.catalog.get_models(provider_id) if _deps.catalog else [])}
-        enabled_models = {m["id"] for m in (_deps.catalog.get_models(provider_id) if _deps.catalog else []) if m.get("enabled")}
+        all_catalog = _deps.catalog.get_models(provider_id) if _deps.catalog else []
+        catalog_models = {m["id"] for m in all_catalog}
+        enabled_models = {m["id"] for m in all_catalog if m.get("enabled")}
 
         not_added = [m for m in remote_models if m not in catalog_models]
         added_enabled = [m for m in remote_models if m in enabled_models]
@@ -306,13 +311,6 @@ def _register_builtin_tools():
     )
 
     # ---- search_ollama_library ----
-
-    _VRAM_TIERS = [
-        (8, "推荐 (完全载入 VRAM)"),
-        (14, "可用 (VRAM 足够)"),
-        (27, "可用 (需部分 CPU 辅助)"),
-        (35, "勉强可用 (大量 CPU 辅助)"),
-    ]
 
     def _estimate_suitability(size_b: float, vram_gb: float) -> str:
         """根据参数量和 VRAM 估算 Q4 量化下的适合度"""
@@ -355,12 +353,13 @@ def _register_builtin_tools():
         installed_names: set[str] = set()
         try:
             if _deps.dispatcher and _deps.dispatcher.has_provider("ollama"):
+                from src.providers.ollama import OllamaProvider
                 prov = _deps.dispatcher.get_provider("ollama")
-                tags_resp = await prov._client.get("/api/tags")
-                if tags_resp.status_code == 200:
-                    for m in tags_resp.json().get("models", []):
-                        installed_names.add(m["name"].split(":")[0].lower())
-                        installed_names.add(m["name"].lower())
+                if isinstance(prov, OllamaProvider):
+                    installed = await prov.list_models()
+                    for m in installed:
+                        installed_names.add(m.split(":")[0].lower())
+                        installed_names.add(m.lower())
         except Exception:
             pass
 
@@ -380,6 +379,8 @@ def _register_builtin_tools():
             if name in seen or "/" not in name:
                 continue
             seen.add(name)
+            if name.startswith("library/"):
+                name = name[len("library/"):]
 
             caps = [c for c in ("tools", "thinking", "vision", "audio")
                     if c in text.lower()]

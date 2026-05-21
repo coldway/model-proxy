@@ -96,7 +96,14 @@ class OllamaProvider(BaseProvider):
         resp.raise_for_status()
         data = resp.json()
 
-        choice = data["choices"][0]
+        choices = data.get("choices") or []
+        if not choices:
+            raise httpx.HTTPStatusError(
+                f"Ollama 返回空 choices: {str(data)[:200]}",
+                request=resp.request,
+                response=resp,
+            )
+        choice = choices[0]
         usage = data.get("usage", {})
         msg = choice["message"]
 
@@ -132,7 +139,9 @@ class OllamaProvider(BaseProvider):
             headers={"Content-Type": "application/json"},
             json=self._build_payload(model, request, stream=True),
         ) as resp:
-            resp.raise_for_status()
+            if resp.status_code >= 400:
+                await resp.aread()
+                resp.raise_for_status()
             async for line in resp.aiter_lines():
                 if not line.startswith("data: "):
                     continue
@@ -306,6 +315,7 @@ def _infer_tool_calling(model_id: str, family: str) -> bool:
         "command-r", "command-r-plus",
         "hermes", "nemotron", "firefunction",
         "granite", "phi4",
+        "deepseek-v2.5", "deepseek-v3", "deepseek-r1",
     )
     if any(p in lower for p in tc_patterns):
         return True

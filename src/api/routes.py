@@ -593,13 +593,19 @@ async def pull_ollama_model(model: str):
         raise HTTPException(status_code=400, detail="Ollama 厂商未启用或未注册")
 
     async def _stream():
+        import asyncio
         try:
+            last_progress_time = time.time()
             async for progress in prov.pull_model(model):
+                last_progress_time = time.time()
                 yield f"data: {json.dumps(progress, ensure_ascii=False)}\n\n"
                 if progress.get("status") == "success":
                     if _deps.catalog:
                         added = await prov.discover_and_register(_deps.catalog)
                         yield f"data: {json.dumps({'status': 'registered', 'new_models': added}, ensure_ascii=False)}\n\n"
+                    break
+                if time.time() - last_progress_time > 600:
+                    yield f"data: {json.dumps({'status': 'error', 'error': '下载超时: 10分钟无进度更新'}, ensure_ascii=False)}\n\n"
                     break
         except Exception as e:
             yield f"data: {json.dumps({'status': 'error', 'error': str(e)[:200]}, ensure_ascii=False)}\n\n"

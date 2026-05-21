@@ -8,15 +8,16 @@ import logging
 import threading
 import time
 from collections import deque
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 HISTORY_FILE = Path("data/request_history.jsonl")
-MAX_MEMORY_RECORDS = 500
+DEFAULT_MAX_MEMORY_RECORDS = 2000
 FLUSH_INTERVAL_SECONDS = 5
+RETENTION_DAYS = 30
 
 
 @dataclass
@@ -39,13 +40,17 @@ class RequestRecord:
 class RequestHistory:
     """请求历史记录器，支持内存队列 + 文件持久化"""
 
-    def __init__(self, persist: bool = True):
-        self._records: deque[RequestRecord] = deque(maxlen=MAX_MEMORY_RECORDS)
+    def __init__(self, persist: bool = True, *, max_memory_records: int | None = None):
+        cap = max_memory_records if max_memory_records is not None else DEFAULT_MAX_MEMORY_RECORDS
+        cap = max(1, int(cap))
+        self._records: deque[RequestRecord] = deque(maxlen=cap)
         self._persist = persist
         self._pending: list[RequestRecord] = []
+        self._pending_lock = threading.Lock()
         self._flush_timer: threading.Timer | None = None
         if persist:
             HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
+            self._load_and_cleanup()
 
     def record(
         self,
@@ -73,7 +78,8 @@ class RequestHistory:
         self._records.append(rec)
 
         if self._persist:
-            self._pending.append(rec)
+            with self._pending_lock:
+                self._pending.append(rec)
             self._schedule_flush()
 
     def get_recent(self, limit: int = 50) -> list[dict[str, Any]]:
@@ -176,6 +182,54 @@ class RequestHistory:
             }
         return result
 
+    def _load_and_cleanup(self) -> None:
+        """启动时单次扫描 JSONL 文件：加载有效记录到内存 + 清理过期记录"""
+        if not HISTORY_FILE.exists():
+            return
+        cutoff = time.time() - RETENTION_DAYS * 86400
+        kept_lines: list[str] = []
+        loaded = 0
+        removed = 0
+        try:
+            with open(HISTORY_FILE, encoding="utf-8") as f:
+                for raw_line in f:
+                    line = raw_line.strip()
+                    if not line:
+                        continue
+                    try:
+                        data = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if data.get("timestamp", 0) < cutoff:
+                        removed += 1
+                        continue
+                    kept_lines.append(line)
+                    try:
+                        rec = RequestRecord(
+                            timestamp=data["timestamp"],
+                            provider=data["provider"],
+                            model=data["model"],
+                            success=data["success"],
+                            latency_ms=data["latency_ms"],
+                            error=data.get("error", ""),
+                            prompt_tokens=data.get("prompt_tokens", 0),
+                            completion_tokens=data.get("completion_tokens", 0),
+                            route_strategy=data.get("route_strategy", ""),
+                        )
+                        self._records.append(rec)
+                        loaded += 1
+                    except KeyError:
+                        continue
+            if removed:
+                with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+                    for line in kept_lines:
+                        f.write(line + "\n")
+                logger.info("已清理 %d 条超过 %d 天的路由决策记录", removed, RETENTION_DAYS)
+            if loaded:
+                logger.info("已从历史文件加载 %d 条路由决策记录", loaded)
+        except Exception as e:
+            logger.warning("加载/清理路由决策历史失败: %s", e)
+
     def _schedule_flush(self) -> None:
         if self._flush_timer is None or not self._flush_timer.is_alive():
             self._flush_timer = threading.Timer(FLUSH_INTERVAL_SECONDS, self._flush)
@@ -183,16 +237,19 @@ class RequestHistory:
             self._flush_timer.start()
 
     def _flush(self) -> None:
-        if not self._pending:
-            return
-        batch = self._pending[:]
+        with self._pending_lock:
+            if not self._pending:
+                return
+            batch = self._pending[:]
+            self._pending.clear()
         try:
             with open(HISTORY_FILE, "a", encoding="utf-8") as f:
                 for rec in batch:
                     f.write(json.dumps(rec.to_dict(), ensure_ascii=False) + "\n")
-            self._pending = self._pending[len(batch):]
         except Exception as e:
             logger.warning("批量写入历史记录失败（%d 条将在下次重试）: %s", len(batch), e)
+            with self._pending_lock:
+                self._pending = batch + self._pending
 
     def flush(self) -> None:
         """立即刷盘（用于优雅关闭）"""

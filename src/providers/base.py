@@ -28,13 +28,19 @@ class BaseProvider(ABC):
 
     async def stream_chat_completion(
         self, model: str, request: ChatCompletionRequest
-    ) -> AsyncIterator[str]:
-        """流式聊天补全，逐块 yield 文本内容。
+    ) -> AsyncIterator[dict]:
+        """流式聊天补全，逐块 yield delta dict（保留 content/tool_calls/reasoning 等完整字段）。
         默认回退到非流式调用后一次性 yield 完整内容。
         """
         result = await self.chat_completion(model, request)
-        content = result.choices[0].message.content if result.choices else ""
-        yield content
+        msg = result.choices[0].message if result.choices else None
+        delta: dict = {}
+        if msg:
+            if msg.content:
+                delta["content"] = msg.content
+            if getattr(msg, "tool_calls", None):
+                delta["tool_calls"] = [tc.model_dump() for tc in msg.tool_calls]
+        yield delta or {"content": ""}
 
     @abstractmethod
     async def list_models(self) -> list[str]:

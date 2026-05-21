@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import time
@@ -42,19 +43,116 @@ class GroqProvider(BaseProvider):
             "Content-Type": "application/json",
         }
 
+    @staticmethod
+    def _relax_schema(schema: dict) -> dict:
+        """递归放宽 JSON Schema 以兼容 Groq 模型的非严格输出：
+        1. boolean → anyOf[boolean, string("true"/"false")]
+        2. array items: {type: "string"} → items: anyOf[string, object]
+
+        使用 deepcopy 避免污染调用方的原始 schema。
+        """
+        if not isinstance(schema, dict):
+            return schema
+        schema = copy.deepcopy(schema)
+        if schema.get("type") == "boolean":
+            return {"anyOf": [{"type": "boolean"}, {"type": "string", "enum": ["true", "false"]}]}
+        if schema.get("type") == "array":
+            items = schema.get("items", {})
+            if isinstance(items, dict) and items.get("type") == "string":
+                schema["items"] = {"anyOf": [{"type": "string"}, {"type": "object"}]}
+        if "properties" in schema and isinstance(schema["properties"], dict):
+            schema["properties"] = {
+                k: GroqProvider._relax_schema(v) for k, v in schema["properties"].items()
+            }
+        return schema
+
+    @staticmethod
+    def _looks_like_tool_call(obj: dict) -> bool:
+        return "name" in obj and ("arguments" in obj or "parameters" in obj)
+
+    @staticmethod
+    def _is_tool_call_json(text: str) -> bool:
+        """判断文本是否为模型试图生成的工具调用 JSON（非面向用户的文本）。
+        要求同时包含 name + (arguments|parameters) 才认定为工具调用。"""
+        stripped = text.strip()
+        if not stripped:
+            return False
+        try:
+            parsed = json.loads(stripped)
+        except (json.JSONDecodeError, ValueError):
+            return False
+        if isinstance(parsed, list):
+            return any(
+                isinstance(item, dict) and GroqProvider._looks_like_tool_call(item)
+                for item in parsed[:5]
+            )
+        if isinstance(parsed, dict):
+            return GroqProvider._looks_like_tool_call(parsed)
+        return False
+
+    def _try_recover_tool_use_failed(
+        self, resp: httpx.Response, model: str,
+    ) -> dict | None:
+        """Groq 严格模式下模型想输出文本但被拒绝时，
+        从 failed_generation 中恢复有效响应，避免不必要的降级。
+        如果 failed_generation 是工具调用 JSON，则不恢复（让降级链处理）。"""
+        try:
+            body = resp.json()
+        except Exception:
+            return None
+        err = body.get("error", {})
+        if err.get("code") != "tool_use_failed":
+            return None
+        text = err.get("failed_generation", "")
+        if not text:
+            return None
+        if self._is_tool_call_json(text):
+            logger.info(
+                "Groq tool_use_failed: failed_generation 是工具调用 JSON (%d字)，不恢复",
+                len(text),
+            )
+            return None
+        logger.info(
+            "Groq tool_use_failed 恢复: 提取 failed_generation (%d字) 作为有效响应",
+            len(text),
+        )
+        return {
+            "id": f"chatcmpl-{uuid.uuid4().hex[:12]}",
+            "created": int(time.time()),
+            "model": model,
+            "choices": [{"index": 0, "message": {"role": "assistant", "content": text}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+        }
+
     def _build_payload(self, model: str, request: ChatCompletionRequest, stream: bool = False) -> dict:
+        messages = [msg_to_dict(m) for m in request.messages]
+        if request.response_format and request.response_format.type in ("json_object", "json_schema"):
+            has_json_hint = any("json" in (m.get("content") or "").lower() for m in messages)
+            if not has_json_hint:
+                messages.insert(0, {"role": "system", "content": "Output valid JSON only."})
         payload: dict = {
             "model": model,
-            "messages": [msg_to_dict(m) for m in request.messages],
+            "messages": messages,
             "temperature": request.temperature,
             "stream": stream,
         }
         if request.max_tokens:
             payload["max_tokens"] = request.max_tokens
         if request.tools:
-            payload["tools"] = [t.model_dump() for t in request.tools]
+            relaxed = []
+            for t in request.tools:
+                td = t.model_dump()
+                if "function" in td and "parameters" in td["function"]:
+                    td["function"]["parameters"] = self._relax_schema(td["function"]["parameters"])
+                relaxed.append(td)
+            payload["tools"] = relaxed
         if request.tool_choice is not None:
             payload["tool_choice"] = request.tool_choice
+        if request.response_format:
+            rf_type = request.response_format.type
+            if rf_type == "json_schema":
+                rf_type = "json_object"
+            payload["response_format"] = {"type": rf_type}
         return payload
 
     async def chat_completion(
@@ -64,8 +162,13 @@ class GroqProvider(BaseProvider):
         resp = await self._client.post(
             url, headers=self._build_headers(), json=self._build_payload(model, request),
         )
-        resp.raise_for_status()
-        data = resp.json()
+        if resp.status_code == 400:
+            data = self._try_recover_tool_use_failed(resp, model)
+            if data is None:
+                resp.raise_for_status()
+        else:
+            resp.raise_for_status()
+            data = resp.json()
 
         choice = data["choices"][0]
         usage = data.get("usage", {})
@@ -95,14 +198,32 @@ class GroqProvider(BaseProvider):
 
     async def stream_chat_completion(
         self, model: str, request: ChatCompletionRequest
-    ) -> AsyncIterator[str]:
+    ) -> AsyncIterator[dict]:
         url = f"{GROQ_API_BASE}/chat/completions"
         async with self._client.stream(
             "POST", url,
             headers=self._build_headers(),
             json=self._build_payload(model, request, stream=True),
         ) as resp:
-            resp.raise_for_status()
+            if resp.status_code == 400:
+                body = await resp.aread()
+                try:
+                    err_data = json.loads(body)
+                    err = err_data.get("error", {})
+                    if err.get("code") == "tool_use_failed":
+                        text = err.get("failed_generation", "")
+                        if text and not self._is_tool_call_json(text):
+                            logger.info(
+                                "Groq stream tool_use_failed 恢复: 提取 failed_generation (%d字)",
+                                len(text),
+                            )
+                            yield {"content": text}
+                            return
+                except (json.JSONDecodeError, KeyError):
+                    pass
+                resp.raise_for_status()
+            else:
+                resp.raise_for_status()
             async for line in resp.aiter_lines():
                 if not line.startswith("data: "):
                     continue
@@ -114,9 +235,9 @@ class GroqProvider(BaseProvider):
                     choices = chunk.get("choices", [])
                     if not choices:
                         continue
-                    text = choices[0].get("delta", {}).get("content", "")
-                    if text:
-                        yield text
+                    delta = choices[0].get("delta", {})
+                    if delta:
+                        yield delta
                 except (json.JSONDecodeError, IndexError, KeyError):
                     continue
 
@@ -129,7 +250,7 @@ class GroqProvider(BaseProvider):
             data = resp.json()
             return [m["id"] for m in data.get("data", [])]
         except Exception as e:
-            logger.error(f"获取 Groq 模型列表失败: {e}")
+            logger.error("获取 Groq 模型列表失败: %s", e)
             return []
 
     async def health_check(self) -> bool:

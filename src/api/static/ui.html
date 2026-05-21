@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+<!-- region 页面骨架与全局样式 -->
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
@@ -385,8 +386,37 @@
         .log-logger { color: var(--accent-cyan); }
         .log-trace { color: var(--accent-purple); font-weight: 600; }
         .log-msg { color: var(--text-primary); }
+
+        .intg-section { padding-bottom: 4px; border-bottom: 1px solid var(--border); }
+        .intg-section:last-child { border-bottom: none; }
+        .intg-title { font-size: 0.95rem; color: var(--accent-blue); margin-bottom: 10px; }
+        .intg-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+        .intg-table td { padding: 6px 10px; border-bottom: 1px solid rgba(51,65,85,0.15); vertical-align: top; }
+        .intg-label { white-space: nowrap; color: var(--text-muted); width: 120px; font-weight: 600; }
+        .intg-code { background: var(--bg-primary); padding: 2px 6px; border-radius: 4px; font-family: 'JetBrains Mono','Fira Code',monospace; font-size: 0.78rem; color: var(--accent-cyan); border: 1px solid var(--border); }
+        .intg-code-block { background: var(--bg-primary); border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
+        .intg-code-header { display: flex; justify-content: space-between; align-items: center; padding: 6px 12px; background: var(--bg-tertiary); font-size: 0.75rem; color: var(--text-muted); border-bottom: 1px solid var(--border); }
+        .intg-pre { margin: 0; padding: 12px 16px; font-family: 'JetBrains Mono','Fira Code',monospace; font-size: 0.78rem; line-height: 1.6; color: var(--text-primary); overflow-x: auto; white-space: pre;         }
+
+        .session-tab { flex:1; padding:6px 0; font-size:0.75rem; font-weight:500; border:none; background:transparent; color:var(--text-muted); cursor:pointer; transition:var(--transition); }
+        .session-tab.active { color:var(--accent-blue); border-bottom:2px solid var(--accent-blue); }
+        .session-tab:not(.active):hover { color:var(--text-primary); }
+        .session-item { position:relative; padding:8px 10px; border-radius:8px; margin-bottom:4px; cursor:pointer; transition:all 0.15s; }
+        .session-item:hover .session-delete-btn { opacity:1; }
+        .session-delete-btn { position:absolute; right:6px; top:50%; transform:translateY(-50%); opacity:0; width:20px; height:20px; border:none; background:rgba(239,68,68,0.15); color:var(--accent-red); border-radius:4px; cursor:pointer; font-size:0.75rem; display:flex; align-items:center; justify-content:center; transition:opacity 0.15s; }
+        .session-delete-btn:hover { background:rgba(239,68,68,0.3); }
+        .trash-item { position:relative; padding:8px 10px; border-radius:8px; margin-bottom:4px; background:rgba(239,68,68,0.05); border:1px solid rgba(239,68,68,0.1); }
+        .trash-item-actions { display:flex; gap:4px; margin-top:4px; }
+        .trash-item-actions button { padding:2px 8px; font-size:0.7rem; border-radius:4px; border:none; cursor:pointer; transition:var(--transition); }
+        .trash-restore-btn { background:rgba(16,185,129,0.15); color:var(--accent-green); }
+        .trash-restore-btn:hover { background:rgba(16,185,129,0.3); }
+        .trash-perm-del-btn { background:rgba(239,68,68,0.15); color:var(--accent-red); }
+        .trash-perm-del-btn:hover { background:rgba(239,68,68,0.3); }
     </style>
 </head>
+<!-- endregion 页面骨架与全局样式 -->
+
+<!-- region 页面框架（头部/选项卡/面板/弹窗） -->
 <body>
     <div class="toast-container" id="toast-container"></div>
 
@@ -420,6 +450,12 @@
             </button>
             <button class="tab" onclick="switchTab('logs', this)">
                 <span>📋</span> 实时日志
+            </button>
+            <button class="tab" onclick="switchTab('memory', this)">
+                <span>🧠</span> 记忆
+            </button>
+            <button class="tab" onclick="switchTab('integration', this)">
+                <span>📖</span> 接入指南
             </button>
         </div>
 
@@ -464,7 +500,12 @@
                         <span style="font-size:0.85rem;font-weight:600">会话列表</span>
                         <button class="btn btn-primary btn-sm" onclick="createNewSession()" style="padding:3px 8px;font-size:0.75rem">+ 新建</button>
                     </div>
+                    <div style="display:flex;border-bottom:1px solid var(--border)">
+                        <button id="tab-active-sessions" class="session-tab active" onclick="switchSessionTab('active')">会话</button>
+                        <button id="tab-trash-sessions" class="session-tab" onclick="switchSessionTab('trash')">回收站</button>
+                    </div>
                     <div id="session-list" style="flex:1;overflow-y:auto;padding:6px"></div>
+                    <div id="trash-list" style="flex:1;overflow-y:auto;padding:6px;display:none"></div>
                 </div>
                 <!-- 聊天主区域 -->
                 <div class="card" style="flex:1;display:flex;flex-direction:column;min-width:0">
@@ -525,10 +566,10 @@
                     <h3>实时日志</h3>
                     <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
                         <select id="log-level-filter" onchange="renderLogEntries()" style="background:var(--bg-tertiary);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius-xs);padding:4px 8px;font-size:0.75rem">
-                            <option value="all">全部级别</option>
+                            <option value="all" selected>全部级别</option>
                             <option value="ERROR">ERROR</option>
                             <option value="WARNING">WARNING</option>
-                            <option value="INFO" selected>INFO+</option>
+                            <option value="INFO">INFO+</option>
                             <option value="DEBUG">DEBUG</option>
                         </select>
                         <input id="log-search" placeholder="搜索日志..." oninput="renderLogEntries()" style="background:var(--bg-tertiary);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius-xs);padding:4px 8px;font-size:0.75rem;width:160px">
@@ -548,6 +589,248 @@
                     </div>
                 </div>
                 <div id="log-container" style="height:calc(100vh - 260px);overflow-y:auto;font-family:'JetBrains Mono','Fira Code','SF Mono',Menlo,Consolas,monospace;font-size:0.72rem;line-height:1.55;background:var(--bg-primary);border-radius:var(--radius-xs);padding:8px 12px;border:1px solid var(--border)">
+                </div>
+            </div>
+        </div>
+
+        <!-- 记忆管理 -->
+        <div id="panel-memory" class="panel">
+            <div class="card">
+                <div class="card-header">
+                    <h3>长期记忆管理</h3>
+                    <div style="display:flex;gap:8px">
+                        <button class="btn btn-sm" onclick="loadMemory()">刷新</button>
+                        <button class="btn btn-sm" onclick="exportMemory()">导出 JSON</button>
+                        <label class="btn btn-sm" style="cursor:pointer">导入 JSON<input type="file" accept=".json" onchange="importMemory(event)" style="display:none"></label>
+                    </div>
+                </div>
+                <div id="memory-stats" style="padding:8px 0;font-size:0.85rem;color:var(--text-muted)"></div>
+                <div id="memory-list" style="display:flex;flex-direction:column;gap:8px"></div>
+                <div id="memory-empty" style="padding:32px;text-align:center;color:var(--text-muted);display:none">
+                    暂无长期记忆。在聊天中表达偏好或做出决策后，系统会自动记录。
+                </div>
+            </div>
+
+            <div class="card" style="margin-top:16px">
+                <div class="card-header"><h3>手动添加记忆</h3></div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;padding:4px 0">
+                    <select id="memory-add-type" style="padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg-secondary);color:var(--text-primary)">
+                        <option value="preference">偏好</option>
+                        <option value="semantic">知识</option>
+                        <option value="episodic">经验</option>
+                    </select>
+                    <input id="memory-add-content" type="text" placeholder="输入记忆内容..." style="flex:1;min-width:200px;padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg-secondary);color:var(--text-primary)">
+                    <button class="btn btn-sm" onclick="addMemory()" style="background:var(--accent);color:#fff">添加</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 接入指南 -->
+        <div id="panel-integration" class="panel">
+            <div class="card" style="max-width:900px">
+                <div class="card-header">
+                    <h3>API 接入指南</h3>
+                    <span style="font-size:0.75rem;color:var(--text-muted)">兼容 OpenAI SDK，上游服务可直接替换 base_url 接入</span>
+                </div>
+
+                <div style="display:flex;flex-direction:column;gap:24px;padding:8px 0">
+
+                    <section class="intg-section">
+                        <h4 class="intg-title">基本信息</h4>
+                        <table class="intg-table">
+                            <tr><td class="intg-label">Base URL</td><td><code class="intg-code" id="intg-base-url"></code> <button class="btn btn-ghost" style="padding:1px 6px;font-size:0.65rem" onclick="copyText(document.getElementById('intg-base-url').textContent)">复制</button></td></tr>
+                            <tr><td class="intg-label">API Key</td><td><code class="intg-code">任意值（如 "unused"）</code></td></tr>
+                            <tr><td class="intg-label">核心接口</td><td><code class="intg-code">POST /v1/chat/completions</code></td></tr>
+                            <tr><td class="intg-label">模型列表</td><td><code class="intg-code">GET /v1/models</code></td></tr>
+                            <tr><td class="intg-label">使用量</td><td><code class="intg-code">GET /v1/usage</code></td></tr>
+                            <tr><td class="intg-label">协议</td><td>完全兼容 OpenAI Chat Completions API，支持流式 (SSE) 和非流式</td></tr>
+                        </table>
+                    </section>
+
+                    <section class="intg-section">
+                        <h4 class="intg-title">模型选择</h4>
+                        <table class="intg-table">
+                            <tr><td class="intg-label"><code class="intg-code">"auto"</code></td><td>系统按厂商优先级 → 模型优先级自动选择最优可用模型（推荐）</td></tr>
+                            <tr><td class="intg-label">指定模型</td><td>传入具体模型名，如 <code class="intg-code">"gemini-2.5-flash"</code>、<code class="intg-code">"llama-3.3-70b-versatile"</code></td></tr>
+                        </table>
+                        <div style="font-size:0.75rem;color:var(--text-muted);margin-top:6px">当指定模型额度耗尽时返回 429；使用 auto 模式时会自动降级到下一个可用模型。</div>
+                    </section>
+
+                    <section class="intg-section">
+                        <h4 class="intg-title">请求格式</h4>
+                        <div class="intg-code-block">
+                            <div class="intg-code-header"><span>POST /v1/chat/completions</span><button class="btn btn-ghost" style="padding:1px 6px;font-size:0.65rem" onclick="copyCodeBlock(this)">复制</button></div>
+                            <pre class="intg-pre">{
+  "model": "auto",
+  "messages": [
+    {"role": "system", "content": "你是一个助手"},
+    {"role": "user", "content": "你好"}
+  ],
+  "temperature": 0.7,
+  "max_tokens": 2048,
+  "stream": false,
+  "session_id": "my-task-001"
+}</pre>
+                        <div style="font-size:.78rem;color:var(--text-muted);margin-top:6px">
+                            <code class="intg-code">session_id</code> 为可选字段。传入后首次请求自动绑定模型，后续相同 session_id 的请求将路由到同一模型（1小时过期）。不传则按正常路由逻辑处理。
+                        </div>
+                        </div>
+                    </section>
+
+                    <section class="intg-section">
+                        <h4 class="intg-title">响应格式</h4>
+                        <div class="intg-code-block">
+                            <div class="intg-code-header"><span>非流式响应</span></div>
+                            <pre class="intg-pre">{
+  "id": "chatcmpl-xxx",
+  "object": "chat.completion",
+  "model": "gemini-2.5-flash",
+  "choices": [{
+    "index": 0,
+    "message": {"role": "assistant", "content": "你好！"},
+    "finish_reason": "stop"
+  }],
+  "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+  "proxy_info": {
+    "provider": "google",
+    "trace_id": "a1b2c3d4e5f6",
+    "latency_ms": 1230.5,
+    "route_strategy": "priority",
+    "session_id": "my-task-001",
+    "bound_model": "google:gemini-2.5-flash"
+  }
+}</pre>
+                        </div>
+                        <div class="intg-code-block" style="margin-top:12px">
+                            <div class="intg-code-header"><span>流式响应（SSE，最后一条 chunk）</span></div>
+                            <pre class="intg-pre">{
+  "id": "chatcmpl-xxx",
+  "object": "chat.completion.chunk",
+  "model": "gemini-2.5-flash",
+  "choices": [{
+    "index": 0,
+    "delta": {},
+    "finish_reason": "stop"
+  }],
+  "proxy_info": {
+    "provider": "google",
+    "trace_id": "a1b2c3d4e5f6",
+    "latency_ms": 1230.5,
+    "route_strategy": "priority",
+    "session_id": "my-task-001",
+    "bound_model": "google:gemini-2.5-flash"
+  }
+}</pre>
+                        </div>
+                        <div style="font-size:.78rem;color:var(--text-muted);margin-top:8px">
+                            <code class="intg-code">proxy_info</code> 为 model-proxy 附加的路由元数据（非流式直接返回，流式在最后一条 chunk 中返回）：
+                        </div>
+                        <table class="intg-table" style="margin-top:6px">
+                            <tr><td class="intg-label"><code class="intg-code">provider</code></td><td>实际处理请求的厂商 ID</td></tr>
+                            <tr><td class="intg-label"><code class="intg-code">trace_id</code></td><td>请求追踪 ID，可用于日志关联排障</td></tr>
+                            <tr><td class="intg-label"><code class="intg-code">latency_ms</code></td><td>端到端推理耗时（毫秒）</td></tr>
+                            <tr><td class="intg-label"><code class="intg-code">route_strategy</code></td><td>路由策略：direct / priority / round_robin / fallback</td></tr>
+                            <tr><td class="intg-label"><code class="intg-code">session_id</code></td><td>传入的会话 ID（未传入时不返回此字段）</td></tr>
+                            <tr><td class="intg-label"><code class="intg-code">bound_model</code></td><td>当前 session_id 绑定的模型，格式 <code class="intg-code">provider:model</code>（未绑定时不返回）</td></tr>
+                        </table>
+                    </section>
+
+                    <section class="intg-section">
+                        <h4 class="intg-title">Tool Calling（工具调用）</h4>
+                        <div class="intg-code-block">
+                            <div class="intg-code-header"><span>请求示例</span><button class="btn btn-ghost" style="padding:1px 6px;font-size:0.65rem" onclick="copyCodeBlock(this)">复制</button></div>
+                            <pre class="intg-pre">{
+  "model": "auto",
+  "messages": [{"role": "user", "content": "北京天气怎么样"}],
+  "tools": [{
+    "type": "function",
+    "function": {
+      "name": "get_weather",
+      "description": "获取指定城市的天气",
+      "parameters": {
+        "type": "object",
+        "properties": {"city": {"type": "string"}},
+        "required": ["city"]
+      }
+    }
+  }]
+}</pre>
+                        </div>
+                        <div style="font-size:0.75rem;color:var(--text-muted);margin-top:6px">并非所有模型都支持 tool calling，可通过 <code class="intg-code">GET /v1/models</code> 查看 <code>tool_calling</code> 字段。</div>
+                    </section>
+
+                    <section class="intg-section">
+                        <h4 class="intg-title">代码示例</h4>
+
+                        <div class="intg-code-block" style="margin-bottom:12px">
+                            <div class="intg-code-header"><span>Python (OpenAI SDK)</span><button class="btn btn-ghost" style="padding:1px 6px;font-size:0.65rem" onclick="copyCodeBlock(this)">复制</button></div>
+                            <pre class="intg-pre" id="intg-python-code"></pre>
+                        </div>
+
+                        <div class="intg-code-block" style="margin-bottom:12px">
+                            <div class="intg-code-header"><span>curl</span><button class="btn btn-ghost" style="padding:1px 6px;font-size:0.65rem" onclick="copyCodeBlock(this)">复制</button></div>
+                            <pre class="intg-pre" id="intg-curl-code"></pre>
+                        </div>
+
+                        <div class="intg-code-block">
+                            <div class="intg-code-header"><span>JavaScript / TypeScript</span><button class="btn btn-ghost" style="padding:1px 6px;font-size:0.65rem" onclick="copyCodeBlock(this)">复制</button></div>
+                            <pre class="intg-pre" id="intg-js-code"></pre>
+                        </div>
+                    </section>
+
+                    <section class="intg-section">
+                        <h4 class="intg-title">会话模型绑定（Session Affinity）</h4>
+                        <p style="font-size:.82rem;color:var(--text-muted);margin-bottom:8px">
+                            通过 <code class="intg-code">session_id</code> 参数，可以让同一会话内的所有请求使用相同的模型，确保对话连贯性。
+                        </p>
+                        <table class="intg-table">
+                            <tr><td class="intg-label">首次请求</td><td>携带 <code class="intg-code">session_id</code>，正常路由选模型，成功后自动绑定</td></tr>
+                            <tr><td class="intg-label">后续请求</td><td>携带相同 <code class="intg-code">session_id</code>，<b>优先</b>调用绑定的模型</td></tr>
+                            <tr><td class="intg-label">绑定模型失败</td><td>自动降级到正常路由重试其他模型，成功后更新绑定</td></tr>
+                            <tr><td class="intg-label">绑定过期</td><td>1 小时后自动失效，下次请求重新路由并绑定</td></tr>
+                            <tr><td class="intg-label">不传 session_id</td><td>按正常路由逻辑处理（auto / 指定模型）</td></tr>
+                            <tr><td class="intg-label">管理 API</td><td><code class="intg-code">GET /api/session-bindings</code> 查看 | <code class="intg-code">DELETE /api/session-bindings/clear</code> 重置</td></tr>
+                        </table>
+                    </section>
+
+                    <section class="intg-section">
+                        <h4 class="intg-title">错误码</h4>
+                        <table class="intg-table">
+                            <tr><td class="intg-label">413</td><td>请求 payload 超出目标模型的大小限制（自动路由时会尝试切换其他模型）</td></tr>
+                            <tr><td class="intg-label">429</td><td>模型额度用尽（指定模型时）或全部限流</td></tr>
+                            <tr><td class="intg-label">404</td><td>指定的模型不存在或未启用</td></tr>
+                            <tr><td class="intg-label">503</td><td>所有模型均不可用（未配置或全部熔断）</td></tr>
+                            <tr><td class="intg-label">500</td><td>推理服务内部错误</td></tr>
+                        </table>
+                    </section>
+
+                    <section class="intg-section">
+                        <h4 class="intg-title">Payload 大小自适应</h4>
+                        <p style="font-size:.82rem;color:var(--text-muted);margin-bottom:8px">
+                            model-proxy 内置动态 payload 上限检测机制。当某模型返回 <code class="intg-code">413 Payload Too Large</code> 时，
+                            自动记录该模型的 payload 上限，后续请求会根据 payload 大小跳过超限模型。
+                        </p>
+                        <table class="intg-table">
+                            <tr><td class="intg-label">触发条件</td><td>模型厂商返回 HTTP 413</td></tr>
+                            <tr><td class="intg-label">行为</td><td>记录触发 413 的 payload 大小为该模型上限；相同/更大 payload 自动跳过该模型</td></tr>
+                            <tr><td class="intg-label">收敛</td><td>更小的 payload 再次 413 → 上限自动下调；成功处理更大 payload → 自动清除限制</td></tr>
+                            <tr><td class="intg-label">auto 模式</td><td>自动切换到 payload 上限更高的其他模型，对调用方透明</td></tr>
+                            <tr><td class="intg-label">管理 API</td><td><code class="intg-code">GET /api/payload-limits</code> 查看 | <code class="intg-code">DELETE /api/payload-limits/clear</code> 重置</td></tr>
+                        </table>
+                        <p style="font-size:.78rem;color:var(--text-muted);margin-top:6px">
+                            持久化到 <code class="intg-code">data/payload_limits.yaml</code>，服务重启后自动加载。
+                        </p>
+                    </section>
+
+                    <section class="intg-section">
+                        <h4 class="intg-title">第三方平台配置参考</h4>
+                        <table class="intg-table">
+                            <tr><td class="intg-label">OpenClaw</td><td>Provider baseUrl 设为 <code class="intg-code" id="intg-openclaw-url"></code>，apiKey 填 <code class="intg-code">"unused"</code>，api 选 <code class="intg-code">"openai-completions"</code></td></tr>
+                            <tr><td class="intg-label">LobeChat</td><td>设置 → 语言模型 → OpenAI → API 代理地址填 <code class="intg-code" id="intg-lobe-url"></code>，API Key 任意</td></tr>
+                            <tr><td class="intg-label">ChatGPT-Next-Web</td><td>设置 → 自定义接口 → Base URL 填 <code class="intg-code" id="intg-next-url"></code></td></tr>
+                            <tr><td class="intg-label">任何 OpenAI SDK</td><td><code class="intg-code">OpenAI(base_url="<span class="intg-dynamic-url"></span>", api_key="unused")</code></td></tr>
+                        </table>
+                    </section>
                 </div>
             </div>
         </div>
@@ -627,7 +910,9 @@
         </div>
     </div>
 
+    <!-- region JavaScript 主逻辑 -->
     <script>
+        // --- HTTP 与鉴权 ---
         const API = '';
         let currentPriorityTarget = null;
 
@@ -659,18 +944,20 @@
             document.getElementById('panel-' + name).classList.add('active');
             location.hash = name;
             if (name === 'routing') loadRoutingLog();
+            if (name === 'memory') loadMemory();
             if (name === 'logs') startLogPolling();
             else stopLogPolling();
         }
 
         // --- Toast 通知 ---
-        function toast(msg, type = 'info') {
+        function toast(msg, type = 'info', persistent = false) {
             const container = document.getElementById('toast-container');
             const el = document.createElement('div');
             el.className = 'toast ' + type;
             el.textContent = msg;
             container.appendChild(el);
-            setTimeout(() => el.remove(), 3000);
+            if (!persistent) setTimeout(() => el.remove(), 3000);
+            return el;
         }
 
         // --- 弹窗 ---
@@ -696,25 +983,28 @@
                     return;
                 }
                 container.innerHTML = decisions.map(d => {
-                    const strategyColor = d.strategy.includes('快速') ? 'var(--accent-green)' :
-                                          d.strategy.includes('LLM') ? 'var(--accent-blue)' :
-                                          d.strategy.includes('缓存') ? 'var(--accent-purple)' : 'var(--accent-yellow)';
+                    const strategy = escapeHtml(d.strategy || '');
+                    const strategyColor = strategy.includes('快速') ? 'var(--accent-green)' :
+                                          strategy.includes('LLM') ? 'var(--accent-blue)' :
+                                          strategy.includes('缓存') ? 'var(--accent-purple)' : 'var(--accent-yellow)';
                     const cachedTag = d.cached ? '<span style="font-size:0.65rem;padding:1px 6px;border-radius:8px;background:rgba(139,92,246,0.12);color:var(--accent-purple)">⚡ 缓存</span>' : '';
+                    const selected = escapeHtml(d.selected || '-');
                     const candidates = (d.candidates || []).map(c => {
+                        const ce = escapeHtml(c);
                         const isSelected = d.selected && d.selected.endsWith(c);
-                        return `<span style="font-size:0.7rem;padding:2px 6px;border-radius:6px;background:${isSelected ? 'rgba(16,185,129,0.15)' : 'rgba(100,116,139,0.1)'};color:${isSelected ? 'var(--accent-green)' : 'var(--text-muted)'};font-weight:${isSelected ? '600' : '400'}">${c}</span>`;
+                        return `<span style="font-size:0.7rem;padding:2px 6px;border-radius:6px;background:${isSelected ? 'rgba(16,185,129,0.15)' : 'rgba(100,116,139,0.1)'};color:${isSelected ? 'var(--accent-green)' : 'var(--text-muted)'};font-weight:${isSelected ? '600' : '400'}">${ce}</span>`;
                     }).join(' ');
                     return `<div style="padding:12px;background:var(--bg-primary);border-radius:8px;margin-bottom:8px;border:1px solid var(--border)">
                         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
                             <div style="display:flex;align-items:center;gap:8px">
-                                <span style="font-size:0.75rem;font-weight:600;color:${strategyColor}">${d.strategy}</span>
+                                <span style="font-size:0.75rem;font-weight:600;color:${strategyColor}">${strategy}</span>
                                 ${cachedTag}
                             </div>
-                            <span style="font-size:0.7rem;color:var(--text-muted)">${d.timestamp || ''}</span>
+                            <span style="font-size:0.7rem;color:var(--text-muted)">${escapeHtml(d.timestamp || '')}</span>
                         </div>
                         <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
                             <span style="font-size:0.7rem;color:var(--text-muted)">选择:</span>
-                            <span style="font-size:0.8rem;font-weight:600;color:var(--accent-green)">${d.selected || '-'}</span>
+                            <span style="font-size:0.8rem;font-weight:600;color:var(--accent-green)">${selected}</span>
                         </div>
                         ${d.user_hint ? `<div style="font-size:0.7rem;color:var(--text-secondary);margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">📝 ${escapeHtml(d.user_hint)}</div>` : ''}
                         <div style="display:flex;gap:4px;flex-wrap:wrap">${candidates}</div>
@@ -765,6 +1055,13 @@
                     breakerMap = bkData.breakers || {};
                 } catch(e) {}
 
+                let payloadLimits = {};
+                try {
+                    const plResp = await apiFetch(API + '/api/payload-limits');
+                    const plData = await plResp.json();
+                    payloadLimits = plData.limits || {};
+                } catch(e) {}
+
                 grid.innerHTML = data.stats.map(s => {
                     const pct = s.rpd_limit > 0 ? (s.today_requests / s.rpd_limit * 100) : 0;
                     const color = pct > 80 ? 'red' : pct > 50 ? 'yellow' : 'green';
@@ -778,14 +1075,14 @@
                     const remainStr = remaining > 3600 ? Math.round(remaining/3600) + 'h' : remaining > 60 ? Math.round(remaining/60) + 'min' : remaining + 's';
                     const statusText = isBroken ? '🔥 熔断中（' + breakerRemainStr + '后恢复）' : is429 ? '🚫 429限流（' + remainStr + '后恢复）' : (s.available ? '● 可用' : '● 不可用');
                     const borderStyle = isBroken ? 'border-left:3px solid #e74c3c' : is429 ? 'border-left:3px solid var(--accent-red)' : '';
-                    const unblockBtn = is429 ? `<button class="btn btn-ghost btn-sm" style="font-size:0.65rem;margin-top:4px" onclick="unblock429('${s.provider}','${s.model}')">🔓 立即解除</button>` : '';
-                    const resetBreakerBtn = isBroken ? `<button class="btn btn-ghost btn-sm" style="font-size:0.65rem;margin-top:4px;color:#e74c3c" onclick="resetBreaker('${s.provider}')">⚡ 重置熔断</button>` : '';
+                    const unblockBtn = is429 ? `<button class="btn btn-ghost btn-sm" style="font-size:0.65rem;margin-top:4px" onclick="unblock429('${escapeHtml(s.provider)}','${escapeHtml(s.model)}')">🔓 立即解除</button>` : '';
+                    const resetBreakerBtn = isBroken ? `<button class="btn btn-ghost btn-sm" style="font-size:0.65rem;margin-top:4px;color:#e74c3c" onclick="resetBreaker('${escapeHtml(s.provider)}')">⚡ 重置熔断</button>` : '';
                     const cap = capMap[s.model];
                     const capHtml = cap ? buildCapBadges(cap) : '';
                     return `<div class="stat-card" style="${borderStyle}">
                         <div class="model-header">
-                            <span class="model-name">${s.model}</span>
-                            <span class="provider-tag">${s.provider}</span>
+                            <span class="model-name">${escapeHtml(s.model)}</span>
+                            <span class="provider-tag">${escapeHtml(s.provider)}</span>
                         </div>
                         <span class="availability ${statusClass}">${statusText}</span>
                         ${unblockBtn}${resetBreakerBtn}
@@ -802,6 +1099,7 @@
                             <div class="stat-item"><span class="label">每日上限</span><span class="value">${s.rpd_limit || '无限制'}</span></div>
                             <div class="stat-item"><span class="label">本分钟</span><span class="value">${s.minute_requests}</span></div>
                             <div class="stat-item"><span class="label">RPM 上限</span><span class="value">${s.rpm_limit || '无限制'}</span></div>
+                            ${(() => { const plKey = s.provider + '/' + s.model; const pl = payloadLimits[plKey]; if (!pl) return ''; const kb = (pl.max_bytes / 1024).toFixed(1); return '<div class="stat-item"><span class="label">Payload 上限</span><span class="value" style="color:var(--accent-yellow)">⚠ ' + kb + ' KB</span></div>'; })()}
                         </div>
                     </div>`;
                 }).join('');
@@ -1023,9 +1321,10 @@
         }
 
         async function loadProviderModels(providerId) {
-            const [catalogResp, capResp] = await Promise.all([
+            const [catalogResp, capResp, plResp] = await Promise.all([
                 apiFetch(API + `/api/catalog/provider/${providerId}/models`),
                 apiFetch(API + `/api/capabilities`).catch(() => null),
+                apiFetch(API + `/api/payload-limits`).catch(() => null),
             ]);
             const data = await catalogResp.json();
             const allModels = data.models || [];
@@ -1041,6 +1340,12 @@
                         capMap[parts.slice(1).join('/')] = val;
                     }
                 }
+            }
+
+            let payloadLimits = {};
+            if (plResp && plResp.ok) {
+                const plData = await plResp.json();
+                payloadLimits = plData.limits || {};
             }
 
             if (allModels.length === 0) {
@@ -1072,10 +1377,11 @@
                             </div>
                             ${capBadgesHtml}
                             ${capSummaryHtml}
-                            <div style="font-size:0.7rem;color:var(--text-muted);margin-top:2px">RPD: ${m.default_rpd || '∞'} | RPM: ${m.default_rpm || '∞'}</div>
+                            <div style="font-size:0.7rem;color:var(--text-muted);margin-top:2px">RPD: ${m.default_rpd || '∞'} | RPM: ${m.default_rpm || '∞'}${(() => { const plKey = providerId + '/' + m.id; const pl = payloadLimits[plKey]; if (!pl) return ''; const kb = (pl.max_bytes / 1024).toFixed(1); return ' | <span style="color:var(--accent-yellow)" title="收到 413 后自动检测的上限（触发 ' + pl.hit_count + ' 次，' + pl.updated_at + '）">⚠ Payload 上限: ' + kb + ' KB</span>'; })()}</div>
                         </div>
                     </div>
                     <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
+                        <button class="btn btn-ghost btn-sm" style="font-size:0.6rem;padding:2px 6px" onclick="event.stopPropagation();testSingleModel('${providerId}','${m.id}')" title="检测此模型的 tool calling、中文、视觉等能力">🔍 测试能力</button>
                         <label class="toggle" onclick="event.stopPropagation()">
                             <input type="checkbox" ${isEnabled ? 'checked' : ''} onchange="toggleModelAndReload('${providerId}','${m.id}',this.checked)">
                             <span class="slider"></span>
@@ -1085,6 +1391,36 @@
             }).join('');
 
             initModelDragAndDrop();
+        }
+
+        async function testSingleModel(providerId, modelId) {
+            const loadingToast = toast(`正在测试 ${modelId} 的能力（约 15-30 秒）...`, 'info', true);
+            try {
+                const resp = await apiFetch(API + `/api/capabilities/test?provider=${providerId}&model=${encodeURIComponent(modelId)}&force=true`, {method: 'POST'});
+                const data = await resp.json();
+                const results = data.results || [];
+                if (results.length > 0) {
+                    const r = results[0];
+                    const caps = [];
+                    if (r.tool_calling) caps.push('工具调用');
+                    if (r.multi_turn_tc) caps.push('多轮对话');
+                    if (r.chinese) caps.push('中文');
+                    if (r.vision) caps.push('视觉');
+                    if (r.json_mode) caps.push('JSON');
+                    if (r.streaming) caps.push('流式');
+                    if (r.reasoning) caps.push('推理');
+                    const capStr = caps.length > 0 ? caps.join('、') : '无特殊能力';
+                    const latStr = r.latency_ms ? `${r.latency_ms}ms` : '-';
+                    toast(`${modelId} 测试完成: ${capStr} | 延迟 ${latStr}`, 'success');
+                } else {
+                    toast(`${modelId} 测试完成（无结果）`, 'info');
+                }
+                loadProviderModels(providerId);
+            } catch(e) {
+                toast(`测试失败: ${e.message}`, 'error');
+            } finally {
+                loadingToast.remove();
+            }
         }
 
         async function toggleModelAndReload(providerId, modelId, enabled) {
@@ -1398,7 +1734,8 @@
         function showGuide(providerId) {
             const meta = providerMeta[providerId] || {};
             document.getElementById('guide-modal-title').textContent = (meta.name || providerId) + ' - 接入说明';
-            document.getElementById('guide-modal-url').innerHTML = meta.url ? `<a href="${meta.url}" target="_blank" style="color:var(--accent-blue);font-size:0.85rem">🔗 ${meta.url}</a>` : '';
+            const safeUrl = meta.url && /^https?:\/\//.test(meta.url) ? escapeHtml(meta.url) : '';
+            document.getElementById('guide-modal-url').innerHTML = safeUrl ? `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer" style="color:var(--accent-blue);font-size:0.85rem">🔗 ${safeUrl}</a>` : '';
             document.getElementById('guide-modal-content').textContent = meta.guide || '暂无接入说明';
             showModal('guide');
         }
@@ -1497,7 +1834,7 @@
                 const currentVal = select.value;
                 select.innerHTML = '<option value="auto">🤖 自动选择模型</option>';
                 data.models.filter(m => m.enabled).forEach(m => {
-                    select.innerHTML += `<option value="${m.id}">[${m.provider}] ${m.id}</option>`;
+                    select.innerHTML += `<option value="${escapeHtml(m.id)}">[${escapeHtml(m.provider)}] ${escapeHtml(m.id)}</option>`;
                 });
                 select.value = currentVal || 'auto';
             } catch(e) {}
@@ -1518,14 +1855,86 @@
                     const bg = isActive ? 'var(--accent-blue)' : 'transparent';
                     const color = isActive ? '#fff' : 'var(--text-primary)';
                     const t = new Date(s.updated_at * 1000).toLocaleString('zh-CN', {month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'});
-                    return '<div onclick="switchSession(\''+s.id+'\')" style="padding:8px 10px;border-radius:8px;margin-bottom:4px;cursor:pointer;background:'+bg+';color:'+color+';transition:all 0.15s">'
-                        + '<div style="font-size:0.82rem;font-weight:'+(isActive?'600':'400')+';overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+escapeHtml(s.title)+'</div>'
+                    return '<div class="session-item" onclick="switchSession(\''+s.id+'\')" style="background:'+bg+';color:'+color+'">'
+                        + '<div style="font-size:0.82rem;font-weight:'+(isActive?'600':'400')+';overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding-right:20px">'+escapeHtml(s.title)+'</div>'
                         + '<div style="font-size:0.65rem;color:'+(isActive?'rgba(255,255,255,0.7)':'var(--text-muted)')+';margin-top:2px;display:flex;justify-content:space-between">'
-                        + '<span>'+s.message_count+' 条</span><span>'+t+'</span></div></div>';
+                        + '<span>'+s.message_count+' 条</span><span>'+t+'</span></div>'
+                        + '<button class="session-delete-btn" onclick="event.stopPropagation();softDeleteSession(\''+s.id+'\')" title="删除会话">&times;</button>'
+                        + '</div>';
                 }).join('');
             } catch(e) {
                 document.getElementById('session-list').innerHTML = '<div style="padding:12px;color:var(--accent-red);font-size:0.8rem">加载失败</div>';
             }
+        }
+
+        async function loadTrashList() {
+            try {
+                const resp = await apiFetch(API + '/api/chat/trash');
+                const data = await resp.json();
+                const list = document.getElementById('trash-list');
+                const sessions = data.sessions || [];
+                if (!sessions.length) {
+                    list.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:0.8rem">回收站为空</div>';
+                    return;
+                }
+                list.innerHTML = sessions.map(s => {
+                    const delDate = new Date(s.deleted_at * 1000).toLocaleString('zh-CN', {month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'});
+                    return '<div class="trash-item">'
+                        + '<div style="font-size:0.82rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-secondary)">'+escapeHtml(s.title)+'</div>'
+                        + '<div style="font-size:0.65rem;color:var(--text-muted);margin-top:2px">'+s.message_count+' 条 · 删除于 '+delDate+' · '+s.expires_in_days+'天后过期</div>'
+                        + '<div class="trash-item-actions">'
+                        + '<button class="trash-restore-btn" onclick="restoreSession(\''+s.id+'\')">恢复</button>'
+                        + '<button class="trash-perm-del-btn" onclick="permanentDeleteSession(\''+s.id+'\')">永久删除</button>'
+                        + '</div></div>';
+                }).join('');
+            } catch(e) {
+                document.getElementById('trash-list').innerHTML = '<div style="padding:12px;color:var(--accent-red);font-size:0.8rem">加载失败</div>';
+            }
+        }
+
+        function switchSessionTab(tab) {
+            const activeBtn = document.getElementById('tab-active-sessions');
+            const trashBtn = document.getElementById('tab-trash-sessions');
+            const sessionList = document.getElementById('session-list');
+            const trashList = document.getElementById('trash-list');
+            if (tab === 'active') {
+                activeBtn.classList.add('active');
+                trashBtn.classList.remove('active');
+                sessionList.style.display = '';
+                trashList.style.display = 'none';
+                loadSessionList();
+            } else {
+                activeBtn.classList.remove('active');
+                trashBtn.classList.add('active');
+                sessionList.style.display = 'none';
+                trashList.style.display = '';
+                loadTrashList();
+            }
+        }
+
+        async function softDeleteSession(sessionId) {
+            await apiFetch(API + '/api/chat/sessions/' + sessionId, {method:'DELETE'});
+            if (sessionId === currentSessionId) {
+                currentSessionId = null;
+                localStorage.removeItem('mp_current_session');
+                document.getElementById('chat-messages').innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:40px 0"><p>会话已移至回收站</p></div>';
+                document.getElementById('chat-title').textContent = '新对话';
+            }
+            loadSessionList();
+            toast('会话已移至回收站', 'success');
+        }
+
+        async function restoreSession(sessionId) {
+            await apiFetch(API + '/api/chat/trash/' + sessionId + '/restore', {method:'POST'});
+            loadTrashList();
+            toast('会话已恢复', 'success');
+        }
+
+        async function permanentDeleteSession(sessionId) {
+            if (!confirm('确认永久删除？此操作不可恢复。')) return;
+            await apiFetch(API + '/api/chat/trash/' + sessionId, {method:'DELETE'});
+            loadTrashList();
+            toast('会话已永久删除', 'success');
         }
 
         async function createNewSession() {
@@ -1557,14 +1966,7 @@
 
         async function deleteCurrentSession() {
             if (!currentSessionId) return;
-            if (!confirm('确认删除当前会话？')) return;
-            await apiFetch(API + '/api/chat/sessions/' + currentSessionId, {method:'DELETE'});
-            currentSessionId = null;
-            localStorage.removeItem('mp_current_session');
-            await loadSessionList();
-            renderSessionMessages([]);
-            document.getElementById('chat-title').textContent = '新对话';
-            updateContextInfo(0, 0);
+            await softDeleteSession(currentSessionId);
         }
 
         async function renameCurrentSession() {
@@ -1693,7 +2095,7 @@
 
         function escapeHtml(text) {
             if (!text) return '';
-            return text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            return text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
         }
 
         // --- 流式发送 ---
@@ -1817,15 +2219,104 @@
         let _logEntries = [];
         let _logTraceFilter = '';
         const LOG_LEVELS = ['DEBUG', 'INFO', 'WARNING', 'ERROR'];
+        let _historyDates = [];
+        let _historyDateIdx = -1;
+        let _historyLoading = false;
+        let _historyExhausted = false;
+        let _historyOffset = 0;
+        let _preserveScroll = false;
 
         function startLogPolling() {
             if (_logTimer) return;
             fetchLogs();
             loadServerLogLevel();
+            _loadHistoryDates();
             _logTimer = setInterval(fetchLogs, 1000);
+
+            const container = document.getElementById('log-container');
+            container.addEventListener('scroll', _onLogScroll);
         }
         function stopLogPolling() {
             if (_logTimer) { clearInterval(_logTimer); _logTimer = null; }
+        }
+
+        async function _loadHistoryDates() {
+            try {
+                const resp = await apiFetch(`${API}/api/logs/history`);
+                const data = await resp.json();
+                if (data.dates) {
+                    _historyDates = data.dates
+                        .filter(d => d.label !== '当前')
+                        .sort((a, b) => b.label.localeCompare(a.label));
+                }
+            } catch (e) {}
+        }
+
+        function _onLogScroll() {
+            const container = document.getElementById('log-container');
+            const nearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100;
+            if (nearBottom && !_historyLoading && !_historyExhausted) {
+                _loadMoreHistory();
+            }
+        }
+
+        function _parseLogLine(line) {
+            const m = line.match(/^(\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}:\d{2},\d{3})\s\[(\w+)\s*\]\s([\w.]+):\s(.*)$/s);
+            if (m) {
+                return { ts: 0, time: m[1], level: m[2], logger: m[3], message: m[4], seq: -1 };
+            }
+            return { ts: 0, time: '', level: 'INFO', logger: '(raw)', message: line, seq: -1 };
+        }
+
+        async function _loadMoreHistory() {
+            if (_historyLoading || _historyExhausted) return;
+            _historyLoading = true;
+            _preserveScroll = true;
+            renderLogEntries();
+            const statusEl = document.getElementById('log-status');
+            statusEl.textContent = '加载历史日志...';
+
+            let added = false;
+            try {
+                if (_historyDateIdx < 0) {
+                    const resp = await apiFetch(`${API}/api/logs/history?date=current&tail=2000`);
+                    const data = await resp.json();
+                    if (data.lines && data.lines.length > 0) {
+                        const parsed = data.lines.map(_parseLogLine);
+                        const existingMsgs = new Set(_logEntries.slice(0, 200).map(e => e.message));
+                        const newEntries = parsed.filter(e => !existingMsgs.has(e.message));
+                        if (newEntries.length > 0) {
+                            _logEntries = newEntries.concat(_logEntries);
+                            added = true;
+                        }
+                    }
+                    _historyDateIdx = 0;
+                } else {
+                    if (_historyDateIdx >= _historyDates.length) {
+                        _historyExhausted = true;
+                        _historyLoading = false;
+                        _preserveScroll = true;
+                        renderLogEntries();
+                        statusEl.textContent = `共 ${_logEntries.length} 条 | 历史已全部加载`;
+                        return;
+                    }
+                    const dateInfo = _historyDates[_historyDateIdx];
+                    const resp = await apiFetch(`${API}/api/logs/history?date=${dateInfo.label}&tail=2000`);
+                    const data = await resp.json();
+                    if (data.lines && data.lines.length > 0) {
+                        const parsed = data.lines.map(_parseLogLine);
+                        _logEntries = parsed.concat(_logEntries);
+                        added = true;
+                    }
+                    _historyDateIdx++;
+                }
+            } catch (e) {
+                console.warn('加载历史日志失败:', e);
+            }
+            _historyLoading = false;
+            if (added) _preserveScroll = true;
+            renderLogEntries();
+            statusEl.textContent = `共 ${_logEntries.length} 条 | seq=${_logSeq}`;
         }
 
         async function fetchLogs() {
@@ -1834,7 +2325,6 @@
                 const data = await resp.json();
                 if (data.entries && data.entries.length > 0) {
                     _logEntries = _logEntries.concat(data.entries);
-                    if (_logEntries.length > 3000) _logEntries = _logEntries.slice(-2000);
                     _logSeq = data.latest_seq;
                     renderLogEntries();
                 }
@@ -1857,8 +2347,11 @@
                 return true;
             });
 
-            const maxRender = 500;
+            const maxRender = Math.min(10000, filtered.length);
             const toRender = filtered.slice(-maxRender).reverse();
+
+            const prevScrollTop = container.scrollTop;
+            const prevScrollHeight = container.scrollHeight;
 
             const fragment = document.createDocumentFragment();
             for (const entry of toRender) {
@@ -1867,32 +2360,50 @@
                 div.innerHTML = formatLogLine(entry);
                 fragment.appendChild(div);
             }
+
+            if (!_historyExhausted && _historyDates.length > 0) {
+                const loadMore = document.createElement('div');
+                loadMore.style.cssText = 'color:var(--accent-blue);font-size:0.7rem;padding:8px 0;text-align:center;cursor:pointer';
+                loadMore.textContent = _historyLoading ? '加载中...' : `↓ 加载更多历史日志（还有 ${Math.max(0, _historyDates.length - _historyDateIdx)} 天）`;
+                loadMore.onclick = () => { if (!_historyLoading) _loadMoreHistory(); };
+                fragment.appendChild(loadMore);
+            } else if (_historyExhausted) {
+                const endHint = document.createElement('div');
+                endHint.style.cssText = 'color:var(--text-muted);font-size:0.65rem;padding:4px 0;text-align:center';
+                endHint.textContent = '── 已到达最早日志 ──';
+                fragment.appendChild(endHint);
+            }
+
             container.innerHTML = '';
             container.appendChild(fragment);
 
-            if (filtered.length > maxRender) {
-                const hint = document.createElement('div');
-                hint.style.cssText = 'color:var(--text-muted);font-size:0.65rem;padding:4px 0;text-align:center';
-                hint.textContent = `已省略 ${filtered.length - maxRender} 条较早日志`;
-                container.appendChild(hint);
-            }
-
-            if (document.getElementById('log-auto-scroll').checked) {
+            if (_preserveScroll) {
+                _preserveScroll = false;
+                container.scrollTop = prevScrollTop;
+            } else if (document.getElementById('log-auto-scroll').checked) {
                 container.scrollTop = 0;
+            } else {
+                const delta = container.scrollHeight - prevScrollHeight;
+                if (delta > 0) container.scrollTop = prevScrollTop;
             }
         }
 
         function formatLogLine(entry) {
-            let msg = escapeHtml(entry.message);
+            let time = entry.time, level = entry.level, logger = entry.logger, rawMsg = entry.message;
+            if (logger === '(file)') {
+                const m = rawMsg.match(/^(\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}:\d{2},\d{3})\s\[(\w+)\s*\]\s([\w.]+):\s(.*)$/s);
+                if (m) { time = m[1]; level = m[2]; logger = m[3]; rawMsg = m[4]; }
+            }
+            let msg = escapeHtml(rawMsg);
             msg = msg.replace(/trace=([a-f0-9]{12})/g, 'trace=<span class="log-trace" onclick="filterByTrace(\'$1\')" style="cursor:pointer" title="点击过滤此 trace">$1</span>');
-            return `<span class="log-time">${entry.time}</span> `
-                 + `<span class="log-level-${entry.level}">[${entry.level.padEnd(7)}]</span> `
-                 + `<span class="log-logger">${escapeHtml(entry.logger)}:</span> `
+            return `<span class="log-time">${time}</span> `
+                 + `<span class="log-level-${level}">[${level.padEnd(7)}]</span> `
+                 + `<span class="log-logger">${escapeHtml(logger)}:</span> `
                  + `<span class="log-msg">${msg}</span>`;
         }
 
         function escapeHtml(s) {
-            return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
         }
 
         function filterByTrace(traceId) {
@@ -1962,6 +2473,9 @@
                 await apiFetch(`${API}/api/logs/clear`, {method:'DELETE'});
                 _logEntries = [];
                 _logSeq = 0;
+                _historyDateIdx = -1;
+                _historyExhausted = false;
+                _historyLoading = false;
                 document.getElementById('log-container').innerHTML = '';
                 document.getElementById('log-status').textContent = '已清空';
                 toast('日志已清空', 'success');
@@ -1970,7 +2484,103 @@
             }
         }
 
+        // --- 接入指南 ---
+        function initIntegrationGuide() {
+            const baseUrl = location.origin + '/v1';
+            const host = location.origin;
+            document.getElementById('intg-base-url').textContent = baseUrl;
+            document.getElementById('intg-openclaw-url').textContent = baseUrl;
+            document.getElementById('intg-lobe-url').textContent = baseUrl;
+            document.getElementById('intg-next-url').textContent = baseUrl;
+            document.querySelectorAll('.intg-dynamic-url').forEach(el => el.textContent = baseUrl);
+
+            document.getElementById('intg-python-code').textContent =
+`from openai import OpenAI
+
+client = OpenAI(
+    base_url="${baseUrl}",
+    api_key="unused",
+)
+
+# 非流式调用
+response = client.chat.completions.create(
+    model="auto",
+    messages=[{"role": "user", "content": "你好"}],
+    extra_body={"session_id": "my-task-001"},  # 可选：会话绑定
+)
+print(response.choices[0].message.content)
+
+# 流式调用
+stream = client.chat.completions.create(
+    model="auto",
+    messages=[{"role": "user", "content": "你好"}],
+    stream=True,
+    extra_body={"session_id": "my-task-001"},
+)
+for chunk in stream:
+    if chunk.choices[0].delta.content:
+        print(chunk.choices[0].delta.content, end="")`;
+
+            document.getElementById('intg-curl-code').textContent =
+`# 非流式
+curl ${baseUrl}/chat/completions \\
+  -H "Content-Type: application/json" \\
+  -H "Authorization: Bearer unused" \\
+  -d '{
+    "model": "auto",
+    "messages": [{"role": "user", "content": "你好"}],
+    "session_id": "my-task-001"
+  }'
+
+# 流式
+curl ${baseUrl}/chat/completions \\
+  -H "Content-Type: application/json" \\
+  -H "Authorization: Bearer unused" \\
+  -d '{
+    "model": "auto",
+    "messages": [{"role": "user", "content": "你好"}],
+    "stream": true,
+    "session_id": "my-task-001"
+  }'`;
+
+            document.getElementById('intg-js-code').textContent =
+`import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "${baseUrl}",
+  apiKey: "unused",
+});
+
+// 非流式（session_id 通过 body 扩展传入）
+const response = await client.chat.completions.create({
+  model: "auto",
+  messages: [{ role: "user", content: "你好" }],
+  session_id: "my-task-001",  // 可选：会话绑定
+} as any);
+console.log(response.choices[0].message.content);
+
+// 流式
+const stream = await client.chat.completions.create({
+  model: "auto",
+  messages: [{ role: "user", content: "你好" }],
+  stream: true,
+  session_id: "my-task-001",
+} as any);
+for await (const chunk of stream) {
+  process.stdout.write(chunk.choices[0]?.delta?.content || "");
+}`;
+        }
+
+        function copyText(text) {
+            navigator.clipboard.writeText(text).then(() => toast('已复制', 'success'));
+        }
+        function copyCodeBlock(btn) {
+            const pre = btn.closest('.intg-code-block').querySelector('.intg-pre');
+            navigator.clipboard.writeText(pre.textContent).then(() => toast('代码已复制', 'success'));
+        }
+
         // --- 初始化 ---
+        initIntegrationGuide();
         loadUsage();
         loadProviderCards();
         loadConfig();
@@ -1995,6 +2605,95 @@
                 }
             }
         })();
+
+        // --- Memory 管理 ---
+        async function loadMemory() {
+            try {
+                const [statsResp, entriesResp] = await Promise.all([
+                    apiFetch('/api/memory/stats'),
+                    apiFetch('/api/memory/entries?limit=100')
+                ]);
+                const stats = await statsResp.json();
+                const data = await entriesResp.json();
+
+                document.getElementById('memory-stats').innerHTML =
+                    `共 <strong>${stats.total_entries}</strong> 条记忆 | ` +
+                    Object.entries(stats.by_type || {}).map(([k,v]) => `${k}: ${v}`).join(', ') +
+                    ` | 活跃会话: ${stats.active_sessions}`;
+
+                const list = document.getElementById('memory-list');
+                const empty = document.getElementById('memory-empty');
+                if (!data.entries || data.entries.length === 0) {
+                    list.innerHTML = '';
+                    empty.style.display = 'block';
+                    return;
+                }
+                empty.style.display = 'none';
+                list.innerHTML = data.entries.map(e => {
+                    const typeLabel = {preference:'偏好',semantic:'知识',episodic:'经验'}[e.type] || e.type;
+                    const date = new Date(e.created_at * 1000).toLocaleString('zh-CN', {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+                    const imp = (e.importance * 100).toFixed(0);
+                    return `<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--bg-secondary);border-radius:8px;border:1px solid var(--border)">
+                        <span style="font-size:0.7rem;padding:2px 6px;border-radius:4px;background:var(--accent);color:#fff;white-space:nowrap">${typeLabel}</span>
+                        <span style="flex:1;font-size:0.88rem">${e.content}</span>
+                        <span style="font-size:0.72rem;color:var(--text-muted);white-space:nowrap">${date}</span>
+                        <span style="font-size:0.72rem;color:var(--text-muted)" title="重要性">⚡${imp}%</span>
+                        <button onclick="deleteMemory('${e.id}')" style="border:none;background:none;cursor:pointer;color:var(--text-muted);font-size:1rem" title="删除">×</button>
+                    </div>`;
+                }).join('');
+            } catch (err) {
+                console.error('loadMemory error:', err);
+            }
+        }
+
+        async function addMemory() {
+            const type = document.getElementById('memory-add-type').value;
+            const content = document.getElementById('memory-add-content').value.trim();
+            if (!content) { toast('请输入记忆内容', 'warning'); return; }
+            try {
+                await apiFetch('/api/memory/add', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({type, content}) });
+                document.getElementById('memory-add-content').value = '';
+                toast('记忆已添加', 'success');
+                loadMemory();
+            } catch (err) { toast('添加失败: ' + err.message, 'error'); }
+        }
+
+        async function deleteMemory(id) {
+            if (!confirm('确定删除这条记忆？')) return;
+            try {
+                await apiFetch('/api/memory/entries/' + id, { method: 'DELETE' });
+                toast('已删除', 'success');
+                loadMemory();
+            } catch (err) { toast('删除失败: ' + err.message, 'error'); }
+        }
+
+        async function exportMemory() {
+            try {
+                const resp = await apiFetch('/api/memory/entries?limit=9999');
+                const data = await resp.json();
+                const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url; a.download = 'model_proxy_memory_' + new Date().toISOString().slice(0,10) + '.json';
+                a.click(); URL.revokeObjectURL(url);
+                toast('导出成功', 'success');
+            } catch (err) { toast('导出失败: ' + err.message, 'error'); }
+        }
+
+        async function importMemory(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            try {
+                const text = await file.text();
+                const data = JSON.parse(text);
+                await apiFetch('/api/memory/import', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(data) });
+                toast(`导入成功`, 'success');
+                loadMemory();
+            } catch (err) { toast('导入失败: ' + err.message, 'error'); }
+            event.target.value = '';
+        }
     </script>
+    <!-- endregion JavaScript 主逻辑 -->
 </body>
+<!-- endregion 页面框架 -->
 </html>

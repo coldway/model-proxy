@@ -118,22 +118,25 @@ settings:
   log_level: "warning"   # 生产环境降低日志等级
 ```
 
-### 2. 使用 Gunicorn + Uvicorn Workers（Linux/macOS）
+### 2. 使用 Uvicorn 单 Worker 运行（Linux/macOS/Windows）
 
-生产环境建议使用 Gunicorn 管理多 Worker 进程：
+> **⚠️ 重要：** 本项目为**单 Worker 进程设计**，所有状态（dispatcher、rate_limiter、history、session 等）以进程内单例持有。
+> 不支持 `uvicorn --workers N` 或 `gunicorn --workers N` 多进程模式（会导致状态不一致）。
+> 如需水平扩展，应在反向代理层做负载均衡（多实例各自独立），或改用外部存储（Redis 等）管理共享状态。
 
 ```bash
-pip install gunicorn
+# 生产环境推荐：单 worker + 反向代理（Nginx/Caddy）
+uvicorn main:app --host 0.0.0.0 --port 8000 --workers 1
 
+# 或使用 Gunicorn 管理单 Worker（支持优雅重启）
+pip install gunicorn
 gunicorn main:app \
-  --workers 4 \
+  --workers 1 \
   --worker-class uvicorn.workers.UvicornWorker \
   --bind 0.0.0.0:8000 \
   --access-logfile - \
   --error-logfile -
 ```
-
-> Windows 不支持 Gunicorn，可直接使用 Uvicorn：`uvicorn main:app --host 0.0.0.0 --port 8000`
 
 ### 3. 反向代理（Nginx）
 

@@ -46,12 +46,25 @@ class AppSettings(BaseModel):
     auto_switch: bool = True
     log_level: str = "info"
     admin_token: str = Field(default="", description="管理面板认证令牌，为空则不启用认证")
+    api_token: str = Field(default="", description="OpenAI 兼容 API (/v1/*) 认证令牌，为空则不启用；客户端通过 api_key 传入")
     route_cache_ttl: int = Field(default=600, description="路由缓存有效期（秒）")
     breaker_threshold: int = Field(default=3, description="连续失败 N 次触发厂商熔断")
     breaker_cooldown: int = Field(default=300, description="熔断冷却时间（秒）")
     max_context_tokens: int = Field(default=8000, description="会话上下文最大 token 数")
     max_sessions: int = Field(default=50, description="最大会话数")
     probe_interval: int = Field(default=5, description="能力探测间隔（秒）")
+    request_history_max_records: int = Field(
+        default=2000,
+        description="内存中保留的推理请求历史条数上限（影响 /api/history 与运维统计窗口）",
+    )
+    cors_origins: str = Field(
+        default="",
+        description="CORS 允许的 Origin，逗号分隔；空表示不启用跨域（仅同源）；* 表示允许任意来源",
+    )
+    session_bind_ttl: int = Field(
+        default=3600,
+        description="会话模型绑定的 TTL（秒），过期后绑定自动失效",
+    )
 
 
 class AppConfig(BaseModel):
@@ -108,6 +121,18 @@ class ChatMessage(BaseModel):
         return v
 
 
+class ResponseFormat(BaseModel):
+    """结构化输出格式控制（兼容 OpenAI response_format）"""
+    type: str = Field(
+        default="text",
+        description="输出格式：text（默认）、json_object（强制 JSON）、json_schema（严格 schema）",
+    )
+    json_schema: dict[str, Any] | None = Field(
+        default=None,
+        description="当 type=json_schema 时，指定 JSON Schema 定义",
+    )
+
+
 class ChatCompletionRequest(BaseModel):
     model: str = "auto"
     messages: list[ChatMessage] = Field(..., min_length=1)
@@ -116,6 +141,14 @@ class ChatCompletionRequest(BaseModel):
     stream: bool = False
     tools: list[ToolDefinition] | None = None
     tool_choice: str | dict | None = None
+    response_format: ResponseFormat | None = Field(
+        default=None,
+        description="输出格式控制：{type: 'json_object'} 强制 JSON 输出，{type: 'json_schema', json_schema: {...}} 严格 schema 约束",
+    )
+    session_id: str | None = Field(
+        default=None,
+        description="会话标识：首次请求成功后自动绑定模型，后续携带相同 session_id 的请求将路由到同一模型",
+    )
 
 
 class Choice(BaseModel):
@@ -130,6 +163,16 @@ class UsageInfo(BaseModel):
     total_tokens: int = 0
 
 
+class ProxyInfo(BaseModel):
+    """model-proxy 附加路由信息，帮助上游服务追踪实际调用详情"""
+    provider: str = Field(description="实际处理请求的厂商 ID")
+    trace_id: str = Field(default="", description="请求追踪 ID，用于日志关联")
+    latency_ms: float = Field(default=0, description="端到端推理耗时（毫秒）")
+    route_strategy: str = Field(default="", description="路由策略：direct / priority / round_robin / fallback")
+    session_id: str | None = Field(default=None, description="会话绑定 ID（传入 session_id 时返回，确认绑定关系）")
+    bound_model: str | None = Field(default=None, description="当前 session_id 绑定的模型（仅会话绑定时返回）")
+
+
 class ChatCompletionResponse(BaseModel):
     id: str
     object: str = "chat.completion"
@@ -137,6 +180,18 @@ class ChatCompletionResponse(BaseModel):
     model: str
     choices: list[Choice]
     usage: UsageInfo = Field(default_factory=UsageInfo)
+    proxy_info: ProxyInfo | None = Field(default=None, description="model-proxy 路由元数据")
+
+
+class ModelCapabilities(BaseModel):
+    """已探测的模型能力"""
+    streaming: bool = False
+    reasoning: bool = False
+    multi_turn_tc: bool = False
+    chinese: bool = False
+    vision: bool = False
+    json_mode: bool = False
+    latency_ms: float = Field(default=99999, description="探测延迟（毫秒）")
 
 
 class ModelInfo(BaseModel):
@@ -146,6 +201,7 @@ class ModelInfo(BaseModel):
     priority: int
     rate_limit: RateLimit | None = None
     tool_calling: bool = False
+    capabilities: ModelCapabilities = Field(default_factory=ModelCapabilities)
 
 
 class ModelListResponse(BaseModel):

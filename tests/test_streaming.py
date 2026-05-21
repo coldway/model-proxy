@@ -32,19 +32,26 @@ class TestStreamGenerator:
         assert chunks[-1].strip() == "data: [DONE]"
 
     @pytest.mark.asyncio
-    async def test_error_stream_has_error_finish_reason(self):
+    async def test_error_stream_has_server_error_payload(self):
         chunks = []
         async for line in _stream_generator("test-model", _error_iter()):
             chunks.append(line)
         finish_reasons = []
+        error_frames = []
         for c in chunks:
             if c.startswith("data: {"):
                 d = json.loads(c.removeprefix("data: ").strip())
                 fr = d.get("choices", [{}])[0].get("finish_reason")
                 if fr is not None:
                     finish_reasons.append(fr)
+                if "error" in d:
+                    error_frames.append(d["error"])
         assert "error" in finish_reasons
         assert "stop" not in finish_reasons
+        assert len(error_frames) == 1
+        assert error_frames[0]["type"] == "server_error"
+        assert error_frames[0]["code"] is None
+        assert "重试" in error_frames[0]["message"]
         assert chunks[-1].strip() == "data: [DONE]"
 
     @pytest.mark.asyncio

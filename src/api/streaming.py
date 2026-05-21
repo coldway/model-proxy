@@ -4,19 +4,26 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 import uuid
 from typing import AsyncIterator
 
 from starlette.responses import StreamingResponse
 
-from src.models.schemas import ChatCompletionRequest, ChatMessage
+from src.models.schemas import ProxyInfo
+
+logger = logging.getLogger(__name__)
 
 
-def create_stream_response(model: str, content_iterator: AsyncIterator[str]) -> StreamingResponse:
+def create_stream_response(
+    model: str,
+    content_iterator: AsyncIterator[dict | str],
+    proxy_info: ProxyInfo | None = None,
+) -> StreamingResponse:
     """创建 SSE 流式响应"""
     return StreamingResponse(
-        _stream_generator(model, content_iterator),
+        _stream_generator(model, content_iterator, proxy_info),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -26,16 +33,19 @@ def create_stream_response(model: str, content_iterator: AsyncIterator[str]) -> 
     )
 
 
-async def _stream_generator(model: str, content_iterator: AsyncIterator[str]) -> AsyncIterator[str]:
-    """生成 SSE 格式的流式数据"""
-    import logging
-    logger = logging.getLogger(__name__)
+async def _stream_generator(
+    model: str,
+    content_iterator: AsyncIterator[dict | str],
+    proxy_info: ProxyInfo | None = None,
+) -> AsyncIterator[str]:
+    """生成 SSE 格式的流式数据。支持 dict delta（保留 tool_calls 等字段）和纯 str 兼容。"""
     chat_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
     created = int(time.time())
 
     has_error = False
     try:
         async for chunk in content_iterator:
+            delta = chunk if isinstance(chunk, dict) else {"content": chunk}
             data = {
                 "id": chat_id,
                 "object": "chat.completion.chunk",
@@ -43,23 +53,29 @@ async def _stream_generator(model: str, content_iterator: AsyncIterator[str]) ->
                 "model": model,
                 "choices": [{
                     "index": 0,
-                    "delta": {"content": chunk},
+                    "delta": delta,
                     "finish_reason": None,
                 }],
             }
             yield f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
     except Exception as e:
         has_error = True
-        logger.error(f"流式生成异常: {e}")
+        logger.error("流式生成异常: %s", e, exc_info=True)
         error_data = {
-            "id": chat_id, "object": "chat.completion.chunk", "created": created,
+            "error": {
+                "message": "流式响应中断，请稍后重试",
+                "type": "server_error",
+                "code": None,
+            },
+            "id": chat_id,
+            "object": "chat.completion.chunk",
+            "created": created,
             "model": model,
             "choices": [{
                 "index": 0,
                 "delta": {},
                 "finish_reason": "error",
             }],
-            "error": {"message": "流式响应中断"},
         }
         yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
 
@@ -75,5 +91,7 @@ async def _stream_generator(model: str, content_iterator: AsyncIterator[str]) ->
                 "finish_reason": "stop",
             }],
         }
+        if proxy_info:
+            end_data["proxy_info"] = proxy_info.model_dump()
         yield f"data: {json.dumps(end_data, ensure_ascii=False)}\n\n"
     yield "data: [DONE]\n\n"

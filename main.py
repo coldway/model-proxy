@@ -3,16 +3,22 @@
 
 from __future__ import annotations
 
+import asyncio
+import hmac
 import logging
 import sys
+import uuid
 from contextlib import asynccontextmanager
+from logging.handlers import TimedRotatingFileHandler
+from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
+from starlette.middleware.cors import CORSMiddleware
 
 from src.api.routes import init_routes, router
-from src.api.ui import UI_HTML
+from src.api.ui import get_ui_html
 from src.config.capability_tester import CapabilityCache, CapabilityTester
 from src.config.catalog import CatalogManager
 from src.config.manager import ConfigManager
@@ -27,16 +33,40 @@ from src.scheduler.dispatcher import Dispatcher
 from src.scheduler.history import RequestHistory
 from src.scheduler.rate_limiter import RateLimiter
 
-from src.api.log_buffer import install as install_log_buffer
+from src.api.log_buffer import install as install_log_buffer, preload_from_file as preload_logs
+
+_LOG_DIR = Path("logs")
+_LOG_FMT = "%(asctime)s [%(levelname)-7s] %(name)s: %(message)s"
+
+_log_handlers: list[logging.Handler] = [logging.StreamHandler(sys.stdout)]
+try:
+    _LOG_DIR.mkdir(exist_ok=True)
+    _file_handler = TimedRotatingFileHandler(
+        _LOG_DIR / "app.log",
+        when="midnight",
+        backupCount=30,
+        encoding="utf-8",
+    )
+    _file_handler.setFormatter(logging.Formatter(_LOG_FMT))
+    _log_handlers.append(_file_handler)
+except OSError:
+    pass
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)],
+    format=_LOG_FMT,
+    handlers=_log_handlers,
 )
+logging.getLogger("watchfiles").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 install_log_buffer(max_records=2000)
+try:
+    _preloaded = preload_logs(_LOG_DIR / "app.log", max_lines=500)
+    if _preloaded:
+        logger.info("从日志文件预加载 %d 条历史记录到 UI 缓冲", _preloaded)
+except OSError:
+    pass
 
 
 def create_app() -> FastAPI:
@@ -48,13 +78,18 @@ def create_app() -> FastAPI:
     logging.getLogger().setLevel(log_level)
 
     rate_limiter = RateLimiter()
-    history = RequestHistory(persist=True)
+    history = RequestHistory(
+        persist=True,
+        max_memory_records=settings.request_history_max_records,
+    )
     capability_cache = CapabilityCache()
     dispatcher = Dispatcher(
         rate_limiter, capability_cache=capability_cache, history=history,
+        catalog=catalog,
         route_cache_ttl=settings.route_cache_ttl,
         breaker_threshold=settings.breaker_threshold,
         breaker_cooldown=settings.breaker_cooldown,
+        session_bind_ttl=settings.session_bind_ttl,
     )
 
     # 注册各厂商 Provider（根据 API Key 是否存在决定是否注册）
@@ -74,7 +109,7 @@ def create_app() -> FastAPI:
         api_key = config_manager.get_api_key(name)
         if api_key:
             dispatcher.register_provider(name, factory(api_key))
-            logger.info(f"已注册 {name} 厂商")
+            logger.info("已注册 %s 厂商", name)
 
     if catalog.is_provider_enabled("cursor"):
         dispatcher.register_provider("cursor", CursorProvider())
@@ -87,50 +122,145 @@ def create_app() -> FastAPI:
         history, catalog, provider_factories, capability_tester,
     )
 
+    _PERIODIC_FLUSH_INTERVAL = 60
+
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
+        def _sync_flush_all():
+            rate_limiter.flush()
+            history.flush()
+            catalog.flush()
+            dispatcher.payload_tracker.flush()
+
+        async def _periodic_flush():
+            while True:
+                await asyncio.sleep(_PERIODIC_FLUSH_INTERVAL)
+                try:
+                    await asyncio.to_thread(_sync_flush_all)
+                except Exception as exc:
+                    logger.warning("周期性刷盘异常: %s", exc)
+
+        async def _periodic_cache_purge():
+            while True:
+                await asyncio.sleep(dispatcher._route_cache_ttl)
+                try:
+                    await dispatcher.purge_expired_cache()
+                except Exception as exc:
+                    logger.warning("路由缓存清理异常: %s", exc)
+
+        flush_task = asyncio.create_task(_periodic_flush())
+        cache_purge_task = asyncio.create_task(_periodic_cache_purge())
+
+        if capability_cache:
+            all_caps = capability_cache.get_all()
+            if all_caps:
+                logger.info("已加载 %d 个模型的能力缓存（预热）", len(all_caps))
+
         yield
+        flush_task.cancel()
+        cache_purge_task.cancel()
+        try:
+            await flush_task
+        except asyncio.CancelledError:
+            pass
+        try:
+            await cache_purge_task
+        except asyncio.CancelledError:
+            pass
         logger.info("正在优雅关闭…")
         rate_limiter.flush()
         history.flush()
         catalog.flush()
+        dispatcher.payload_tracker.close()
+        dispatcher.flush_session_bindings()
         await dispatcher.close_providers()
         logger.info("所有资源已释放")
 
     admin_token = settings.admin_token.strip()
-    OPEN_PATHS = frozenset({"/", "/ui"})
+    api_token = settings.api_token.strip()
+    OPEN_PATHS = frozenset({"/", "/ui", "/health", "/ready"})
 
     app = FastAPI(
         title="Model Proxy",
         description="免费大模型推理代理服务",
-        version="0.1.0",
+        version="0.3.0",
         lifespan=lifespan,
     )
 
-    if admin_token:
+    _cors_origins = settings.cors_origins.strip()
+    if _cors_origins == "*":
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=["*"],
+            allow_credentials=False,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+        logger.info("CORS 已启用: 允许任意来源 (*)")
+    elif _cors_origins:
+        _allowed = [o.strip() for o in _cors_origins.split(",") if o.strip()]
+        if _allowed:
+            app.add_middleware(
+                CORSMiddleware,
+                allow_origins=_allowed,
+                allow_credentials=True,
+                allow_methods=["*"],
+                allow_headers=["*"],
+            )
+            logger.info("CORS 已启用: %s", _allowed)
+
+    @app.middleware("http")
+    async def trace_id_middleware(request: Request, call_next):
+        trace_id = request.headers.get("X-Trace-Id") or uuid.uuid4().hex[:12]
+        response = await call_next(request)
+        response.headers["X-Trace-Id"] = trace_id
+        return response
+
+    if admin_token or api_token:
+        def _extract_bearer(auth_header: str) -> str:
+            if auth_header.lower().startswith("bearer "):
+                return auth_header[7:].strip()
+            return ""
+
+        def _token_match(given: str, expected: str) -> bool:
+            if not given or not expected:
+                return False
+            return hmac.compare_digest(given.encode(), expected.encode())
+
         @app.middleware("http")
-        async def admin_auth_middleware(request: Request, call_next):
+        async def auth_middleware(request: Request, call_next):
             path = request.url.path
-            if path in OPEN_PATHS or path.startswith("/v1/"):
+            if path in OPEN_PATHS:
                 return await call_next(request)
-            auth = request.headers.get("Authorization", "")
-            if auth != f"Bearer {admin_token}":
-                return JSONResponse(status_code=401, content={"detail": "未授权，请提供有效的管理令牌"})
+            bearer = _extract_bearer(request.headers.get("Authorization", ""))
+            if path.startswith("/v1/"):
+                expected = api_token or admin_token
+                if expected and not _token_match(bearer, expected):
+                    return JSONResponse(status_code=401, content={"detail": "未授权：需要有效的 API 令牌"})
+                return await call_next(request)
+            expected = admin_token or api_token
+            if expected and not _token_match(bearer, expected):
+                return JSONResponse(status_code=401, content={"detail": "未授权：需要有效的管理令牌"})
             return await call_next(request)
-        logger.info("管理面板认证已启用（/api/* 路由需要 Bearer Token）")
+        _auth_parts = []
+        if admin_token:
+            _auth_parts.append("管理面板 /api/*")
+        if api_token:
+            _auth_parts.append("OpenAI API /v1/*")
+        logger.info("认证已启用: %s", " + ".join(_auth_parts))
 
     app.include_router(router)
 
     @app.get("/ui", response_class=HTMLResponse)
     async def ui_panel():
-        return UI_HTML
+        return get_ui_html()
 
     @app.get("/", response_class=HTMLResponse)
     async def root():
         return '<meta http-equiv="refresh" content="0;url=/ui">'
 
-    logger.info(f"Model Proxy 启动于 http://{settings.host}:{settings.port}")
-    logger.info(f"UI 面板: http://{settings.host}:{settings.port}/ui")
+    logger.info("Model Proxy 启动于 http://%s:%s", settings.host, settings.port)
+    logger.info("UI 面板: http://%s:%s/ui", settings.host, settings.port)
 
     return app
 
@@ -142,8 +272,28 @@ def create_app() -> FastAPI:
 app = create_app()
 
 if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Model Proxy")
+    parser.add_argument("--validate", action="store_true", help="校验配置后退出（dry-run 模式）")
+    args = parser.parse_args()
+
     _catalog = CatalogManager()
     _config = ConfigManager(catalog=_catalog)
+
+    if args.validate:
+        print("配置校验通过")
+        print(f"  监听: {_config.settings.host}:{_config.settings.port}")
+        providers = {n for n, p in _config.config.providers.items() if p.enabled}
+        models = _config.get_enabled_models()
+        print(f"  已启用厂商: {', '.join(sorted(providers)) or '无'}")
+        print(f"  已启用模型: {len(models)} 个")
+        if _config.settings.api_token:
+            print("  /v1 认证: 已启用")
+        if _config.settings.admin_token:
+            print("  管理面板认证: 已启用")
+        sys.exit(0)
+
     uvicorn.run(
         "main:app",
         host=_config.settings.host,

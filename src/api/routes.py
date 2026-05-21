@@ -4,210 +4,53 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 import time
 import uuid
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+
+from pathlib import Path
+
+from starlette.responses import StreamingResponse
 
 from src.models.schemas import (
     ChatCompletionRequest,
-    ChatCompletionResponse,
     ChatMessage,
-    ModelConfig,
+    ModelCapabilities,
     ModelDetail,
     ModelInfo,
     ModelListResponse,
-    ProviderConfig,
     ProviderDiscovery,
     ProviderListResponse,
     ProviderModelsResponse,
     ProviderSummary,
-    RateLimit,
+    ProxyInfo,
     UsageResponse,
     UsageStats,
 )
+from src.api.log_buffer import get_instance as _get_log_buffer
+from src.api.streaming import create_stream_response
+from src.api.thinking import strip_thinking as _strip_thinking
 from src.config.catalog import CatalogManager
+from src.config.capability_tester import merge_catalog_capabilities
+from src.scheduler.exceptions import (
+    AllModelsUnavailable,
+    ModelNotFound,
+    PayloadTooLarge,
+    ProviderCallError,
+    RateLimitExceeded,
+)
 from src.scheduler.history import RequestHistory
 from src.scheduler.session import SessionManager
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-_THINK_TAG_RE = re.compile(r"<think(?:ing)?>(.*?)</think(?:ing)?>", re.DOTALL)
-
-_THINKING_LINE_PATTERNS = [
-    re.compile(r"^\s*[*•]\s"),
-    re.compile(r"^\s{4,}\S"),
-    re.compile(r"^\s*\("),
-    re.compile(r"^Final\s+(Polish|Answer|Response|Draft)\s*:", re.I),
-    re.compile(
-        r"^\s*(Wait|Hmm|Let me|I should|I need to|I will|Since the|However,|Actually,|"
-        r"The user|User input|Task:|Constraints?:|Draft|Revised|Refinement)",
-        re.I,
-    ),
-]
-
-
-def _is_thinking_line(line: str) -> bool:
-    stripped = line.strip()
-    if not stripped:
-        return False
-    return any(p.match(line) for p in _THINKING_LINE_PATTERNS)
-
-
-def _strip_thinking(text: str) -> tuple[str, str]:
-    """从模型回复中分离思考过程和最终回复。
-
-    返回 (clean_reply, thinking_content)。
-    支持：
-    1. <think>/<thinking> 标签
-    2. Gemma 式 bullet-point 推理 + 末尾回复
-    3. 元认知文本（Final Polish/Wait/Since the user 等）+ 末尾回复
-    """
-    thinking_parts = _THINK_TAG_RE.findall(text)
-    if thinking_parts:
-        clean = _THINK_TAG_RE.sub("", text).strip()
-        thinking = "\n---\n".join(p.strip() for p in thinking_parts if p.strip())
-        return clean, thinking
-
-    lines = text.strip().split("\n")
-    if len(lines) < 3:
-        return text, ""
-
-    non_empty = [(i, lines[i]) for i in range(len(lines)) if lines[i].strip()]
-    if len(non_empty) < 3:
-        return text, ""
-
-    thinking_count = sum(1 for _, l in non_empty if _is_thinking_line(l))
-
-    if thinking_count < 2 or thinking_count < len(non_empty) * 0.5:
-        return text, ""
-
-    last_clean_start = -1
-    for i in range(len(lines) - 1, -1, -1):
-        stripped = lines[i].strip()
-        if not stripped:
-            continue
-        if _is_thinking_line(lines[i]):
-            break
-        last_clean_start = i
-
-    if last_clean_start > 0:
-        clean = "\n".join(lines[last_clean_start:]).strip()
-        thinking = "\n".join(lines[:last_clean_start]).strip()
-        if clean:
-            return _dedup_answer(clean), thinking
-
-    paragraphs = re.split(r"\n\s*\n", text.strip())
-    if len(paragraphs) >= 2:
-        last_para = paragraphs[-1].strip()
-        if last_para and not _is_thinking_line(last_para.split("\n")[0]):
-            thinking_text = "\n\n".join(paragraphs[:-1]).strip()
-            return _dedup_answer(last_para), thinking_text
-
-    cn_answer = _extract_chinese_answer(text)
-    if cn_answer:
-        thinking_text = text[:text.rfind(cn_answer)].strip()
-        return _dedup_answer(cn_answer), thinking_text
-
-    trailing = _extract_trailing_answer(text)
-    if trailing:
-        thinking_text = text[:text.rfind(trailing)].strip()
-        return _dedup_answer(trailing), thinking_text
-
-    return text, ""
-
-
-def _dedup_answer(text: str) -> str:
-    """去除 Gemma 模型常见的答案重复（先引号内草稿，后直接输出）。
-
-    例如: '"我是AI助手。"我是AI助手。' → '我是AI助手。'
-    """
-    stripped = text.strip()
-    for q_open, q_close in [('"', '"'), ('\u201c', '\u201d'), ("'", "'"), ('\u2018', '\u2019')]:
-        if stripped.startswith(q_open) and q_close in stripped[1:]:
-            end_idx = stripped.index(q_close, 1) + len(q_close)
-            quoted = stripped[len(q_open):end_idx - len(q_close)].strip()
-            rest = stripped[end_idx:].strip()
-            if rest and _similar(quoted, rest):
-                return rest
-    half = len(stripped) // 2
-    if half > 2:
-        first_half = stripped[:half].strip()
-        second_half = stripped[half:].strip()
-        if _similar(first_half, second_half):
-            return second_half
-    return stripped
-
-
-def _similar(a: str, b: str) -> bool:
-    a_clean = re.sub(r"[\s，。！？、""''\"'\.\,]", "", a)
-    b_clean = re.sub(r"[\s，。！？、""''\"'\.\,]", "", b)
-    if not a_clean or not b_clean:
-        return False
-    shorter = min(len(a_clean), len(b_clean))
-    longer = max(len(a_clean), len(b_clean))
-    if shorter < 3:
-        return a_clean == b_clean
-    common = sum(1 for ca, cb in zip(a_clean, b_clean) if ca == cb)
-    return common / longer > 0.8
-
-
-_CHINESE_SENTENCE_RE = re.compile(
-    r"([\u4e00-\u9fff][\u4e00-\u9fff\s，。！？、（）""''：；…·\w A-Za-z0-9\-_.]{2,}[。！？\u201d]?)$"
-)
-
-
-def _extract_chinese_answer(text: str) -> str:
-    """提取文本末尾的中文句子作为最终答案。"""
-    m = _CHINESE_SENTENCE_RE.search(text.strip())
-    if m:
-        candidate = m.group(1).strip()
-        if candidate and len(candidate) < len(text) * 0.5:
-            return candidate
-    return ""
-
-
-def _extract_trailing_answer(text: str) -> str:
-    """从全是思考内容的文本末尾提取被拼接的最终答案。
-
-    Gemma 模型常见模式：思考过程以 bullet-point 输出，最终答案
-    无换行直接拼接在最后一行末尾或最后一个 bullet 内容之后。
-    """
-    lines = text.strip().split("\n")
-    last_line = ""
-    for line in reversed(lines):
-        if line.strip():
-            last_line = line
-            break
-    if not last_line:
-        return ""
-
-    content = re.sub(r"^\s*[*•]\s+", "", last_line).strip()
-    if not content:
-        return ""
-
-    for pattern in [
-        re.compile(r'[.。!！?？)\）"\u201d]\s*(.+)$'),
-        re.compile(r'(?:best|better|correct|answer|回复|答案|直接)[.。"\u201d)）]*\s*(.+)$', re.I),
-    ]:
-        m = pattern.search(content)
-        if m:
-            candidate = m.group(1).strip()
-            if candidate and 0 < len(candidate) < len(content):
-                return candidate
-
-    all_thinking = all(
-        _is_thinking_line(l) for l in lines if l.strip()
-    )
-    if all_thinking and len(content) < 200:
-        return content
-
-    return ""
 
 
 class _RouteDeps:
@@ -225,6 +68,34 @@ class _RouteDeps:
 _deps = _RouteDeps()
 
 
+# region 健康探针
+
+@router.get("/health")
+async def health_probe():
+    """进程存活探针（负载均衡 / k8s liveness）"""
+    return {"status": "ok"}
+
+
+@router.get("/ready")
+async def ready_probe():
+    """就绪探针：配置中至少有一个 provider 填写了 API Key"""
+    if not _deps.config_manager:
+        return JSONResponse(status_code=503, content={"ready": False, "reason": "配置未初始化"})
+    configured = any(
+        bool(str(getattr(p, "api_key", "")).strip())
+        for p in _deps.config_manager.config.providers.values()
+    )
+    if not configured:
+        return JSONResponse(
+            status_code=503,
+            content={"ready": False, "reason": "未配置任何厂商 API Key"},
+        )
+    return {"ready": True}
+
+
+# endregion
+
+
 def init_routes(config_manager, dispatcher, rate_limiter, history=None, catalog=None, provider_factories=None, capability_tester=None):
     _deps.config_manager = config_manager
     _deps.dispatcher = dispatcher
@@ -233,18 +104,64 @@ def init_routes(config_manager, dispatcher, rate_limiter, history=None, catalog=
     _deps.catalog = catalog
     _deps.provider_factories = provider_factories or {}
     _deps.capability_tester = capability_tester
-    _deps.session_mgr = SessionManager()
+    settings = config_manager.settings
+    _deps.session_mgr = SessionManager(
+        max_context_tokens=settings.max_context_tokens,
+        max_sessions=settings.max_sessions,
+    )
 
+
+def _extract_json_from_response(content: str) -> str:
+    """从可能包含思考过程的模型输出中提取 JSON。
+    用于 response_format=json 时，Gemma 等模型输出思考内容 + JSON 的情况。"""
+    if not content:
+        return content
+    stripped = content.strip()
+    if stripped.endswith("```"):
+        stripped = stripped[:-3].strip()
+    if stripped.startswith("{") or stripped.startswith("["):
+        return stripped
+    if "```" in stripped:
+        lines = stripped.split("\n")
+        in_block = False
+        json_lines = []
+        for line in lines:
+            if line.strip().startswith("```") and not in_block:
+                in_block = True
+                continue
+            elif line.strip() == "```" and in_block:
+                break
+            elif in_block:
+                json_lines.append(line)
+        if json_lines:
+            candidate = "\n".join(json_lines).strip()
+            try:
+                json.loads(candidate)
+                return candidate
+            except (json.JSONDecodeError, ValueError):
+                pass
+    # 逐位置尝试从 { 或 [ 开始解析 JSON（兼容字符串内的花括号）
+    for start_char in ("{", "["):
+        start = stripped.find(start_char)
+        if start >= 0:
+            try:
+                obj = json.loads(stripped[start:])
+                return json.dumps(obj, ensure_ascii=False)
+            except (json.JSONDecodeError, ValueError):
+                pass
+    return content
+
+
+# region 聊天（OpenAI 兼容 /v1/chat/completions）
 
 @router.post("/v1/chat/completions")
 async def chat_completions(request: ChatCompletionRequest):
     """聊天补全接口（支持流式和非流式）"""
-    from src.scheduler.dispatcher import AllModelsUnavailable, ModelNotFound, RateLimitExceeded
-
     trace_id = uuid.uuid4().hex[:12]
+    sid_tag = f" session={request.session_id}" if request.session_id else ""
     logger.info(
-        "[API] trace=%s /v1/chat/completions | model=%s stream=%s 消息数=%d",
-        trace_id, request.model, request.stream, len(request.messages),
+        "[API] trace=%s%s /v1/chat/completions | model=%s stream=%s 消息数=%d",
+        trace_id, sid_tag, request.model, request.stream, len(request.messages),
     )
 
     enabled_models = _deps.config_manager.get_enabled_models()
@@ -258,18 +175,39 @@ async def chat_completions(request: ChatCompletionRequest):
     try:
         provider_name, model_name, result = await _deps.dispatcher.dispatch(request, enabled_models, trace_id=trace_id)
         latency = (time.time() - start_time) * 1000
+        route_strategy = _deps.dispatcher.last_route_strategy or ""
         if _deps.history:
             _deps.history.record(
                 provider=provider_name,
                 model=model_name,
                 success=True,
                 latency_ms=latency,
-                prompt_tokens=result.usage.prompt_tokens,
-                completion_tokens=result.usage.completion_tokens,
-                route_strategy=_deps.dispatcher.last_route_strategy,
+                prompt_tokens=result.usage.prompt_tokens if result.usage else 0,
+                completion_tokens=result.usage.completion_tokens if result.usage else 0,
+                route_strategy=route_strategy,
             )
-        logger.info("[API] trace=%s 完成 | provider=%s model=%s 耗时=%.0fms", trace_id, provider_name, model_name, latency)
-        return result
+        bound = _deps.dispatcher.get_session_binding(request.session_id) if request.session_id else None
+        info = ProxyInfo(
+            provider=provider_name,
+            trace_id=trace_id,
+            latency_ms=round(latency, 1),
+            route_strategy=route_strategy,
+            session_id=request.session_id,
+            bound_model=f"{bound[0]}:{bound[1]}" if bound else None,
+        )
+        if request.response_format and request.response_format.type in ("json_object", "json_schema"):
+            msg = result.choices[0].message if result.choices else None
+            if msg and msg.content:
+                msg.content = _extract_json_from_response(msg.content)
+
+        logger.info("[API] trace=%s%s 完成 | provider=%s model=%s 耗时=%.0fms", trace_id, sid_tag, provider_name, model_name, latency)
+        out = result.model_dump()
+        out["proxy_info"] = info.model_dump(exclude_none=True)
+        return JSONResponse(content=out)
+    except PayloadTooLarge as e:
+        _record_failure(start_time, str(e))
+        logger.warning("[API] trace=%s payload 过大: %s", trace_id, e)
+        raise HTTPException(status_code=413, detail=str(e))
     except RateLimitExceeded as e:
         _record_failure(start_time, str(e))
         logger.warning("[API] trace=%s 限流: %s", trace_id, e)
@@ -281,7 +219,11 @@ async def chat_completions(request: ChatCompletionRequest):
     except AllModelsUnavailable as e:
         _record_failure(start_time, str(e))
         logger.error("[API] trace=%s 所有模型不可用: %s", trace_id, e)
-        raise HTTPException(status_code=503, detail=str(e))
+        raise HTTPException(status_code=503, detail="所有模型均不可用，请稍后重试")
+    except ProviderCallError as e:
+        _record_failure(start_time, str(e))
+        logger.warning("[API] trace=%s 厂商调用失败（可恢复）: %s", trace_id, e)
+        raise HTTPException(status_code=503, detail="模型服务暂时不可用，请稍后重试")
     except Exception as e:
         _record_failure(start_time, str(e))
         logger.error("[API] trace=%s 推理请求异常: %s", trace_id, e, exc_info=True)
@@ -290,58 +232,100 @@ async def chat_completions(request: ChatCompletionRequest):
 
 async def _handle_stream(request: ChatCompletionRequest, enabled_models, trace_id: str = ""):
     """处理流式请求，返回 SSE StreamingResponse"""
-    from src.api.streaming import create_stream_response
-    from src.scheduler.dispatcher import AllModelsUnavailable, ModelNotFound, RateLimitExceeded
 
+    sid_tag = f" session={request.session_id}" if request.session_id else ""
     start_time = time.time()
     try:
         provider_name, model_name, content_iter = await _deps.dispatcher.dispatch_stream(request, enabled_models, trace_id=trace_id)
-    except RateLimitExceeded as e:
-        _record_failure(start_time, str(e))
-        logger.warning("[API] trace=%s 流式限流: %s", trace_id, e)
-        raise HTTPException(status_code=429, detail=str(e))
-    except ModelNotFound as e:
-        _record_failure(start_time, str(e))
-        logger.warning("[API] trace=%s 流式模型未找到: %s", trace_id, e)
-        raise HTTPException(status_code=404, detail=str(e))
-    except AllModelsUnavailable as e:
-        _record_failure(start_time, str(e))
-        logger.error("[API] trace=%s 流式所有模型不可用: %s", trace_id, e)
-        raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
         _record_failure(start_time, str(e))
-        logger.error("[API] trace=%s 流式请求异常: %s", trace_id, e, exc_info=True)
-        raise HTTPException(status_code=500, detail="推理服务内部错误，请稍后重试")
+        raise _map_dispatch_error(e, trace_id)
 
     latency = (time.time() - start_time) * 1000
-    if _deps.history:
-        _deps.history.record(
-            provider=provider_name, model=model_name,
-            success=True, latency_ms=latency,
-        )
-    logger.info("[API] trace=%s 流式连接建立 | provider=%s model=%s 耗时=%.0fms", trace_id, provider_name, model_name, latency)
-    return create_stream_response(model_name, content_iter)
+    route_strategy = _deps.dispatcher.last_route_strategy or ""
+    # 流式历史记录延迟到流结束后，此处仅记录连接建立（不标记 success）
+    logger.info("[API] trace=%s%s 流式连接建立 | provider=%s model=%s 耗时=%.0fms", trace_id, sid_tag, provider_name, model_name, latency)
+    bound = _deps.dispatcher.get_session_binding(request.session_id) if request.session_id else None
+    info = ProxyInfo(
+        provider=provider_name,
+        trace_id=trace_id,
+        latency_ms=round(latency, 1),
+        route_strategy=route_strategy,
+        session_id=request.session_id,
+        bound_model=f"{bound[0]}:{bound[1]}" if bound else None,
+    )
+    return create_stream_response(model_name, content_iter, proxy_info=info)
+
+
+# endregion
 
 
 def _record_failure(start_time: float, error: str, provider: str = "unknown", model: str = "unknown") -> None:
     if _deps.history:
         latency = (time.time() - start_time) * 1000
-        _deps.history.record(provider=provider, model=model, success=False, latency_ms=latency, error=error)
+        safe_error = error[:200] if error else ""
+        _deps.history.record(provider=provider, model=model, success=False, latency_ms=latency, error=safe_error)
 
+
+def _map_dispatch_error(e: Exception, trace_id: str = "") -> HTTPException:
+    """将 Dispatcher 异常统一映射为 HTTPException（去重重复 except 块）"""
+    if isinstance(e, PayloadTooLarge):
+        logger.warning("[API] trace=%s payload 过大: %s", trace_id, e)
+        return HTTPException(status_code=413, detail=str(e))
+    if isinstance(e, RateLimitExceeded):
+        logger.warning("[API] trace=%s 限流: %s", trace_id, e)
+        return HTTPException(status_code=429, detail=str(e))
+    if isinstance(e, ModelNotFound):
+        logger.warning("[API] trace=%s 模型未找到: %s", trace_id, e)
+        return HTTPException(status_code=404, detail=str(e))
+    if isinstance(e, AllModelsUnavailable):
+        logger.error("[API] trace=%s 所有模型不可用: %s", trace_id, e)
+        return HTTPException(status_code=503, detail="所有模型均不可用，请稍后重试")
+    if isinstance(e, ProviderCallError):
+        logger.warning("[API] trace=%s 厂商调用失败（可恢复）: %s", trace_id, e)
+        return HTTPException(status_code=503, detail="模型服务暂时不可用，请稍后重试")
+    logger.error("[API] trace=%s 推理请求异常: %s", trace_id, e, exc_info=True)
+    return HTTPException(status_code=500, detail="推理服务内部错误，请稍后重试")
+
+
+# region 模型管理、厂商与用量
 
 @router.get("/v1/models", response_model=ModelListResponse)
 async def list_models():
-    """列出所有已配置模型"""
+    """列出所有已配置模型（含已探测的能力信息）
+
+    注意：此端点遍历 config.providers（静态配置），而 dispatch 使用
+    get_enabled_models()（catalog 动态源）。两者可能存在差异——
+    此处展示的模型不保证 dispatch 时可用。
+    """
+
     models = []
     for prov_name, prov in _deps.config_manager.config.providers.items():
         for m in prov.models:
+            caps = ModelCapabilities()
+            cached_raw: dict | None = None
+            if _deps.capability_tester:
+                cached_raw = _deps.capability_tester.cache.get(prov_name, m.name)
+            catalog_model = _deps.catalog.get_model(prov_name, m.name) if _deps.catalog else None
+            merged = merge_catalog_capabilities(cached_raw, catalog_model)
+            if merged and not merged.get("error"):
+                caps = ModelCapabilities(
+                    streaming=bool(merged.get("streaming")),
+                    reasoning=bool(merged.get("reasoning")),
+                    multi_turn_tc=bool(merged.get("multi_turn_tc")),
+                    chinese=bool(merged.get("chinese")),
+                    vision=bool(merged.get("vision")),
+                    json_mode=bool(merged.get("json_mode")),
+                    latency_ms=merged.get("latency_ms", 99999),
+                )
             models.append(ModelInfo(
                 id=m.name,
                 provider=prov_name,
                 enabled=m.enabled,
                 priority=m.priority,
                 rate_limit=m.rate_limit,
-                tool_calling=m.tool_calling,
+                tool_calling=bool(merged.get("tool_calling", m.tool_calling)),
+                capabilities=caps,
             ))
     return ModelListResponse(models=models)
 
@@ -385,13 +369,15 @@ async def list_provider_models(provider_id: str):
 
     models = []
     for m in prov.models:
-        cap = cap_cache.get(m.name, {})
+        cached_raw = cap_cache.get(m.name) or None
+        catalog_model = _deps.catalog.get_model(provider_id, m.name) if _deps.catalog else None
+        cap = merge_catalog_capabilities(cached_raw, catalog_model)
         models.append(ModelDetail(
             id=m.name,
             provider=provider_id,
             enabled=m.enabled,
             priority=m.priority,
-            tool_calling=m.tool_calling,
+            tool_calling=bool(cap.get("tool_calling", m.tool_calling)),
             rate_limit=m.rate_limit,
             capabilities=cap,
         ))
@@ -430,6 +416,10 @@ async def get_usage():
     return UsageResponse(stats=stats)
 
 
+# endregion
+
+# region 配置与发现
+
 # --- 配置管理 API ---
 
 @router.get("/api/config")
@@ -443,7 +433,12 @@ async def get_config():
             "priority": prov.priority,
             "models": [m.model_dump() for m in prov.models],
         }
-    return {"providers": result, "settings": _deps.config_manager.settings.model_dump()}
+    _SECRET_KEYS = frozenset({"admin_token", "api_token"})
+    safe_settings = _deps.config_manager.settings.model_dump(exclude=_SECRET_KEYS)
+    for key in _SECRET_KEYS:
+        val = getattr(_deps.config_manager.settings, key, "")
+        safe_settings[key] = "***" if val else ""
+    return {"providers": result, "settings": safe_settings}
 
 
 class ApiKeyUpdateRequest(BaseModel):
@@ -462,14 +457,14 @@ async def update_api_key(body: ApiKeyUpdateRequest):
         try:
             new_provider = _deps.provider_factories[provider](api_key.strip())
             _deps.dispatcher.register_provider(provider, new_provider)
-            logger.info(f"动态注册厂商 {provider}")
+            logger.info("动态注册厂商 %s", provider)
             return {"status": "ok", "message": f"{provider} API Key 已更新，厂商已自动加载"}
         except Exception as e:
-            logger.error(f"动态注册厂商 {provider} 失败: {e}")
-            return {"status": "ok", "message": f"{provider} API Key 已保存，但厂商加载失败: {e}"}
+            logger.error("动态注册厂商 %s 失败: %s", provider, e, exc_info=True)
+            return {"status": "ok", "message": f"{provider} API Key 已保存，但厂商加载失败，请检查 Key 是否正确"}
     elif not api_key.strip():
-        _deps.dispatcher.unregister_provider(provider)
-        logger.info(f"已注销厂商 {provider}（API Key 已清空）")
+        await _deps.dispatcher.unregister_provider(provider)
+        logger.info("已注销厂商 %s（API Key 已清空）", provider)
         return {"status": "ok", "message": f"{provider} API Key 已清空，厂商已卸载"}
 
     return {"status": "ok", "message": f"{provider} API Key 已更新"}
@@ -522,23 +517,23 @@ async def toggle_provider(provider: str, enabled: bool):
         if provider == "cursor":
             from src.providers.cursor import CursorProvider
             _deps.dispatcher.register_provider("cursor", CursorProvider())
-            logger.info(f"动态注册 Cursor 厂商")
+            logger.info("动态注册 Cursor 厂商")
             return {"status": "ok", "message": f"{provider} 已启用并加载"}
         elif provider in _deps.provider_factories:
             api_key = _deps.config_manager.get_api_key(provider) if _deps.config_manager else ""
             if api_key.strip():
                 try:
                     _deps.dispatcher.register_provider(provider, _deps.provider_factories[provider](api_key))
-                    logger.info(f"动态注册厂商 {provider}")
+                    logger.info("动态注册厂商 %s", provider)
                     return {"status": "ok", "message": f"{provider} 已启用并加载"}
                 except Exception as e:
-                    logger.error(f"动态注册 {provider} 失败: {e}")
-                    return {"status": "ok", "message": f"{provider} 已启用，但加载失败: {e}"}
+                    logger.error("动态注册 %s 失败: %s", provider, e)
+                    return {"status": "ok", "message": f"{provider} 已启用，但加载失败，请检查 API Key 是否正确"}
             else:
                 return {"status": "ok", "message": f"{provider} 已启用，但 API Key 未配置，请先填写 API Key"}
     elif not enabled and _deps.dispatcher.has_provider(provider):
-        _deps.dispatcher.unregister_provider(provider)
-        logger.info(f"已注销厂商 {provider}")
+        await _deps.dispatcher.unregister_provider(provider)
+        logger.info("已注销厂商 %s", provider)
         return {"status": "ok", "message": f"{provider} 已禁用并卸载"}
 
     return {"status": "ok", "message": f"{provider} 已{'启用' if enabled else '禁用'}"}
@@ -592,83 +587,37 @@ async def update_settings(
 
 # --- 模型发现 ---
 
+_DISCOVERY_FALLBACK: dict[str, dict[str, str]] = {
+    "google": {"url": "https://aistudio.google.com/", "guide": "获取 API Key: https://aistudio.google.com/apikey"},
+    "groq": {"url": "https://console.groq.com/", "guide": "注册后在 https://console.groq.com/keys 获取 API Key"},
+    "github": {"url": "https://github.com/marketplace/models", "guide": "使用 GitHub Personal Access Token"},
+    "cerebras": {"url": "https://cloud.cerebras.ai/", "guide": "注册后在 Dashboard 获取 API Key，base_url=https://api.cerebras.ai/v1"},
+    "sambanova": {"url": "https://cloud.sambanova.ai/", "guide": "注册后在 API 页面获取 Key，base_url=https://api.sambanova.ai/v1"},
+    "openrouter": {"url": "https://openrouter.ai/", "guide": "https://openrouter.ai/keys 获取 Key，base_url=https://openrouter.ai/api/v1"},
+    "cloudflare": {"url": "https://ai.cloudflare.com/", "guide": "Dashboard > AI > Workers AI，获取 Account ID 和 API Token"},
+    "huggingface": {"url": "https://huggingface.co/inference-api", "guide": "https://huggingface.co/settings/tokens 创建 Token"},
+    "mistral": {"url": "https://console.mistral.ai/", "guide": "https://console.mistral.ai/api-keys/ 获取 Key，base_url=https://api.mistral.ai/v1"},
+    "cursor": {"url": "https://www.cursor.com/", "guide": "通过 Cursor IDE 登录即可使用"},
+}
+
+
 @router.get("/api/discovery", response_model=list[ProviderDiscovery])
 async def discover_providers():
-    """查找可免费使用的大模型厂商"""
-    discoveries = [
-        ProviderDiscovery(
-            name="Google AI Studio",
-            url="https://aistudio.google.com/",
-            description="Google 提供的免费 Gemini 系列模型，有每日请求额度限制",
-            free_models=["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash", "gemma-4-27b"],
-            integration_guide="获取 API Key: https://aistudio.google.com/apikey",
+    """查找可免费使用的大模型厂商（从 catalog 动态生成）"""
+    if not _deps.catalog:
+        return []
+    discoveries = []
+    for prov_id, prov_data in _deps.catalog.get_all_providers().items():
+        fallback = _DISCOVERY_FALLBACK.get(prov_id, {})
+        model_ids = [m["id"] for m in prov_data.get("models", [])[:5]]
+        discoveries.append(ProviderDiscovery(
+            name=prov_data.get("name", prov_id),
+            url=prov_data.get("url", fallback.get("url", "")),
+            description=prov_data.get("description", f"{prov_data.get('name', prov_id)} 免费模型推理"),
+            free_models=model_ids,
+            integration_guide=fallback.get("guide", "请查看厂商官网获取 API Key"),
             new_user_only=False,
-        ),
-        ProviderDiscovery(
-            name="Groq",
-            url="https://console.groq.com/",
-            description="Groq 提供的高速推理服务，支持多种开源模型免费调用",
-            free_models=["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768"],
-            integration_guide="注册后在 https://console.groq.com/keys 获取 API Key",
-            new_user_only=False,
-        ),
-        ProviderDiscovery(
-            name="GitHub Models",
-            url="https://github.com/marketplace/models",
-            description="GitHub 提供的模型市场，使用 GitHub Token 即可免费调用",
-            free_models=["gpt-4o-mini", "meta-llama-3.1-405b-instruct", "mistral-large"],
-            integration_guide="使用 GitHub Personal Access Token，在 Settings > Developer settings 中生成",
-            new_user_only=False,
-        ),
-        ProviderDiscovery(
-            name="Cerebras",
-            url="https://cloud.cerebras.ai/",
-            description="Cerebras 提供极速推理（~2000 tokens/s），免费层每日 1000 次请求",
-            free_models=["llama-3.3-70b", "llama-3.1-8b", "llama-3.1-70b"],
-            integration_guide="注册后在 Dashboard 获取 API Key，兼容 OpenAI SDK，base_url=https://api.cerebras.ai/v1",
-            new_user_only=False,
-        ),
-        ProviderDiscovery(
-            name="SambaNova",
-            url="https://cloud.sambanova.ai/",
-            description="SambaNova Cloud 免费推理，速度极快，支持 405B 大模型和 DeepSeek",
-            free_models=["Meta-Llama-3.3-70B-Instruct", "Meta-Llama-3.1-405B-Instruct", "DeepSeek-R1", "DeepSeek-V3-0324"],
-            integration_guide="注册后在 API 页面获取 Key，接口兼容 OpenAI 格式，base_url=https://api.sambanova.ai/v1",
-            new_user_only=False,
-        ),
-        ProviderDiscovery(
-            name="OpenRouter",
-            url="https://openrouter.ai/",
-            description="聚合平台，标注 :free 后缀的模型完全免费，每日约 200 次请求",
-            free_models=["meta-llama/llama-3.1-8b-instruct:free", "mistralai/mistral-7b-instruct:free", "qwen/qwen-2.5-72b-instruct:free", "google/gemma-2-9b-it:free"],
-            integration_guide="https://openrouter.ai/keys 获取 Key，兼容 OpenAI SDK，base_url=https://openrouter.ai/api/v1",
-            new_user_only=False,
-        ),
-        ProviderDiscovery(
-            name="Cloudflare Workers AI",
-            url="https://ai.cloudflare.com/",
-            description="Cloudflare 免费 AI 推理，每日 10,000 neurons（约数千次小请求），无需信用卡",
-            free_models=["@cf/meta/llama-3.1-8b-instruct", "@cf/mistral/mistral-7b-instruct-v0.2-lora", "@cf/qwen/qwen1.5-14b-chat-awq"],
-            integration_guide="Dashboard > AI > Workers AI，获取 Account ID 和 API Token，接口 REST 格式",
-            new_user_only=False,
-        ),
-        ProviderDiscovery(
-            name="HuggingFace Inference API",
-            url="https://huggingface.co/inference-api",
-            description="HuggingFace 免费推理 API，支持数千个开源模型，有速率限制但完全免费",
-            free_models=["meta-llama/Llama-3.1-8B-Instruct", "mistralai/Mistral-7B-Instruct-v0.3", "Qwen/Qwen2.5-72B-Instruct", "google/gemma-2-27b-it"],
-            integration_guide="https://huggingface.co/settings/tokens 创建 Token，使用 InferenceClient 或 OpenAI 兼容接口",
-            new_user_only=False,
-        ),
-        ProviderDiscovery(
-            name="Mistral AI (La Plateforme)",
-            url="https://console.mistral.ai/",
-            description="Mistral 官方平台免费层，支持 Mistral Small/Nemo/Codestral 等模型",
-            free_models=["mistral-small-latest", "open-mistral-nemo", "codestral-latest"],
-            integration_guide="https://console.mistral.ai/api-keys/ 获取 Key，兼容 OpenAI SDK，base_url=https://api.mistral.ai/v1",
-            new_user_only=False,
-        ),
-    ]
+        ))
     return discoveries
 
 
@@ -698,8 +647,8 @@ async def fetch_provider_models(provider_name: str, force: bool = False):
     try:
         models = await provider.list_models()
     except Exception as e:
-        logger.error(f"拉取 {provider_name} 模型列表失败: {e}", exc_info=True)
-        raise HTTPException(status_code=502, detail=f"拉取 {provider_name} 模型列表失败: {e}")
+        logger.error("拉取 %s 模型列表失败: %s", provider_name, e, exc_info=True)
+        raise HTTPException(status_code=502, detail=f"拉取 {provider_name} 模型列表失败，请检查配置")
 
     result = {"provider": provider_name, "available_models": models}
 
@@ -759,9 +708,10 @@ def _apply_capabilities_to_catalog(provider_name: str, test_results: list[dict])
 # --- 模型能力测试 ---
 
 @router.post("/api/capabilities/test")
-async def test_capabilities(provider: str = "", force: bool = False):
+async def test_capabilities(provider: str = "", model: str = "", force: bool = False):
     """测试模型能力
 
+    - 指定 provider + model: 只测试该厂商的指定模型（最快）
     - 指定 provider: 只测试该厂商的所有模型
     - 不指定 provider: 测试所有已注册厂商
     - force=true: 强制重新测试已缓存的模型
@@ -773,10 +723,14 @@ async def test_capabilities(provider: str = "", force: bool = False):
         if not _deps.dispatcher.has_provider(provider):
             raise HTTPException(status_code=404, detail=f"厂商 {provider} 未注册")
         prov_inst = _deps.dispatcher.get_provider(provider)
-        try:
-            models = await prov_inst.list_models()
-        except Exception as e:
-            raise HTTPException(status_code=502, detail=f"拉取模型列表失败: {e}")
+
+        if model:
+            models = [model]
+        else:
+            try:
+                models = await prov_inst.list_models()
+            except Exception as e:
+                raise HTTPException(status_code=502, detail="拉取模型列表失败，请检查配置")
 
         results = await _deps.capability_tester.test_provider_models(
             prov_inst, provider, models, force=force,
@@ -841,12 +795,19 @@ async def clear_capabilities():
     return {"status": "ok", "message": "能力缓存已清除"}
 
 
+# endregion
+
+# region 历史、路由、黑名单、会话绑定与 Payload
+
 # --- 请求历史 ---
 
 @router.get("/api/history")
 async def get_history(limit: int = 50):
     """获取最近请求历史"""
-    limit = min(max(limit, 1), 500)
+    cap = 2000
+    if _deps.config_manager:
+        cap = max(1, int(getattr(_deps.config_manager.settings, "request_history_max_records", cap)))
+    limit = min(max(limit, 1), cap)
     if not _deps.history:
         return {"records": [], "stats": {}}
     return {"records": _deps.history.get_recent(limit), "stats": _deps.history.get_stats()}
@@ -900,6 +861,45 @@ async def clear_blacklist(provider: str = "", model: str = ""):
     count = _deps.rate_limiter.clear_blacklist(provider, model)
     return {"status": "ok", "cleared": count}
 
+
+# --- 会话模型绑定 ---
+
+@router.get("/api/session-bindings")
+async def get_session_bindings():
+    """获取所有活跃的会话-模型绑定"""
+    bindings = _deps.dispatcher.get_all_session_bindings()
+    return {"bindings": bindings, "count": len(bindings)}
+
+
+@router.delete("/api/session-bindings/clear")
+async def clear_session_bindings(session_id: str = ""):
+    """清除会话绑定（可指定 session_id 或全部清除）"""
+    count = _deps.dispatcher.clear_session_binding(session_id)
+    return {"status": "ok", "cleared": count}
+
+
+# --- Payload 上限管理 ---
+
+@router.get("/api/payload-limits")
+async def get_payload_limits():
+    """获取所有模型的 payload 上限记录"""
+    limits = _deps.dispatcher.payload_tracker.get_all_limits()
+    return {
+        "limits": limits,
+        "count": len(limits),
+    }
+
+
+@router.delete("/api/payload-limits/clear")
+async def clear_payload_limits(provider: str = "", model: str = ""):
+    """清除 payload 上限记录（可指定厂商/模型或全部清除）"""
+    count = _deps.dispatcher.payload_tracker.clear(provider, model)
+    return {"status": "ok", "cleared": count}
+
+
+# endregion
+
+# region 模型目录与内置聊天
 
 # --- 模型目录（可提交到 GitHub 的部分） ---
 
@@ -1030,10 +1030,37 @@ async def get_chat_session(session_id: str):
 
 @router.delete("/api/chat/sessions/{session_id}")
 async def delete_chat_session(session_id: str):
-    """删除聊天会话"""
+    """软删除聊天会话（移入回收站 + 触发记忆巩固）"""
+    from src.scheduler.memory import get_memory_manager
+    memory_mgr = get_memory_manager()
+    consolidated = memory_mgr.on_session_end(session_id)
+    if consolidated:
+        logger.info("[Memory] session=%s 巩固 %d 条到长期记忆", session_id, consolidated)
     if _deps.session_mgr.delete(session_id):
-        return {"status": "ok"}
+        return {"status": "ok", "memory_consolidated": consolidated}
     raise HTTPException(status_code=404, detail="会话不存在")
+
+
+@router.get("/api/chat/trash")
+async def list_trash_sessions():
+    """列出回收站中的会话"""
+    return {"sessions": _deps.session_mgr.list_trash()}
+
+
+@router.post("/api/chat/trash/{session_id}/restore")
+async def restore_trash_session(session_id: str):
+    """从回收站恢复会话"""
+    if _deps.session_mgr.restore(session_id):
+        return {"status": "ok"}
+    raise HTTPException(status_code=404, detail="回收站中无此会话")
+
+
+@router.delete("/api/chat/trash/{session_id}")
+async def permanent_delete_session(session_id: str):
+    """从回收站永久删除会话"""
+    if _deps.session_mgr.permanent_delete(session_id):
+        return {"status": "ok"}
+    raise HTTPException(status_code=404, detail="回收站中无此会话")
 
 
 @router.put("/api/chat/sessions/{session_id}/title")
@@ -1046,10 +1073,13 @@ async def rename_chat_session(session_id: str, title: str):
 
 @router.post("/api/chat/sessions/{session_id}/send")
 async def send_chat_message(session_id: str, request: ChatCompletionRequest):
-    """向指定会话发送消息并获取回复（自动管理上下文）"""
-    from src.scheduler.dispatcher import AllModelsUnavailable, ModelNotFound, RateLimitExceeded
+    """向指定会话发送消息并获取回复（支持内部 tool calling 自动执行 + Memory 系统）"""
+    from src.api.internal_tools import get_tool_definitions, execute_tool
+    from src.models.schemas import ToolDefinition, ToolFunction
+    from src.scheduler.memory import get_memory_manager
 
     trace_id = uuid.uuid4().hex[:12]
+    memory_mgr = get_memory_manager()
 
     session = _deps.session_mgr.get(session_id)
     if not session:
@@ -1066,17 +1096,13 @@ async def send_chat_message(session_id: str, request: ChatCompletionRequest):
 
     session.add_message("user", user_msg)
 
-    if len(session.messages) == 1:
+    is_first_message = len(session.messages) == 1
+    long_term_ctx = ""
+    if is_first_message:
         session.auto_title()
-
-    context_messages = session.get_context_messages()
-    ctx_request = ChatCompletionRequest(
-        model=request.model or session.model,
-        messages=[ChatMessage(role=m["role"], content=m["content"]) for m in context_messages],
-        temperature=request.temperature,
-        max_tokens=request.max_tokens,
-        stream=False,
-    )
+        long_term_ctx = memory_mgr.on_session_start(session_id, user_msg)
+        if long_term_ctx:
+            logger.info("[Memory] trace=%s 注入长期记忆上下文 (%d chars)", trace_id, len(long_term_ctx))
 
     enabled_models = _deps.config_manager.get_enabled_models()
     if not enabled_models:
@@ -1084,9 +1110,71 @@ async def send_chat_message(session_id: str, request: ChatCompletionRequest):
         await asyncio.to_thread(_deps.session_mgr.save)
         raise HTTPException(status_code=503, detail="没有可用模型")
 
+    tool_defs_raw = get_tool_definitions()
+    tools = [
+        ToolDefinition(
+            type="function",
+            function=ToolFunction(
+                name=td["function"]["name"],
+                description=td["function"]["description"],
+                parameters=td["function"]["parameters"],
+            ),
+        )
+        for td in tool_defs_raw
+    ]
+
+    max_tool_rounds = 3
     start_time = time.time()
+    tool_calls_log = []
+    provider_name = "unknown"
+    model_name = "unknown"
+
     try:
-        provider_name, model_name, result = await _deps.dispatcher.dispatch(ctx_request, enabled_models, trace_id=trace_id)
+        for round_idx in range(max_tool_rounds + 1):
+            context_messages = session.get_context_messages()
+
+            session_memory_ctx = memory_mgr.get_context_injection(session_id)
+            full_memory_ctx = "\n\n".join(filter(None, [long_term_ctx, session_memory_ctx]))
+            if full_memory_ctx and context_messages and context_messages[0].get("role") == "system":
+                context_messages[0] = {
+                    **context_messages[0],
+                    "content": (context_messages[0]["content"] or "") + "\n\n" + full_memory_ctx,
+                }
+
+            ctx_request = ChatCompletionRequest(
+                model=request.model or session.model,
+                messages=[ChatMessage(role=m["role"], content=m["content"], tool_calls=m.get("tool_calls"), tool_call_id=m.get("tool_call_id"), name=m.get("name")) for m in context_messages],
+                temperature=request.temperature,
+                max_tokens=request.max_tokens,
+                stream=False,
+                tools=tools if round_idx < max_tool_rounds else None,
+            )
+
+            provider_name, model_name, result = await _deps.dispatcher.dispatch(ctx_request, enabled_models, trace_id=trace_id)
+
+            msg = result.choices[0].message if result.choices else None
+            if not msg:
+                break
+
+            if msg.tool_calls and round_idx < max_tool_rounds:
+                tc_data = [{"id": tc.id, "type": tc.type, "function": {"name": tc.function.name, "arguments": tc.function.arguments}} for tc in msg.tool_calls]
+                session.add_message("assistant", msg.content or "", tool_calls=tc_data)
+
+                for tc in msg.tool_calls:
+                    logger.info("[会话] trace=%s 调用工具: %s(%s)", trace_id, tc.function.name, tc.function.arguments[:100])
+                    tool_result = await execute_tool(tc.function.name, tc.function.arguments)
+                    tool_calls_log.append({"tool": tc.function.name, "result_len": len(tool_result)})
+                    session.add_message("tool", tool_result, tool_call_id=tc.id, name=tc.function.name)
+                continue
+
+            raw_reply = msg.content or ""
+            reply, thinking = _strip_thinking(raw_reply)
+            if thinking:
+                logger.info("[会话] trace=%s 模型思考过程:\n%s", trace_id, thinking[:500])
+            break
+        else:
+            reply = "⚠️ 工具调用轮次超限，请简化问题重试"
+
         latency = (time.time() - start_time) * 1000
         if _deps.history:
             _deps.history.record(
@@ -1094,43 +1182,50 @@ async def send_chat_message(session_id: str, request: ChatCompletionRequest):
                 model=model_name,
                 success=True,
                 latency_ms=latency,
-                prompt_tokens=result.usage.prompt_tokens,
-                completion_tokens=result.usage.completion_tokens,
+                prompt_tokens=result.usage.prompt_tokens if result.usage else 0,
+                completion_tokens=result.usage.completion_tokens if result.usage else 0,
                 route_strategy=_deps.dispatcher.last_route_strategy,
             )
 
-        raw_reply = result.choices[0].message.content or ""
-        reply, thinking = _strip_thinking(raw_reply)
-        if thinking:
-            logger.info(
-                "[会话] trace=%s 模型 %s 思考过程:\n%s",
-                trace_id, result.model,
-                thinking[:500] + ("…" if len(thinking) > 500 else ""),
-            )
         session.add_message("assistant", reply, model=result.model)
+        memory_mgr.on_turn_complete(session_id, user_msg, reply)
+
+        user_turn_count = sum(1 for m in session.messages if m.get("role") == "user")
+        if user_turn_count in (6, 12, 20):
+            asyncio.create_task(memory_mgr.llm_extract_memories(session_id, session.messages))
+
         await asyncio.to_thread(_deps.session_mgr.save)
 
         logger.info(
-            "[会话] trace=%s 完成 | session=%s provider=%s model=%s 耗时=%.0fms 回复长度=%d",
-            trace_id, session_id, provider_name, model_name, latency, len(reply),
+            "[会话] trace=%s 完成 | session=%s provider=%s model=%s 耗时=%.0fms 工具调用=%d",
+            trace_id, session_id, provider_name, model_name, latency, len(tool_calls_log),
         )
 
-        return {
+        resp = {
             "reply": reply,
             "model": result.model,
             "provider": provider_name,
-            "usage": result.usage.model_dump(),
+            "usage": result.usage.model_dump() if result.usage else {},
             "tokens_est": session.total_tokens_est,
-            "context_messages": len(context_messages),
+            "context_messages": len(session.get_context_messages()),
             "total_messages": len(session.messages),
             "title": session.title,
         }
+        if tool_calls_log:
+            resp["tool_calls"] = tool_calls_log
+        return resp
     except (RateLimitExceeded, ModelNotFound, AllModelsUnavailable) as e:
         _record_failure(start_time, str(e))
         await asyncio.to_thread(_deps.session_mgr.save)
         logger.warning("[会话] trace=%s session=%s 失败: %s", trace_id, session_id, e)
         status = 429 if isinstance(e, RateLimitExceeded) else (404 if isinstance(e, ModelNotFound) else 503)
-        raise HTTPException(status_code=status, detail=str(e))
+        _detail_map = {429: "请求过于频繁，请稍后重试", 404: "模型未找到", 503: "所有模型均不可用，请稍后重试"}
+        raise HTTPException(status_code=status, detail=_detail_map.get(status, "服务异常"))
+    except ProviderCallError as e:
+        _record_failure(start_time, str(e))
+        await asyncio.to_thread(_deps.session_mgr.save)
+        logger.warning("[会话] trace=%s session=%s 厂商调用失败（可恢复）: %s", trace_id, session_id, e)
+        raise HTTPException(status_code=503, detail="模型服务暂时不可用，请稍后重试")
     except Exception as e:
         _record_failure(start_time, str(e))
         logger.error("[会话] trace=%s session=%s 异常: %s", trace_id, session_id, e, exc_info=True)
@@ -1138,13 +1233,101 @@ async def send_chat_message(session_id: str, request: ChatCompletionRequest):
         raise HTTPException(status_code=500, detail="推理服务内部错误，请稍后重试")
 
 
+@router.get("/api/memory/stats")
+async def get_memory_stats():
+    """获取 Memory 系统统计信息"""
+    from src.scheduler.memory import get_memory_manager
+    return get_memory_manager().get_long_term_stats()
+
+
+@router.get("/api/memory/entries")
+async def list_memory_entries(limit: int = 50):
+    """列出长期记忆条目"""
+    from src.scheduler.memory import get_memory_manager
+    store = get_memory_manager()._store
+    entries = store.get_all()
+    entries.sort(key=lambda e: e.last_accessed, reverse=True)
+    return {"entries": [e.to_dict() for e in entries[:limit]], "total": store.size()}
+
+
+@router.post("/api/memory/consolidate/{session_id}")
+async def consolidate_session_memory(session_id: str):
+    """手动触发指定会话的记忆巩固"""
+    from src.scheduler.memory import get_memory_manager
+    mgr = get_memory_manager()
+    added = mgr.on_session_end(session_id)
+    return {"consolidated": added}
+
+
+@router.post("/api/memory/add")
+async def add_memory_entry(body: dict):
+    """手动添加一条长期记忆"""
+    from src.scheduler.memory import get_memory_manager, MemoryEntry
+    import time as _time
+    content = body.get("content", "").strip()
+    mem_type = body.get("type", "semantic")
+    if not content:
+        raise HTTPException(status_code=400, detail="content 不能为空")
+    if len(content) > 1000:
+        raise HTTPException(status_code=400, detail="content 长度不能超过 1000 字符")
+    _VALID_TYPES = {"semantic", "episodic", "preference"}
+    if mem_type not in _VALID_TYPES:
+        raise HTTPException(status_code=400, detail=f"type 必须为 {', '.join(_VALID_TYPES)} 之一")
+    mgr = get_memory_manager()
+    now = _time.time()
+    entry = MemoryEntry(
+        id=f"manual_{int(now * 1000)}",
+        type=mem_type,
+        content=content,
+        importance=0.8,
+        created_at=now,
+        last_accessed=now,
+        tags=[],
+        source_session="manual",
+    )
+    mgr._store.add(entry)
+    return {"status": "ok", "id": entry.id}
+
+
+@router.delete("/api/memory/entries/{entry_id}")
+async def delete_memory_entry(entry_id: str):
+    """删除一条长期记忆"""
+    from src.scheduler.memory import get_memory_manager
+    mgr = get_memory_manager()
+    if mgr._store.remove_by_id(entry_id):
+        return {"status": "ok"}
+    raise HTTPException(status_code=404, detail="记忆条目不存在")
+
+
+@router.post("/api/memory/import")
+async def import_memory(body: dict):
+    """导入记忆数据（单次最多 500 条）"""
+    from src.scheduler.memory import get_memory_manager, MemoryEntry
+    mgr = get_memory_manager()
+    entries = body.get("entries", [])
+    if not isinstance(entries, list):
+        raise HTTPException(status_code=400, detail="entries 必须为数组")
+    _IMPORT_MAX = 500
+    if len(entries) > _IMPORT_MAX:
+        raise HTTPException(status_code=400, detail=f"单次最多导入 {_IMPORT_MAX} 条")
+    imported = 0
+    for e in entries:
+        content = (e.get("content") or "").strip()
+        if not content or len(content) > 1000:
+            continue
+        entry = MemoryEntry.from_dict(e)
+        mgr._store.add(entry)
+        imported += 1
+    return {"status": "ok", "imported": imported}
+
+
 @router.post("/api/chat/sessions/{session_id}/stream")
 async def stream_chat_message(session_id: str, request: ChatCompletionRequest):
-    """向指定会话发送消息（流式 SSE 响应 + 自动上下文管理）"""
-    from src.api.streaming import create_stream_response
-    from src.scheduler.dispatcher import AllModelsUnavailable, ModelNotFound, RateLimitExceeded
+    """向指定会话发送消息（流式 SSE 响应 + 自动上下文管理 + Memory 系统）"""
+    from src.scheduler.memory import get_memory_manager
 
     trace_id = uuid.uuid4().hex[:12]
+    memory_mgr = get_memory_manager()
 
     session = _deps.session_mgr.get(session_id)
     if not session:
@@ -1160,13 +1343,25 @@ async def stream_chat_message(session_id: str, request: ChatCompletionRequest):
     )
 
     session.add_message("user", user_msg)
-    if len(session.messages) == 1:
+    is_first_message = len(session.messages) == 1
+    long_term_ctx = ""
+    if is_first_message:
         session.auto_title()
+        long_term_ctx = memory_mgr.on_session_start(session_id, user_msg)
 
     context_messages = session.get_context_messages()
+
+    session_memory_ctx = memory_mgr.get_context_injection(session_id)
+    full_memory_ctx = "\n\n".join(filter(None, [long_term_ctx, session_memory_ctx]))
+    if full_memory_ctx and context_messages and context_messages[0].get("role") == "system":
+        context_messages[0] = {
+            **context_messages[0],
+            "content": (context_messages[0]["content"] or "") + "\n\n" + full_memory_ctx,
+        }
+
     ctx_request = ChatCompletionRequest(
         model=request.model or session.model,
-        messages=[ChatMessage(role=m["role"], content=m["content"]) for m in context_messages],
+        messages=[ChatMessage(role=m["role"], content=m["content"], tool_calls=m.get("tool_calls"), tool_call_id=m.get("tool_call_id"), name=m.get("name")) for m in context_messages],
         temperature=request.temperature,
         max_tokens=request.max_tokens,
         stream=True,
@@ -1183,7 +1378,12 @@ async def stream_chat_message(session_id: str, request: ChatCompletionRequest):
         _record_failure(start_time, str(e))
         logger.warning("[流式会话] trace=%s session=%s 失败: %s", trace_id, session_id, e)
         status = 429 if isinstance(e, RateLimitExceeded) else (404 if isinstance(e, ModelNotFound) else 503)
-        raise HTTPException(status_code=status, detail=str(e))
+        _detail_map = {429: "请求过于频繁，请稍后重试", 404: "模型未找到", 503: "所有模型均不可用，请稍后重试"}
+        raise HTTPException(status_code=status, detail=_detail_map.get(status, "服务异常"))
+    except ProviderCallError as e:
+        _record_failure(start_time, str(e))
+        logger.warning("[流式会话] trace=%s session=%s 厂商调用失败（可恢复）: %s", trace_id, session_id, e)
+        raise HTTPException(status_code=503, detail="模型服务暂时不可用，请稍后重试")
     except Exception as e:
         _record_failure(start_time, str(e))
         logger.error("[流式会话] trace=%s session=%s 异常: %s", trace_id, session_id, e, exc_info=True)
@@ -1197,32 +1397,49 @@ async def stream_chat_message(session_id: str, request: ChatCompletionRequest):
 
     async def _collect_and_stream():
         """流式输出的同时收集完整回复写入会话"""
-        import json as _json
-
         chat_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
         created = int(time.time())
-        full_reply = []
+        full_reply: list[str | dict] = []
+        stream_broken = False
 
         meta = {"model": model_name, "provider": provider_name, "title": session.title, "session_id": session.id}
-        yield f"data: {_json.dumps({'meta': meta}, ensure_ascii=False)}\n\n"
+        yield f"data: {json.dumps({'meta': meta}, ensure_ascii=False)}\n\n"
 
         try:
             async for chunk in content_iter:
                 full_reply.append(chunk)
+                delta = chunk if isinstance(chunk, dict) else {"content": chunk}
                 data = {
                     "id": chat_id, "object": "chat.completion.chunk", "created": created,
                     "model": model_name,
-                    "choices": [{"index": 0, "delta": {"content": chunk}, "finish_reason": None}],
+                    "choices": [{"index": 0, "delta": delta, "finish_reason": None}],
                 }
-                yield f"data: {_json.dumps(data, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
         except Exception as ex:
+            stream_broken = True
             logger.error("[流式会话] trace=%s 流式传输异常: %s", trace_id, ex)
 
-        raw_text = "".join(full_reply)
+        raw_text = "".join(
+            (c.get("content", "") if isinstance(c, dict) else str(c)) for c in full_reply
+        )
         reply_text, thinking = _strip_thinking(raw_text)
         if thinking:
             logger.info("[流式会话] trace=%s 模型 %s 思考过程:\n%s", trace_id, model_name, thinking[:500])
-        session.add_message("assistant", reply_text, model=model_name)
+
+        save_assistant = (not stream_broken) and len(reply_text.strip()) >= 1
+        if save_assistant:
+            session.add_message("assistant", reply_text, model=model_name)
+            memory_mgr.on_turn_complete(session_id, user_msg, reply_text)
+        elif stream_broken:
+            logger.info(
+                "[流式会话] trace=%s 流式中断，跳过写入助手消息（避免残缺上下文）",
+                trace_id,
+            )
+        else:
+            logger.info(
+                "[流式会话] trace=%s 输出为空，跳过写入助手消息",
+                trace_id,
+            )
         await asyncio.to_thread(_deps.session_mgr.save)
 
         logger.info(
@@ -1239,16 +1456,19 @@ async def stream_chat_message(session_id: str, request: ChatCompletionRequest):
                 "total_messages": len(session.messages),
             },
         }
-        yield f"data: {_json.dumps(end_data, ensure_ascii=False)}\n\n"
+        yield f"data: {json.dumps(end_data, ensure_ascii=False)}\n\n"
         yield "data: [DONE]\n\n"
 
-    from starlette.responses import StreamingResponse
     return StreamingResponse(
         _collect_and_stream(),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
     )
 
+
+# endregion
+
+# region 实时日志
 
 # --- 实时日志 ---
 
@@ -1259,8 +1479,7 @@ async def get_logs(after: int = 0, limit: int = 200):
     - after: 上次返回的 latest_seq，仅获取此后的新日志
     - limit: 最多返回条数
     """
-    from src.api.log_buffer import get_instance
-    handler = get_instance()
+    handler = _get_log_buffer()
     if not handler:
         return {"entries": [], "latest_seq": 0}
     limit = min(max(limit, 1), 500)
@@ -1271,11 +1490,80 @@ async def get_logs(after: int = 0, limit: int = 200):
 @router.delete("/api/logs/clear")
 async def clear_logs():
     """清空日志缓冲"""
-    from src.api.log_buffer import get_instance
-    handler = get_instance()
+    handler = _get_log_buffer()
     if handler:
         handler.clear()
     return {"status": "ok"}
+
+
+def _tail_file(path, n: int, chunk_size: int = 8192) -> list[str]:
+    """从文件末尾高效读取最后 n 行，避免将整个文件加载到内存。"""
+    with open(path, "rb") as f:
+        f.seek(0, 2)
+        size = f.tell()
+        if size == 0:
+            return []
+        buf = b""
+        pos = size
+        lines_found = 0
+        while pos > 0 and lines_found <= n:
+            read_size = min(chunk_size, pos)
+            pos -= read_size
+            f.seek(pos)
+            buf = f.read(read_size) + buf
+            lines_found = buf.count(b"\n")
+        return buf.decode("utf-8", errors="replace").splitlines()[-n:]
+
+
+@router.get("/api/logs/history")
+async def get_log_history(date: str = "", tail: int = 500):
+    """查询历史日志文件。
+
+    - date: 日期字符串（YYYY-MM-DD），为空时返回可用日期列表
+    - tail: 返回文件末尾行数（默认 500，最大 5000）
+    """
+    log_dir = Path("logs")
+    if not log_dir.is_dir():
+        return {"dates": [], "lines": []}
+
+    if not date:
+        dates = []
+        for f in sorted(log_dir.iterdir()):
+            if f.is_file() and f.name.startswith("app.log"):
+                stat = f.stat()
+                size_kb = round(stat.st_size / 1024, 1)
+                if f.name == "app.log":
+                    dates.append({"name": "app.log", "label": "当前", "size_kb": size_kb})
+                else:
+                    suffix = f.name.replace("app.log.", "")
+                    dates.append({"name": f.name, "label": suffix, "size_kb": size_kb})
+        return {"dates": dates}
+
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", date) and date != "current":
+        return JSONResponse(status_code=400, content={"detail": "日期格式无效，应为 YYYY-MM-DD 或 current"})
+
+    if date == "current":
+        target = log_dir / "app.log"
+    else:
+        target = log_dir / f"app.log.{date}"
+
+    if not target.resolve().parent.samefile(log_dir.resolve()):
+        return JSONResponse(status_code=400, content={"detail": "非法路径"})
+
+    if not target.is_file():
+        return JSONResponse(status_code=404, content={"detail": f"日志文件不存在: {target.name}"})
+
+    tail = min(max(tail, 1), 5000)
+    try:
+        lines = await asyncio.to_thread(_tail_file, target, tail)
+        return {
+            "file": target.name,
+            "returned_lines": len(lines),
+            "lines": lines,
+        }
+    except Exception as e:
+        logger.warning("读取日志文件失败: %s", e)
+        return JSONResponse(status_code=500, content={"detail": "读取日志文件失败"})
 
 
 @router.get("/api/logs/level")
@@ -1295,3 +1583,190 @@ async def set_log_level(level: str):
     logging.getLogger().setLevel(numeric)
     logger.info("日志级别已切换为 %s", level_upper)
     return {"status": "ok", "level": level_upper}
+
+
+# endregion
+
+
+# region 结构化输出测试 API
+
+class StructuredTestRequest(BaseModel):
+    model: str | None = None
+    schema_level: str = "basic"
+
+
+_STRUCTURED_TEST_SCHEMAS = {
+    "basic": {
+        "prompt": "列出3种编程语言",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "languages": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string"},
+                            "year": {"type": "integer"},
+                        },
+                        "required": ["name", "year"],
+                    },
+                },
+            },
+            "required": ["languages"],
+        },
+    },
+    "nested": {
+        "prompt": "描述一个Web应用的技术栈",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "app_name": {"type": "string"},
+                "stack": {
+                    "type": "object",
+                    "properties": {
+                        "frontend": {"type": "object", "properties": {"framework": {"type": "string"}, "language": {"type": "string"}}, "required": ["framework", "language"]},
+                        "backend": {"type": "object", "properties": {"framework": {"type": "string"}, "language": {"type": "string"}}, "required": ["framework", "language"]},
+                        "database": {"type": "string"},
+                    },
+                    "required": ["frontend", "backend", "database"],
+                },
+                "deployment": {"type": "string"},
+            },
+            "required": ["app_name", "stack", "deployment"],
+        },
+    },
+    "enum_constraints": {
+        "prompt": "分析文本情感：'今天天气真好，我很开心'",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string"},
+                "sentiment": {"type": "string", "enum": ["positive", "negative", "neutral"]},
+                "confidence": {"type": "number"},
+                "keywords": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["text", "sentiment", "confidence", "keywords"],
+        },
+    },
+}
+
+
+@router.post("/api/test/structured-output")
+async def test_structured_output(req: StructuredTestRequest):
+    """测试模型结构化输出能力
+
+    - model=null: 测试所有已启用模型
+    - model="xxx": 仅测试指定模型
+    - schema_level: basic / nested / enum_constraints
+    """
+    test_def = _STRUCTURED_TEST_SCHEMAS.get(req.schema_level)
+    if not test_def:
+        raise HTTPException(
+            status_code=400,
+            detail=f"不支持的 schema_level: {req.schema_level}，可选: {list(_STRUCTURED_TEST_SCHEMAS.keys())}",
+        )
+
+    enabled_models = _deps.config_manager.get_enabled_models()
+    if not enabled_models:
+        raise HTTPException(status_code=503, detail="没有可用模型")
+
+    if req.model:
+        target_models = [(prov, mc.name) for prov, mc in enabled_models if mc.name == req.model]
+        if not target_models:
+            raise HTTPException(status_code=404, detail=f"模型 {req.model} 未找到或未启用")
+    else:
+        target_models = [(prov, mc.name) for prov, mc in enabled_models]
+
+    results = []
+    for provider_name, model_id in target_models:
+        result = await _test_single_model_structured(
+            provider_name, model_id, test_def["prompt"], test_def["schema"],
+        )
+        results.append(result)
+
+    passed = [r for r in results if r["json_valid"] and r["schema_valid"]]
+    return {
+        "schema_level": req.schema_level,
+        "total_tested": len(results),
+        "passed": len(passed),
+        "failed": len(results) - len(passed),
+        "results": results,
+    }
+
+
+async def _test_single_model_structured(provider_name: str, model_id: str, prompt: str, schema: dict) -> dict:
+    """测试单个模型的结构化输出"""
+    from src.models.schemas import ResponseFormat
+
+    schema_desc = json.dumps(schema, ensure_ascii=False, indent=2)
+    full_prompt = f"{prompt}\n\n请严格按以下 JSON Schema 输出：\n{schema_desc}"
+
+    request = ChatCompletionRequest(
+        model=model_id,
+        messages=[ChatMessage(role="user", content=full_prompt)],
+        temperature=0.1,
+        max_tokens=500,
+        response_format=ResponseFormat(
+            type="json_schema",
+            json_schema={"name": "test_output", "schema": schema},
+        ),
+    )
+
+    start = time.time()
+    try:
+        enabled_models = _deps.config_manager.get_enabled_models()
+        _prov, _model, result = await _deps.dispatcher.dispatch(
+            request, enabled_models, trace_id=uuid.uuid4().hex[:8],
+        )
+        latency = round((time.time() - start) * 1000)
+
+        content = result.choices[0].message.content or "" if result.choices else ""
+        content = _extract_json_from_response(content)
+
+        try:
+            parsed = json.loads(content)
+            required = schema.get("required", [])
+            has_all_fields = all(k in parsed for k in required)
+            return {
+                "model": model_id,
+                "provider": provider_name,
+                "status": "success",
+                "json_valid": True,
+                "schema_valid": has_all_fields,
+                "latency_ms": latency,
+                "output": content[:200],
+            }
+        except (json.JSONDecodeError, ValueError) as e:
+            return {
+                "model": model_id,
+                "provider": provider_name,
+                "status": "json_parse_error",
+                "json_valid": False,
+                "schema_valid": False,
+                "latency_ms": latency,
+                "error": str(e)[:60],
+                "raw_output": content[:200],
+            }
+    except Exception as e:
+        latency = round((time.time() - start) * 1000)
+        return {
+            "model": model_id,
+            "provider": provider_name,
+            "status": "error",
+            "json_valid": False,
+            "schema_valid": False,
+            "latency_ms": latency,
+            "error": str(e)[:100],
+        }
+
+
+@router.get("/api/test/structured-output/schemas")
+async def list_test_schemas():
+    """列出可用的测试 schema"""
+    return {
+        name: {"prompt": v["prompt"], "required_fields": v["schema"].get("required", [])}
+        for name, v in _STRUCTURED_TEST_SCHEMAS.items()
+    }
+
+# endregion

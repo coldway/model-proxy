@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 import uuid
 from typing import AsyncIterator
@@ -49,6 +50,14 @@ class GoogleProvider(BaseProvider):
             payload["generationConfig"]["maxOutputTokens"] = request.max_tokens
         if request.tools:
             payload["tools"] = [self._convert_tools(request.tools)]
+        if request.response_format:
+            if request.response_format.type in ("json_object", "json_schema"):
+                payload["generationConfig"]["responseMimeType"] = "application/json"
+            if request.response_format.type == "json_schema" and request.response_format.json_schema:
+                schema = request.response_format.json_schema
+                if "schema" in schema:
+                    schema = schema["schema"]
+                payload["generationConfig"]["responseSchema"] = self._clean_json_schema(schema)
         return payload
 
     def _convert_tools(self, tools) -> dict:
@@ -113,7 +122,7 @@ class GoogleProvider(BaseProvider):
 
     async def stream_chat_completion(
         self, model: str, request: ChatCompletionRequest
-    ) -> AsyncIterator[str]:
+    ) -> AsyncIterator[dict]:
         url = f"{GOOGLE_API_BASE}/models/{model}:streamGenerateContent"
         params = {"key": self._api_key, "alt": "sse"}
 
@@ -122,8 +131,12 @@ class GoogleProvider(BaseProvider):
         ) as resp:
             if resp.status_code != 200:
                 await resp.aread()
-                logger.error(f"Google 流式请求失败 ({resp.status_code}): {resp.text[:200]}")
-                raise Exception(f"Google API {resp.status_code}")
+                logger.error("Google 流式请求失败 (%s): %s", resp.status_code, resp.text[:200])
+                raise httpx.HTTPStatusError(
+                    f"Google API {resp.status_code}",
+                    request=resp.request,
+                    response=resp,
+                )
             async for line in resp.aiter_lines():
                 if not line.startswith("data: "):
                     continue
@@ -135,7 +148,7 @@ class GoogleProvider(BaseProvider):
                     parts = candidates[0].get("content", {}).get("parts", [])
                     text = "".join(p.get("text", "") for p in parts)
                     if text:
-                        yield text
+                        yield {"content": text}
                 except (json.JSONDecodeError, IndexError, KeyError):
                     continue
 
@@ -152,7 +165,7 @@ class GoogleProvider(BaseProvider):
                 if "generateContent" in m.get("supportedGenerationMethods", [])
             ]
         except Exception as e:
-            logger.error(f"获取 Google 模型列表失败: {e}")
+            logger.error("获取 Google 模型列表失败: %s", e)
             return []
 
     async def health_check(self) -> bool:
@@ -163,23 +176,27 @@ class GoogleProvider(BaseProvider):
             return False
 
     def _convert_messages(self, messages: list[ChatMessage]) -> list[dict]:
-        """将 OpenAI 格式消息转换为 Gemini 格式（含 tool 消息）"""
+        """将 OpenAI 格式消息转换为 Gemini 格式。
+
+        对于 tool_call 历史：由于 Gemini 3+ 要求 functionCall 必须携带
+        thought_signature（仅 Gemini 自身产生），而跨模型路由时 tool_call
+        来自其他厂商无此签名，因此将 tool_call 历史降级为文本描述，
+        避免 400 Bad Request。
+        """
         contents = []
         for msg in messages:
             if msg.role == "tool":
+                tool_name = msg.name or "unknown"
+                result_text = msg.content or ""
                 contents.append({
                     "role": "user",
-                    "parts": [{
-                        "functionResponse": {
-                            "name": msg.name or "unknown",
-                            "response": {"result": msg.content or ""},
-                        }
-                    }],
+                    "parts": [{"text": f"[工具 {tool_name} 返回结果]\n{result_text}"}],
                 })
             elif msg.role == "assistant" and msg.tool_calls:
                 parts = []
                 if msg.content:
                     parts.append({"text": msg.content})
+                call_descs = []
                 for tc in msg.tool_calls:
                     raw_args = tc.function.arguments
                     if isinstance(raw_args, str):
@@ -189,12 +206,8 @@ class GoogleProvider(BaseProvider):
                             args = {"raw": raw_args}
                     else:
                         args = raw_args or {}
-                    parts.append({
-                        "functionCall": {
-                            "name": tc.function.name,
-                            "args": args,
-                        }
-                    })
+                    call_descs.append(f"调用工具 {tc.function.name}({json.dumps(args, ensure_ascii=False)})")
+                parts.append({"text": "\n".join(call_descs)})
                 contents.append({"role": "model", "parts": parts})
             else:
                 role = "user" if msg.role in ("user", "system") else "model"
@@ -207,7 +220,6 @@ class GoogleProvider(BaseProvider):
                             elif part.get("type") == "image_url":
                                 url = part.get("image_url", {}).get("url", "")
                                 if url and url.startswith("data:"):
-                                    import re
                                     m = re.match(r"data:([^;]+);base64,(.+)", url, re.DOTALL)
                                     if m:
                                         parts.append({"inlineData": {"mimeType": m.group(1), "data": m.group(2)}})

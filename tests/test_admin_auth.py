@@ -26,9 +26,9 @@ def app_with_token(tmp_path, monkeypatch):
             shutil.copy(src_file, tmp_path / "conf" / dst)
 
     config_path = tmp_path / "conf" / "config.yaml"
-    content = config_path.read_text()
+    content = config_path.read_text(encoding="utf-8")
     content += "\n  admin_token: test-secret-token\n"
-    config_path.write_text(content)
+    config_path.write_text(content, encoding="utf-8")
 
     import main as main_mod
     importlib.reload(main_mod)
@@ -54,7 +54,7 @@ class TestAdminAuth:
     async def test_api_requires_token(self, app_with_token):
         transport = ASGITransport(app=app_with_token)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
-            resp = await client.get("/api/models")
+            resp = await client.get("/api/config")
             assert resp.status_code == 401
 
     @pytest.mark.asyncio
@@ -62,7 +62,37 @@ class TestAdminAuth:
         transport = ASGITransport(app=app_with_token)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             resp = await client.get(
-                "/api/models",
+                "/api/config",
                 headers={"Authorization": "Bearer test-secret-token"},
             )
-            assert resp.status_code != 401
+            assert resp.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_v1_also_protected_when_only_admin_token(self, app_with_token):
+        """只配 admin_token 时，/v1/ 路径也应受保护（互兜底）"""
+        transport = ASGITransport(app=app_with_token)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get("/v1/models")
+            assert resp.status_code == 401
+
+            resp = await client.get(
+                "/v1/models",
+                headers={"Authorization": "Bearer test-secret-token"},
+            )
+            assert resp.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_bearer_case_insensitive(self, app_with_token):
+        """Bearer 前缀大小写不敏感"""
+        transport = ASGITransport(app=app_with_token)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get(
+                "/api/config",
+                headers={"Authorization": "bearer test-secret-token"},
+            )
+            assert resp.status_code == 200
+            resp = await client.get(
+                "/api/config",
+                headers={"Authorization": "BEARER test-secret-token"},
+            )
+            assert resp.status_code == 200

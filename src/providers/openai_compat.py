@@ -98,7 +98,7 @@ class OpenAICompatibleProvider(BaseProvider):
 
     async def stream_chat_completion(
         self, model: str, request: ChatCompletionRequest
-    ) -> AsyncIterator[str]:
+    ) -> AsyncIterator[dict]:
         url = f"{self._base_url}/chat/completions"
         async with self._client.stream(
             "POST", url,
@@ -117,9 +117,9 @@ class OpenAICompatibleProvider(BaseProvider):
                     choices = chunk.get("choices", [])
                     if not choices:
                         continue
-                    text = choices[0].get("delta", {}).get("content", "")
-                    if text:
-                        yield text
+                    delta = choices[0].get("delta", {})
+                    if delta:
+                        yield delta
                 except (json.JSONDecodeError, IndexError, KeyError):
                     continue
 
@@ -132,7 +132,7 @@ class OpenAICompatibleProvider(BaseProvider):
             data = resp.json()
             return [m["id"] for m in data.get("data", [])]
         except Exception as e:
-            logger.error(f"获取 {self._provider_name} 模型列表失败: {e}")
+            logger.error("获取 %s 模型列表失败: %s", self._provider_name, e)
             return []
 
     async def health_check(self) -> bool:

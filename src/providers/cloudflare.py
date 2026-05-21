@@ -23,10 +23,13 @@ logger = logging.getLogger(__name__)
 
 
 class CloudflareProvider(BaseProvider):
-    """
-    Cloudflare Workers AI 适配器。
+    """Cloudflare Workers AI 适配器。
+
     API 格式与 OpenAI 不同，需要 account_id。
     api_key 格式："{account_id}:{api_token}"
+
+    注意：Cloudflare Workers AI REST API 不支持标准 SSE 流式输出，
+    因此 stream_chat_completion 回退到 BaseProvider 的假流式（一次缓冲 yield）。
     """
 
     def __init__(self, api_key: str):
@@ -87,7 +90,7 @@ class CloudflareProvider(BaseProvider):
             models = data.get("result", [])
             return [m.get("name", m.get("id", "")) for m in models if "chat" in m.get("task", {}).get("name", "").lower() or "text-generation" in m.get("task", {}).get("name", "").lower()]
         except Exception as e:
-            logger.error(f"获取 Cloudflare 模型列表失败: {e}")
+            logger.error("获取 Cloudflare 模型列表失败: %s", e)
             return [
                 "@cf/meta/llama-3.1-8b-instruct",
                 "@cf/mistral/mistral-7b-instruct-v0.2-lora",

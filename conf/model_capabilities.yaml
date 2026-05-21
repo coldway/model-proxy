@@ -1,760 +1,207 @@
-google/gemini-3.1-flash-lite-preview:
-  provider: google
-  model: gemini-3.1-flash-lite-preview
+github/gpt-4o-mini:
   available: true
-  tool_calling: true
-  multi_turn_tc: false
-  chinese: true
-  vision: true
-  json_mode: true
-  streaming: true
-  reasoning: true
-  latency_ms: 31255
   error: null
-  probe_response: 'get_current_time({"city": "北京"})'
-  mt_issue: 'error: Client error ''400 Bad Request'' for url ''https://generativela'
-  chinese_response: 三个或以上不同音高的音，按一定音程关系结合。
-  vision_response: Red
-  json_sample: "{\n  \"instruments\": [\n    {\n      \"name\": \"钢琴\",\n      \"\
-    type\": \"键盘乐器\"\n    },\n    {"
-  stream_chunks: 2
-  stream_ttfb_ms: 857
-  reasoning_response: 开启两盏灯，过会儿关掉一盏，进屋摸灯泡温度。
-  tested_at: '2026-05-13 17:30:57'
-google/gemini-3.1-flash-lite:
-  provider: google
-  model: gemini-3.1-flash-lite
-  available: true
+  latency_ms: 3749
+  model: gpt-4o-mini
+  provider: github
+  tested_at: '2026-05-17 02:27:55'
   tool_calling: true
-  multi_turn_tc: false
-  chinese: true
-  vision: true
-  json_mode: true
-  streaming: true
-  reasoning: true
-  latency_ms: 1029
-  error: null
-  probe_response: 'get_current_time({"city": "北京"})'
-  mt_issue: 'error: Client error ''400 Bad Request'' for url ''https://generativela'
-  chinese_response: 三个或以上不同音高的音，按一定音程关系结合。
-  vision_response: Red
-  json_sample: "{\n  \"instruments\": [\n    {\n      \"name\": \"钢琴\",\n      \"\
-    type\": \"键盘乐器\"\n    },\n    {"
-  stream_chunks: 2
-  stream_ttfb_ms: 1867
-  reasoning_response: 开一盏灯一段时间后关掉，再开第二盏，进屋摸灯泡。
-  tested_at: '2026-05-13 17:31:46'
-google/gemini-3-pro-image-preview:
-  provider: google
-  model: gemini-3-pro-image-preview
-  available: false
-  tool_calling: false
-  multi_turn_tc: false
-  chinese: false
-  vision: false
-  json_mode: false
-  streaming: false
-  reasoning: false
-  latency_ms: 0
-  error: rate_limited (429)
-  tested_at: '2026-05-13 17:43:46'
-google/nano-banana-pro-preview:
-  provider: google
-  model: nano-banana-pro-preview
-  available: false
-  tool_calling: false
-  multi_turn_tc: false
-  chinese: false
-  vision: false
-  json_mode: false
-  streaming: false
-  reasoning: false
-  latency_ms: 0
-  error: rate_limited (429)
-  tested_at: '2026-05-13 17:43:48'
-google/gemini-3.1-flash-image-preview:
-  provider: google
-  model: gemini-3.1-flash-image-preview
-  available: false
-  tool_calling: false
-  multi_turn_tc: false
-  chinese: false
-  vision: false
-  json_mode: false
-  streaming: false
-  reasoning: false
-  latency_ms: 0
-  error: rate_limited (429)
-  tested_at: '2026-05-13 17:43:50'
-google/lyria-3-clip-preview:
-  provider: google
-  model: lyria-3-clip-preview
-  available: false
-  tool_calling: false
-  multi_turn_tc: false
-  chinese: false
-  vision: false
-  json_mode: false
-  streaming: false
-  reasoning: false
-  latency_ms: 0
-  error: rate_limited (429)
-  tested_at: '2026-05-13 17:43:52'
-google/lyria-3-pro-preview:
-  provider: google
-  model: lyria-3-pro-preview
-  available: false
-  tool_calling: false
-  multi_turn_tc: false
-  chinese: false
-  vision: false
-  json_mode: false
-  streaming: false
-  reasoning: false
-  latency_ms: 0
-  error: rate_limited (429)
-  tested_at: '2026-05-13 17:43:54'
-google/gemini-3.1-flash-tts-preview:
-  provider: google
-  model: gemini-3.1-flash-tts-preview
-  available: true
-  tool_calling: false
-  multi_turn_tc: false
-  chinese: false
-  vision: false
-  json_mode: false
-  streaming: false
-  reasoning: false
-  latency_ms: 0
-  error: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://generativelanguage.googleapis.co'
-  tested_at: '2026-05-13 17:32:00'
-google/gemini-robotics-er-1.5-preview:
-  provider: google
-  model: gemini-robotics-er-1.5-preview
-  available: false
-  tool_calling: false
-  multi_turn_tc: false
-  chinese: false
-  vision: false
-  json_mode: false
-  streaming: false
-  reasoning: false
-  latency_ms: 0
-  error: Client error '404 Not Found' for url 'https://generativelanguage.googleapis.com/v1beta/models/gemini-robotics-er-1.5-pre
-  tested_at: '2026-05-13 17:32:02'
-groq/groq/compound:
-  provider: groq
-  model: groq/compound
-  available: true
-  tool_calling: false
-  multi_turn_tc: false
-  chinese: false
-  vision: false
-  json_mode: false
-  streaming: false
-  reasoning: false
-  latency_ms: 0
-  error: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://api.groq.com/openai/v1/chat/comp'
-  tested_at: '2026-05-13 17:32:11'
-google/gemini-robotics-er-1.6-preview:
-  provider: google
-  model: gemini-robotics-er-1.6-preview
-  available: true
-  tool_calling: true
-  multi_turn_tc: false
-  chinese: true
-  vision: false
-  json_mode: false
-  streaming: false
-  reasoning: false
-  latency_ms: 1127
-  error: null
-  probe_response: 'get_current_time({"city": "北京"})'
-  mt_issue: 'error: Client error ''400 Bad Request'' for url ''https://generativela'
-  chinese_response: 三个
-  vision_response: empty
-  json_sample: '{'
-  stream_chunks: 0
-  stream_ttfb_ms: 0
-  tested_at: '2026-05-13 17:32:18'
-google/gemini-2.5-computer-use-preview-10-2025:
-  provider: google
-  model: gemini-2.5-computer-use-preview-10-2025
-  available: false
-  tool_calling: false
-  multi_turn_tc: false
-  chinese: false
-  vision: false
-  json_mode: false
-  streaming: false
-  reasoning: false
-  latency_ms: 0
-  error: rate_limited (429)
-  tested_at: '2026-05-13 17:43:56'
 google/deep-research-max-preview-04-2026:
-  provider: google
+  available: true
+  chinese: false
+  error: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://generativelanguage.googleapis.co'
+  json_mode: false
+  latency_ms: 0
   model: deep-research-max-preview-04-2026
-  available: true
-  tool_calling: false
   multi_turn_tc: false
-  chinese: false
-  vision: false
-  json_mode: false
-  streaming: false
+  provider: google
   reasoning: false
-  latency_ms: 0
-  error: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://generativelanguage.googleapis.co'
+  streaming: false
   tested_at: '2026-05-13 17:32:22'
-groq/qwen/qwen3-32b:
-  provider: groq
-  model: qwen/qwen3-32b
-  available: true
-  tool_calling: true
-  multi_turn_tc: true
-  chinese: true
+  tool_calling: false
   vision: false
-  json_mode: false
-  streaming: true
-  reasoning: true
-  latency_ms: 394
-  error: null
-  probe_response: get_current_time({"city":"北京"})
-  mt_response: 现在是2026年5月13日下午4点整（中国标准时间）。
-  chinese_response: '<think>
-
-    嗯，用户问的是“什么是和弦？”，需要在20字以内用中文回答。首先，我得确定和弦的基本定义。和弦是由三个或'
-  vision_error: not_supported
-  json_sample: '<think>
-
-    好的，用户让我用JSON格式列出三种乐器，格式是{"instruments": [{"name": "...", "type": "..."}]'
-  stream_chunks: 5
-  stream_ttfb_ms: 254
-  reasoning_response: '<think>
-
-    嗯，用户的问题是关于如何确定三个开关对应三个灯泡的正确方法，而且只能进入房间一次。首先，我需要回忆一下类似的经典谜题。通常这类问题需要利用灯泡的'
-  tested_at: '2026-05-13 17:32:23'
 google/deep-research-preview-04-2026:
-  provider: google
+  available: true
+  chinese: false
+  error: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://generativelanguage.googleapis.co'
+  json_mode: false
+  latency_ms: 0
   model: deep-research-preview-04-2026
-  available: true
-  tool_calling: false
   multi_turn_tc: false
-  chinese: false
-  vision: false
-  json_mode: false
-  streaming: false
+  provider: google
   reasoning: false
-  latency_ms: 0
-  error: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://generativelanguage.googleapis.co'
+  streaming: false
   tested_at: '2026-05-13 17:32:24'
-groq/canopylabs/orpheus-arabic-saudi:
-  provider: groq
-  model: canopylabs/orpheus-arabic-saudi
-  available: true
   tool_calling: false
-  multi_turn_tc: false
-  chinese: false
   vision: false
-  json_mode: false
-  streaming: false
-  reasoning: false
-  latency_ms: 0
-  error: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://api.groq.com/openai/v1/chat/comp'
-  tested_at: '2026-05-13 17:32:25'
 google/deep-research-pro-preview-12-2025:
-  provider: google
+  available: true
+  chinese: false
+  error: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://generativelanguage.googleapis.co'
+  json_mode: false
+  latency_ms: 0
   model: deep-research-pro-preview-12-2025
-  available: true
-  tool_calling: false
   multi_turn_tc: false
-  chinese: false
-  vision: false
-  json_mode: false
-  streaming: false
-  reasoning: false
-  latency_ms: 0
-  error: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://generativelanguage.googleapis.co'
-  tested_at: '2026-05-13 17:32:27'
-groq/allam-2-7b:
-  provider: groq
-  model: allam-2-7b
-  available: true
-  tool_calling: false
-  multi_turn_tc: false
-  chinese: false
-  vision: false
-  json_mode: false
-  streaming: false
-  reasoning: false
-  latency_ms: 0
-  error: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://api.groq.com/openai/v1/chat/comp'
-  tested_at: '2026-05-13 17:32:27'
-groq/openai/gpt-oss-safeguard-20b:
-  provider: groq
-  model: openai/gpt-oss-safeguard-20b
-  available: true
-  tool_calling: true
-  multi_turn_tc: true
-  chinese: false
-  vision: false
-  json_mode: true
-  streaming: false
-  reasoning: false
-  latency_ms: 279
-  error: null
-  probe_response: get_current_time({"city":"北京"})
-  mt_response: 现在北京的时间是 2026‑05‑13 16:00:00 （北京时间，CST）。
-  chinese_response: ''
-  vision_error: not_supported
-  json_sample: '{"instruments":[{"name":"小提琴","type":"弦乐器"},{"name":"钢琴","type":"键盘乐器"},{"name":'
-  stream_chunks: 0
-  stream_ttfb_ms: 0
-  reasoning_response: ''
-  tested_at: '2026-05-13 17:32:37'
-groq/llama-3.3-70b-versatile:
-  provider: groq
-  model: llama-3.3-70b-versatile
-  available: true
-  tool_calling: true
-  multi_turn_tc: true
-  chinese: true
-  vision: false
-  json_mode: true
-  streaming: true
-  reasoning: true
-  latency_ms: 361
-  error: null
-  probe_response: get_current_time({"city":"北京"})
-  mt_response: 北京现在是16:00。
-  chinese_response: 和弦是同时发出的多个音符。
-  vision_error: not_supported
-  json_sample: '{"instruments": [{"name": "钢琴", "type": "键盘乐器"}, {"name": "小提琴", "type":
-    "弦乐器"},'
-  stream_chunks: 5
-  stream_ttfb_ms: 307
-  reasoning_response: 打开开关1 5分钟，然后关闭。打开开关2，进入房间。热的灯对应开关1，亮的对应开关2，剩下的对应开关3。
-  tested_at: '2026-05-13 17:32:47'
-groq/whisper-large-v3:
-  provider: groq
-  model: whisper-large-v3
-  available: true
-  tool_calling: false
-  multi_turn_tc: false
-  chinese: false
-  vision: false
-  json_mode: false
-  streaming: false
-  reasoning: false
-  latency_ms: 0
-  error: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://api.groq.com/openai/v1/chat/comp'
-  tested_at: '2026-05-13 17:32:50'
-groq/whisper-large-v3-turbo:
-  provider: groq
-  model: whisper-large-v3-turbo
-  available: true
-  tool_calling: false
-  multi_turn_tc: false
-  chinese: false
-  vision: false
-  json_mode: false
-  streaming: false
-  reasoning: false
-  latency_ms: 0
-  error: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://api.groq.com/openai/v1/chat/comp'
-  tested_at: '2026-05-13 17:32:52'
-groq/meta-llama/llama-prompt-guard-2-86m:
-  provider: groq
-  model: meta-llama/llama-prompt-guard-2-86m
-  available: true
-  tool_calling: false
-  multi_turn_tc: false
-  chinese: false
-  vision: false
-  json_mode: false
-  streaming: false
-  reasoning: false
-  latency_ms: 0
-  error: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://api.groq.com/openai/v1/chat/comp'
-  tested_at: '2026-05-13 17:32:55'
-groq/groq/compound-mini:
-  provider: groq
-  model: groq/compound-mini
-  available: true
-  tool_calling: false
-  multi_turn_tc: false
-  chinese: false
-  vision: false
-  json_mode: false
-  streaming: false
-  reasoning: false
-  latency_ms: 0
-  error: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://api.groq.com/openai/v1/chat/comp'
-  tested_at: '2026-05-13 17:32:57'
-groq/openai/gpt-oss-20b:
-  provider: groq
-  model: openai/gpt-oss-20b
-  available: true
-  tool_calling: true
-  multi_turn_tc: true
-  chinese: false
-  vision: false
-  json_mode: true
-  streaming: false
-  reasoning: false
-  latency_ms: 267
-  error: null
-  probe_response: get_current_time({"city":"北京"})
-  mt_response: 现在北京时间是 2026‑05‑13 16:00 （即 下午 4:00）。
-  chinese_response: ''
-  vision_error: not_supported
-  json_sample: '{"instruments":[{"name":"Violin","type":"String"},{"name":"Piano","type":"Keyboa'
-  stream_chunks: 0
-  stream_ttfb_ms: 0
-  reasoning_response: ''
-  tested_at: '2026-05-13 17:33:07'
-groq/canopylabs/orpheus-v1-english:
-  provider: groq
-  model: canopylabs/orpheus-v1-english
-  available: true
-  tool_calling: false
-  multi_turn_tc: false
-  chinese: false
-  vision: false
-  json_mode: false
-  streaming: false
-  reasoning: false
-  latency_ms: 0
-  error: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://api.groq.com/openai/v1/chat/comp'
-  tested_at: '2026-05-13 17:33:09'
-groq/llama-3.1-8b-instant:
-  provider: groq
-  model: llama-3.1-8b-instant
-  available: true
-  tool_calling: true
-  multi_turn_tc: false
-  chinese: true
-  vision: false
-  json_mode: true
-  streaming: true
-  reasoning: false
-  latency_ms: 247
-  error: null
-  probe_response: get_current_time({"city":"北京"})
-  mt_issue: loop_call
-  chinese_response: 和弦是指同时演奏的三个或三个以上音符的组合，通常包括根音、第三音和五度音。
-  vision_error: not_supported
-  json_sample: '{"instruments": [{"name": "钢琴", "type": "键盘乐器"}, {"name": "吉他", "type":
-    "弦乐器"}, '
-  stream_chunks: 5
-  stream_ttfb_ms: 209
-  reasoning_response: 进房间后，先关掉所有灯。然后打开开关1，观察哪盏灯亮。关掉开关1，打开开关2，观察哪盏灯亮。最后，关掉开关2，打开开关3，观察哪盏灯亮。
-  tested_at: '2026-05-13 17:33:19'
-groq/meta-llama/llama-4-scout-17b-16e-instruct:
-  provider: groq
-  model: meta-llama/llama-4-scout-17b-16e-instruct
-  available: true
-  tool_calling: true
-  multi_turn_tc: true
-  chinese: true
-  vision: true
-  json_mode: true
-  streaming: true
-  reasoning: true
-  latency_ms: 811
-  error: null
-  probe_response: get_current_time({"city":"北京"})
-  mt_response: 北京现在是16:00。
-  chinese_response: 和弦是音乐中多个音同时发声的组合，常用于歌曲伴奏或编曲中。
-  vision_response: Red.
-  json_sample: "{\"instruments\": [\n    {\"name\": \"吉他\", \"type\": \"弦乐器\"},\n\
-    \    {\"name\": \"鼓\", \"type\": \""
-  stream_chunks: 5
-  stream_ttfb_ms: 255
-  reasoning_response: 打开两个开关2分钟，关闭一个。进入房间，摸热灯对应开关，亮灯对应已开开关，剩下的灯对应剩下的开关。
-  tested_at: '2026-05-13 17:33:32'
-groq/openai/gpt-oss-120b:
-  provider: groq
-  model: openai/gpt-oss-120b
-  available: true
-  tool_calling: true
-  multi_turn_tc: true
-  chinese: false
-  vision: false
-  json_mode: true
-  streaming: false
-  reasoning: false
-  latency_ms: 375
-  error: null
-  probe_response: get_current_time({"city":"Beijing"})
-  mt_response: 北京现在是 2026 年 5 月 13 日 16:00（下午四点）。
-  chinese_response: ''
-  vision_error: not_supported
-  json_sample: '{"instruments":[{"name":"Piano","type":"Keyboard"},{"name":"Violin","type":"Stri'
-  stream_chunks: 0
-  stream_ttfb_ms: 0
-  reasoning_response: ''
-  tested_at: '2026-05-13 17:33:43'
-groq/meta-llama/llama-prompt-guard-2-22m:
-  provider: groq
-  model: meta-llama/llama-prompt-guard-2-22m
-  available: true
-  tool_calling: false
-  multi_turn_tc: false
-  chinese: false
-  vision: false
-  json_mode: false
-  streaming: false
-  reasoning: false
-  latency_ms: 0
-  error: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://api.groq.com/openai/v1/chat/comp'
-  tested_at: '2026-05-13 17:33:46'
-google/gemini-2.5-flash:
   provider: google
-  model: gemini-2.5-flash
-  available: false
-  tool_calling: false
-  multi_turn_tc: false
-  chinese: false
-  vision: false
-  json_mode: false
-  streaming: false
   reasoning: false
-  latency_ms: 0
-  error: rate_limited (429)
-  tested_at: '2026-05-13 17:38:28'
-google/gemini-2.5-pro:
-  provider: google
-  model: gemini-2.5-pro
-  available: false
-  tool_calling: false
-  multi_turn_tc: false
-  chinese: false
-  vision: false
-  json_mode: false
   streaming: false
-  reasoning: false
-  latency_ms: 0
-  error: rate_limited (429)
-  tested_at: '2026-05-13 17:38:30'
+  tested_at: '2026-05-13 17:32:27'
+  tool_calling: false
+  vision: false
 google/gemini-2.0-flash:
-  provider: google
+  available: false
+  chinese: false
+  error: rate_limited (429)
+  json_mode: false
+  latency_ms: 0
   model: gemini-2.0-flash
-  available: false
-  tool_calling: false
   multi_turn_tc: false
-  chinese: false
-  vision: false
-  json_mode: false
-  streaming: false
+  provider: google
   reasoning: false
-  latency_ms: 0
-  error: rate_limited (429)
+  streaming: false
   tested_at: '2026-05-13 17:38:32'
+  tool_calling: false
+  vision: false
 google/gemini-2.0-flash-001:
-  provider: google
+  available: false
+  chinese: false
+  error: rate_limited (429)
+  json_mode: false
+  latency_ms: 0
   model: gemini-2.0-flash-001
-  available: false
-  tool_calling: false
   multi_turn_tc: false
-  chinese: false
-  vision: false
-  json_mode: false
-  streaming: false
+  provider: google
   reasoning: false
-  latency_ms: 0
-  error: rate_limited (429)
+  streaming: false
   tested_at: '2026-05-13 17:38:34'
-google/gemini-2.0-flash-lite-001:
-  provider: google
-  model: gemini-2.0-flash-lite-001
-  available: false
   tool_calling: false
-  multi_turn_tc: false
-  chinese: false
   vision: false
-  json_mode: false
-  streaming: false
-  reasoning: false
-  latency_ms: 0
-  error: rate_limited (429)
-  tested_at: '2026-05-13 17:38:36'
 google/gemini-2.0-flash-lite:
-  provider: google
+  available: false
+  chinese: false
+  error: rate_limited (429)
+  json_mode: false
+  latency_ms: 0
   model: gemini-2.0-flash-lite
-  available: false
-  tool_calling: false
   multi_turn_tc: false
-  chinese: false
-  vision: false
-  json_mode: false
-  streaming: false
+  provider: google
   reasoning: false
-  latency_ms: 0
-  error: rate_limited (429)
+  streaming: false
   tested_at: '2026-05-13 17:38:38'
-google/gemini-2.5-flash-preview-tts:
-  provider: google
-  model: gemini-2.5-flash-preview-tts
-  available: true
   tool_calling: false
-  multi_turn_tc: false
-  chinese: false
   vision: false
-  json_mode: false
-  streaming: false
-  reasoning: false
-  latency_ms: 0
-  error: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://generativelanguage.googleapis.co'
-  tested_at: '2026-05-13 17:38:41'
-google/gemini-2.5-pro-preview-tts:
-  provider: google
-  model: gemini-2.5-pro-preview-tts
+google/gemini-2.0-flash-lite-001:
   available: false
-  tool_calling: false
-  multi_turn_tc: false
   chinese: false
-  vision: false
-  json_mode: false
-  streaming: false
-  reasoning: false
-  latency_ms: 0
   error: rate_limited (429)
-  tested_at: '2026-05-13 17:38:43'
-google/gemma-4-26b-a4b-it:
-  provider: google
-  model: gemma-4-26b-a4b-it
-  available: true
-  tool_calling: true
-  multi_turn_tc: true
-  chinese: true
-  vision: true
   json_mode: false
-  streaming: true
-  reasoning: false
-  latency_ms: 6172
-  error: null
-  probe_response: 'get_current_time({"city": "北京"})'
-  mt_response: 北京现在是 2026年5月13日 16:00:00。
-  chinese_response: "*   Topic: What is a chord (什么是和弦)?\n    *   Language: Chines"
-  vision_response: 'The user wants to know the color of the provided image.
-
-    The '
-  json_sample: "*   Role: Assistant that outputs *only* JSON.\n    *   Constraint:\
-    \ No other conte"
-  stream_chunks: 3
-  stream_ttfb_ms: 6905
-  tested_at: '2026-05-13 17:41:57'
-google/gemma-4-31b-it:
-  provider: google
-  model: gemma-4-31b-it
-  available: true
-  tool_calling: true
-  multi_turn_tc: true
-  chinese: true
-  vision: true
-  json_mode: false
-  streaming: true
-  reasoning: true
-  latency_ms: 11619
-  error: null
-  probe_response: 'get_current_time({"city": "北京"})'
-  mt_response: The user is asking for the current time in Beijing. I have already
-    called the `g
-  chinese_response: "*   Topic: What is a chord (和弦)?\n    *   Language: Chinese ("
-  vision_response: 'The user wants to know the color of the provided image.
-
-    The '
-  json_sample: "*   Role: JSON-only output assistant.\n    *   Constraint: No other\
-    \ content besid"
-  stream_chunks: 3
-  stream_ttfb_ms: 4715
-  reasoning_response: "*   Scenario: 3 lamps in a room, 3 switches outside.\n    *\
-    \   Constraint: Only on"
-  tested_at: '2026-05-13 17:43:17'
-google/gemini-flash-latest:
-  provider: google
-  model: gemini-flash-latest
-  available: false
-  tool_calling: false
-  multi_turn_tc: false
-  chinese: false
-  vision: false
-  json_mode: false
-  streaming: false
-  reasoning: false
   latency_ms: 0
+  model: gemini-2.0-flash-lite-001
+  multi_turn_tc: false
+  provider: google
+  reasoning: false
+  streaming: false
+  tested_at: '2026-05-13 17:38:36'
+  tool_calling: false
+  vision: false
+google/gemini-2.5-computer-use-preview-10-2025:
+  available: false
+  chinese: false
   error: rate_limited (429)
-  tested_at: '2026-05-13 17:43:20'
-google/gemini-flash-lite-latest:
-  provider: google
-  model: gemini-flash-lite-latest
-  available: false
-  tool_calling: false
-  multi_turn_tc: false
-  chinese: false
-  vision: false
   json_mode: false
-  streaming: false
-  reasoning: false
   latency_ms: 0
-  error: unavailable (503)
-  tested_at: '2026-05-13 17:43:28'
-google/gemini-pro-latest:
-  provider: google
-  model: gemini-pro-latest
-  available: false
-  tool_calling: false
+  model: gemini-2.5-computer-use-preview-10-2025
   multi_turn_tc: false
-  chinese: false
-  vision: false
-  json_mode: false
-  streaming: false
+  provider: google
   reasoning: false
-  latency_ms: 0
+  streaming: false
+  tested_at: '2026-05-13 17:43:56'
+  tool_calling: false
+  vision: false
+google/gemini-2.5-flash:
+  available: false
+  chinese: false
   error: rate_limited (429)
-  tested_at: '2026-05-13 17:43:30'
-google/gemini-2.5-flash-lite:
-  provider: google
-  model: gemini-2.5-flash-lite
-  available: false
-  tool_calling: false
-  multi_turn_tc: false
-  chinese: false
-  vision: false
   json_mode: false
-  streaming: false
-  reasoning: false
   latency_ms: 0
-  error: rate_limited (429)
-  tested_at: '2026-05-13 17:43:33'
+  model: gemini-2.5-flash
+  multi_turn_tc: false
+  provider: google
+  reasoning: false
+  streaming: false
+  tested_at: '2026-05-13 17:38:28'
+  tool_calling: false
+  vision: false
 google/gemini-2.5-flash-image:
-  provider: google
+  available: false
+  chinese: false
+  error: rate_limited (429)
+  json_mode: false
+  latency_ms: 0
   model: gemini-2.5-flash-image
-  available: false
-  tool_calling: false
   multi_turn_tc: false
-  chinese: false
-  vision: false
-  json_mode: false
-  streaming: false
-  reasoning: false
-  latency_ms: 0
-  error: rate_limited (429)
-  tested_at: '2026-05-13 17:43:35'
-google/gemini-3-pro-preview:
   provider: google
-  model: gemini-3-pro-preview
-  available: false
-  tool_calling: false
-  multi_turn_tc: false
-  chinese: false
-  vision: false
-  json_mode: false
-  streaming: false
   reasoning: false
+  streaming: false
+  tested_at: '2026-05-13 17:43:35'
+  tool_calling: false
+  vision: false
+google/gemini-2.5-flash-lite:
+  available: true
+  chinese: false
+  error: null
+  json_mode: false
+  latency_ms: 2211
+  model: gemini-2.5-flash-lite
+  multi_turn_tc: false
+  provider: google
+  reasoning: false
+  streaming: false
+  tested_at: '2026-05-17 02:27:55'
+  tool_calling: true
+  vision: false
+google/gemini-2.5-flash-preview-tts:
+  available: true
+  chinese: false
+  error: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://generativelanguage.googleapis.co'
+  json_mode: false
   latency_ms: 0
+  model: gemini-2.5-flash-preview-tts
+  multi_turn_tc: false
+  provider: google
+  reasoning: false
+  streaming: false
+  tested_at: '2026-05-13 17:38:41'
+  tool_calling: false
+  vision: false
+google/gemini-2.5-pro:
+  available: false
+  chinese: false
   error: rate_limited (429)
-  tested_at: '2026-05-13 17:43:37'
+  json_mode: false
+  latency_ms: 0
+  model: gemini-2.5-pro
+  multi_turn_tc: false
+  provider: google
+  reasoning: false
+  streaming: false
+  tested_at: '2026-05-13 17:38:30'
+  tool_calling: false
+  vision: false
+google/gemini-2.5-pro-preview-tts:
+  available: false
+  chinese: false
+  error: rate_limited (429)
+  json_mode: false
+  latency_ms: 0
+  model: gemini-2.5-pro-preview-tts
+  multi_turn_tc: false
+  provider: google
+  reasoning: false
+  streaming: false
+  tested_at: '2026-05-13 17:38:43'
+  tool_calling: false
+  vision: false
 google/gemini-3-flash-preview:
   provider: google
   model: gemini-3-flash-preview
@@ -767,33 +214,597 @@ google/gemini-3-flash-preview:
   streaming: false
   reasoning: false
   latency_ms: 0
+  error: ''
+  tested_at: '2026-05-17 21:07:30'
+google/gemini-3-pro-image-preview:
+  available: false
+  chinese: false
   error: rate_limited (429)
-  tested_at: '2026-05-13 17:43:39'
+  json_mode: false
+  latency_ms: 0
+  model: gemini-3-pro-image-preview
+  multi_turn_tc: false
+  provider: google
+  reasoning: false
+  streaming: false
+  tested_at: '2026-05-13 17:43:46'
+  tool_calling: false
+  vision: false
+google/gemini-3-pro-preview:
+  available: false
+  chinese: false
+  error: rate_limited (429)
+  json_mode: false
+  latency_ms: 0
+  model: gemini-3-pro-preview
+  multi_turn_tc: false
+  provider: google
+  reasoning: false
+  streaming: false
+  tested_at: '2026-05-13 17:43:37'
+  tool_calling: false
+  vision: false
+google/gemini-3.1-flash-image-preview:
+  available: false
+  chinese: false
+  error: rate_limited (429)
+  json_mode: false
+  latency_ms: 0
+  model: gemini-3.1-flash-image-preview
+  multi_turn_tc: false
+  provider: google
+  reasoning: false
+  streaming: false
+  tested_at: '2026-05-13 17:43:50'
+  tool_calling: false
+  vision: false
+google/gemini-3.1-flash-lite:
+  available: true
+  chinese: true
+  chinese_response: 三个或以上不同音高的音，按一定音程关系结合。
+  error: null
+  json_mode: true
+  json_sample: "{\n  \"instruments\": [\n    {\n      \"name\": \"钢琴\",\n      \"\
+    type\": \"键盘乐器\"\n    },\n    {"
+  latency_ms: 5379
+  model: gemini-3.1-flash-lite
+  mt_issue: 'error: Client error ''400 Bad Request'' for url ''https://generativela'
+  multi_turn_tc: false
+  probe_response: 'get_current_time({"city": "北京"})'
+  provider: google
+  reasoning: true
+  reasoning_response: 开一盏灯一段时间后关掉，再开第二盏，进屋摸灯泡。
+  stream_chunks: 2
+  stream_ttfb_ms: 1867
+  streaming: true
+  tested_at: '2026-05-17 02:27:55'
+  tool_calling: true
+  vision: true
+  vision_response: Red
+google/gemini-3.1-flash-lite-preview:
+  available: true
+  chinese: true
+  chinese_response: 三个或以上不同音高的音，按一定音程关系结合。
+  error: null
+  json_mode: true
+  json_sample: "{\n  \"instruments\": [\n    {\n      \"name\": \"钢琴\",\n      \"\
+    type\": \"键盘乐器\"\n    },\n    {"
+  latency_ms: 31255
+  model: gemini-3.1-flash-lite-preview
+  mt_issue: 'error: Client error ''400 Bad Request'' for url ''https://generativela'
+  multi_turn_tc: false
+  probe_response: 'get_current_time({"city": "北京"})'
+  provider: google
+  reasoning: true
+  reasoning_response: 开启两盏灯，过会儿关掉一盏，进屋摸灯泡温度。
+  stream_chunks: 2
+  stream_ttfb_ms: 857
+  streaming: true
+  tested_at: '2026-05-17 02:27:55'
+  tool_calling: true
+  vision: true
+  vision_response: Red
+google/gemini-3.1-flash-tts-preview:
+  available: true
+  chinese: false
+  error: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://generativelanguage.googleapis.co'
+  json_mode: false
+  latency_ms: 0
+  model: gemini-3.1-flash-tts-preview
+  multi_turn_tc: false
+  provider: google
+  reasoning: false
+  streaming: false
+  tested_at: '2026-05-13 17:32:00'
+  tool_calling: false
+  vision: false
 google/gemini-3.1-pro-preview:
-  provider: google
+  available: false
+  chinese: false
+  error: rate_limited (429)
+  json_mode: false
+  latency_ms: 0
   model: gemini-3.1-pro-preview
-  available: false
-  tool_calling: false
   multi_turn_tc: false
-  chinese: false
-  vision: false
-  json_mode: false
-  streaming: false
-  reasoning: false
-  latency_ms: 0
-  error: rate_limited (429)
-  tested_at: '2026-05-13 17:43:41'
-google/gemini-3.1-pro-preview-customtools:
   provider: google
-  model: gemini-3.1-pro-preview-customtools
-  available: false
+  reasoning: false
+  streaming: false
+  tested_at: '2026-05-13 17:43:41'
   tool_calling: false
+  vision: false
+google/gemini-3.1-pro-preview-customtools:
+  available: false
+  chinese: false
+  error: rate_limited (429)
+  json_mode: false
+  latency_ms: 0
+  model: gemini-3.1-pro-preview-customtools
+  multi_turn_tc: false
+  provider: google
+  reasoning: false
+  streaming: false
+  tested_at: '2026-05-13 17:43:43'
+  tool_calling: false
+  vision: false
+google/gemini-flash-latest:
+  provider: google
+  model: gemini-flash-latest
+  available: true
+  tool_calling: true
   multi_turn_tc: false
   chinese: false
   vision: false
   json_mode: false
   streaming: false
   reasoning: false
-  latency_ms: 0
+  latency_ms: 4125
+  error: null
+  probe_response: 'get_current_time({"city": "北京"})'
+  mt_issue: 'error: Client error ''429 Too Many Requests'' for url ''https://genera'
+  stream_error: Google API 429
+  tested_at: '2026-05-17 04:07:21'
+google/gemini-flash-lite-latest:
+  available: true
+  chinese: false
+  error: null
+  json_mode: false
+  latency_ms: 4215
+  model: gemini-flash-lite-latest
+  multi_turn_tc: false
+  provider: google
+  reasoning: false
+  streaming: false
+  tested_at: '2026-05-17 02:27:55'
+  tool_calling: true
+  vision: false
+google/gemini-pro-latest:
+  available: false
+  chinese: false
   error: rate_limited (429)
-  tested_at: '2026-05-13 17:43:43'
+  json_mode: false
+  latency_ms: 0
+  model: gemini-pro-latest
+  multi_turn_tc: false
+  provider: google
+  reasoning: false
+  streaming: false
+  tested_at: '2026-05-13 17:43:30'
+  tool_calling: false
+  vision: false
+google/gemini-robotics-er-1.5-preview:
+  available: false
+  chinese: false
+  error: Client error '404 Not Found' for url 'https://generativelanguage.googleapis.com/v1beta/models/gemini-robotics-er-1.5-pre
+  json_mode: false
+  latency_ms: 0
+  model: gemini-robotics-er-1.5-preview
+  multi_turn_tc: false
+  provider: google
+  reasoning: false
+  streaming: false
+  tested_at: '2026-05-13 17:32:02'
+  tool_calling: false
+  vision: false
+google/gemini-robotics-er-1.6-preview:
+  available: true
+  chinese: true
+  chinese_response: 三个
+  error: null
+  json_mode: false
+  json_sample: '{'
+  latency_ms: 1127
+  model: gemini-robotics-er-1.6-preview
+  mt_issue: 'error: Client error ''400 Bad Request'' for url ''https://generativela'
+  multi_turn_tc: false
+  probe_response: 'get_current_time({"city": "北京"})'
+  provider: google
+  reasoning: false
+  stream_chunks: 0
+  stream_ttfb_ms: 0
+  streaming: false
+  tested_at: '2026-05-13 17:32:18'
+  tool_calling: true
+  vision: false
+  vision_response: empty
+google/gemma-4-26b-a4b-it:
+  available: true
+  chinese: true
+  chinese_response: "*   Topic: What is a chord (什么是和弦)?\n    *   Language: Chines"
+  error: null
+  json_mode: false
+  json_sample: "*   Role: Assistant that outputs *only* JSON.\n    *   Constraint:\
+    \ No other conte"
+  latency_ms: 2399
+  model: gemma-4-26b-a4b-it
+  mt_response: 北京现在是 2026年5月13日 16:00:00。
+  multi_turn_tc: true
+  probe_response: 'get_current_time({"city": "北京"})'
+  provider: google
+  reasoning: false
+  stream_chunks: 3
+  stream_ttfb_ms: 6905
+  streaming: true
+  tested_at: '2026-05-17 02:27:55'
+  tool_calling: true
+  vision: true
+  vision_response: 'The user wants to know the color of the provided image.
+
+    The '
+google/gemma-4-31b-it:
+  available: true
+  chinese: true
+  chinese_response: "*   Topic: What is a chord (和弦)?\n    *   Language: Chinese ("
+  error: null
+  json_mode: false
+  json_sample: "*   Role: JSON-only output assistant.\n    *   Constraint: No other\
+    \ content besid"
+  latency_ms: 3034
+  model: gemma-4-31b-it
+  mt_response: The user is asking for the current time in Beijing. I have already
+    called the `g
+  multi_turn_tc: true
+  probe_response: 'get_current_time({"city": "北京"})'
+  provider: google
+  reasoning: true
+  reasoning_response: "*   Scenario: 3 lamps in a room, 3 switches outside.\n    *\
+    \   Constraint: Only on"
+  stream_chunks: 3
+  stream_ttfb_ms: 4715
+  streaming: true
+  tested_at: '2026-05-17 02:27:55'
+  tool_calling: false
+  vision: true
+  vision_response: 'The user wants to know the color of the provided image.
+
+    The '
+google/lyria-3-clip-preview:
+  available: false
+  chinese: false
+  error: rate_limited (429)
+  json_mode: false
+  latency_ms: 0
+  model: lyria-3-clip-preview
+  multi_turn_tc: false
+  provider: google
+  reasoning: false
+  streaming: false
+  tested_at: '2026-05-13 17:43:52'
+  tool_calling: false
+  vision: false
+google/lyria-3-pro-preview:
+  available: false
+  chinese: false
+  error: rate_limited (429)
+  json_mode: false
+  latency_ms: 0
+  model: lyria-3-pro-preview
+  multi_turn_tc: false
+  provider: google
+  reasoning: false
+  streaming: false
+  tested_at: '2026-05-13 17:43:54'
+  tool_calling: false
+  vision: false
+google/nano-banana-pro-preview:
+  available: false
+  chinese: false
+  error: rate_limited (429)
+  json_mode: false
+  latency_ms: 0
+  model: nano-banana-pro-preview
+  multi_turn_tc: false
+  provider: google
+  reasoning: false
+  streaming: false
+  tested_at: '2026-05-13 17:43:48'
+  tool_calling: false
+  vision: false
+groq/allam-2-7b:
+  available: true
+  chinese: false
+  error: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://api.groq.com/openai/v1/chat/comp'
+  json_mode: false
+  latency_ms: 0
+  model: allam-2-7b
+  multi_turn_tc: false
+  provider: groq
+  reasoning: false
+  streaming: false
+  tested_at: '2026-05-13 17:32:27'
+  tool_calling: false
+  vision: false
+groq/canopylabs/orpheus-arabic-saudi:
+  available: true
+  chinese: false
+  error: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://api.groq.com/openai/v1/chat/comp'
+  json_mode: false
+  latency_ms: 0
+  model: canopylabs/orpheus-arabic-saudi
+  multi_turn_tc: false
+  provider: groq
+  reasoning: false
+  streaming: false
+  tested_at: '2026-05-13 17:32:25'
+  tool_calling: false
+  vision: false
+groq/canopylabs/orpheus-v1-english:
+  available: true
+  chinese: false
+  error: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://api.groq.com/openai/v1/chat/comp'
+  json_mode: false
+  latency_ms: 0
+  model: canopylabs/orpheus-v1-english
+  multi_turn_tc: false
+  provider: groq
+  reasoning: false
+  streaming: false
+  tested_at: '2026-05-13 17:33:09'
+  tool_calling: false
+  vision: false
+groq/groq/compound:
+  available: true
+  chinese: false
+  error: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://api.groq.com/openai/v1/chat/comp'
+  json_mode: false
+  latency_ms: 0
+  model: groq/compound
+  multi_turn_tc: false
+  provider: groq
+  reasoning: false
+  streaming: false
+  tested_at: '2026-05-13 17:32:11'
+  tool_calling: false
+  vision: false
+groq/groq/compound-mini:
+  available: true
+  chinese: false
+  error: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://api.groq.com/openai/v1/chat/comp'
+  json_mode: false
+  latency_ms: 0
+  model: groq/compound-mini
+  multi_turn_tc: false
+  provider: groq
+  reasoning: false
+  streaming: false
+  tested_at: '2026-05-13 17:32:57'
+  tool_calling: false
+  vision: false
+groq/llama-3.1-8b-instant:
+  available: true
+  chinese: true
+  chinese_response: 和弦是指同时演奏的三个或三个以上音符的组合，通常包括根音、第三音和五度音。
+  error: null
+  json_mode: true
+  json_sample: '{"instruments": [{"name": "钢琴", "type": "键盘乐器"}, {"name": "吉他", "type":
+    "弦乐器"}, '
+  latency_ms: 247
+  model: llama-3.1-8b-instant
+  mt_issue: loop_call
+  multi_turn_tc: false
+  probe_response: get_current_time({"city":"北京"})
+  provider: groq
+  reasoning: false
+  reasoning_response: 进房间后，先关掉所有灯。然后打开开关1，观察哪盏灯亮。关掉开关1，打开开关2，观察哪盏灯亮。最后，关掉开关2，打开开关3，观察哪盏灯亮。
+  stream_chunks: 5
+  stream_ttfb_ms: 209
+  streaming: true
+  tested_at: '2026-05-13 17:33:19'
+  tool_calling: true
+  vision: false
+  vision_error: not_supported
+groq/llama-3.3-70b-versatile:
+  available: true
+  chinese: true
+  chinese_response: 和弦是同时发出的多个音符。
+  error: null
+  json_mode: true
+  json_sample: '{"instruments": [{"name": "钢琴", "type": "键盘乐器"}, {"name": "小提琴", "type":
+    "弦乐器"},'
+  latency_ms: 664
+  model: llama-3.3-70b-versatile
+  mt_response: 北京现在是16:00。
+  multi_turn_tc: true
+  probe_response: get_current_time({"city":"北京"})
+  provider: groq
+  reasoning: true
+  reasoning_response: 打开开关1 5分钟，然后关闭。打开开关2，进入房间。热的灯对应开关1，亮的对应开关2，剩下的对应开关3。
+  stream_chunks: 5
+  stream_ttfb_ms: 307
+  streaming: true
+  tested_at: '2026-05-17 02:27:55'
+  tool_calling: true
+  vision: false
+  vision_error: not_supported
+groq/meta-llama/llama-4-scout-17b-16e-instruct:
+  available: true
+  chinese: true
+  chinese_response: 和弦是音乐中多个音同时发声的组合，常用于歌曲伴奏或编曲中。
+  error: null
+  json_mode: true
+  json_sample: "{\"instruments\": [\n    {\"name\": \"吉他\", \"type\": \"弦乐器\"},\n\
+    \    {\"name\": \"鼓\", \"type\": \""
+  latency_ms: 259
+  model: meta-llama/llama-4-scout-17b-16e-instruct
+  mt_response: 北京现在是16:00。
+  multi_turn_tc: true
+  probe_response: get_current_time({"city":"北京"})
+  provider: groq
+  reasoning: true
+  reasoning_response: 打开两个开关2分钟，关闭一个。进入房间，摸热灯对应开关，亮灯对应已开开关，剩下的灯对应剩下的开关。
+  stream_chunks: 5
+  stream_ttfb_ms: 255
+  streaming: true
+  tested_at: '2026-05-17 02:27:55'
+  tool_calling: true
+  vision: true
+  vision_response: Red.
+groq/meta-llama/llama-prompt-guard-2-22m:
+  available: true
+  chinese: false
+  error: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://api.groq.com/openai/v1/chat/comp'
+  json_mode: false
+  latency_ms: 0
+  model: meta-llama/llama-prompt-guard-2-22m
+  multi_turn_tc: false
+  provider: groq
+  reasoning: false
+  streaming: false
+  tested_at: '2026-05-13 17:33:46'
+  tool_calling: false
+  vision: false
+groq/meta-llama/llama-prompt-guard-2-86m:
+  available: true
+  chinese: false
+  error: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://api.groq.com/openai/v1/chat/comp'
+  json_mode: false
+  latency_ms: 0
+  model: meta-llama/llama-prompt-guard-2-86m
+  multi_turn_tc: false
+  provider: groq
+  reasoning: false
+  streaming: false
+  tested_at: '2026-05-13 17:32:55'
+  tool_calling: false
+  vision: false
+groq/openai/gpt-oss-120b:
+  available: true
+  chinese: false
+  chinese_response: ''
+  error: null
+  json_mode: true
+  json_sample: '{"instruments":[{"name":"Piano","type":"Keyboard"},{"name":"Violin","type":"Stri'
+  latency_ms: 263
+  model: openai/gpt-oss-120b
+  mt_response: 北京现在是 2026 年 5 月 13 日 16:00（下午四点）。
+  multi_turn_tc: true
+  probe_response: get_current_time({"city":"Beijing"})
+  provider: groq
+  reasoning: false
+  reasoning_response: ''
+  stream_chunks: 0
+  stream_ttfb_ms: 0
+  streaming: false
+  tested_at: '2026-05-17 02:27:55'
+  tool_calling: true
+  vision: false
+  vision_error: not_supported
+groq/openai/gpt-oss-20b:
+  available: true
+  chinese: false
+  chinese_response: ''
+  error: null
+  json_mode: true
+  json_sample: '{"instruments":[{"name":"Violin","type":"String"},{"name":"Piano","type":"Keyboa'
+  latency_ms: 260
+  model: openai/gpt-oss-20b
+  mt_response: 现在北京时间是 2026‑05‑13 16:00 （即 下午 4:00）。
+  multi_turn_tc: true
+  probe_response: get_current_time({"city":"北京"})
+  provider: groq
+  reasoning: false
+  reasoning_response: ''
+  stream_chunks: 0
+  stream_ttfb_ms: 0
+  streaming: false
+  tested_at: '2026-05-17 02:27:55'
+  tool_calling: true
+  vision: false
+  vision_error: not_supported
+groq/openai/gpt-oss-safeguard-20b:
+  available: true
+  chinese: false
+  chinese_response: ''
+  error: null
+  json_mode: true
+  json_sample: '{"instruments":[{"name":"小提琴","type":"弦乐器"},{"name":"钢琴","type":"键盘乐器"},{"name":'
+  latency_ms: 291
+  model: openai/gpt-oss-safeguard-20b
+  mt_response: 现在北京的时间是 2026‑05‑13 16:00:00 （北京时间，CST）。
+  multi_turn_tc: true
+  probe_response: get_current_time({"city":"北京"})
+  provider: groq
+  reasoning: false
+  reasoning_response: ''
+  stream_chunks: 0
+  stream_ttfb_ms: 0
+  streaming: false
+  tested_at: '2026-05-17 02:27:55'
+  tool_calling: true
+  vision: false
+  vision_error: not_supported
+groq/qwen/qwen3-32b:
+  provider: groq
+  model: qwen/qwen3-32b
+  available: true
+  tool_calling: true
+  multi_turn_tc: true
+  chinese: true
+  vision: false
+  json_mode: false
+  streaming: true
+  reasoning: true
+  latency_ms: 791
+  error: null
+  probe_response: get_current_time({"city":"北京"})
+  mt_response: 现在是2026年5月13日下午4点整（中国标准时间）。
+  chinese_response: '<think>
+
+    嗯，用户问的是“什么是和弦？”，需要在20字以内用中文回答。首先，我得确定和弦的基本定义。和弦是由三个或'
+  vision_error: not_supported
+  json_sample: '<think>
+
+    好的，用户让我用JSON格式列出三种乐器，格式是{"instruments": [{"name": "...", "type": "..."}]'
+  stream_chunks: 5
+  stream_ttfb_ms: 261
+  reasoning_response: '<think>
+
+    嗯，用户的问题是关于如何确定三个开关对应三个灯泡的正确方法，而且只能进入房间一次。首先，我需要回忆一下类似的经典谜题。通常这类问题需要利用灯泡的'
+  tested_at: '2026-05-17 02:36:07'
+groq/whisper-large-v3:
+  available: true
+  chinese: false
+  error: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://api.groq.com/openai/v1/chat/comp'
+  json_mode: false
+  latency_ms: 0
+  model: whisper-large-v3
+  multi_turn_tc: false
+  provider: groq
+  reasoning: false
+  streaming: false
+  tested_at: '2026-05-13 17:32:50'
+  tool_calling: false
+  vision: false
+groq/whisper-large-v3-turbo:
+  available: true
+  chinese: false
+  error: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://api.groq.com/openai/v1/chat/comp'
+  json_mode: false
+  latency_ms: 0
+  model: whisper-large-v3-turbo
+  multi_turn_tc: false
+  provider: groq
+  reasoning: false
+  streaming: false
+  tested_at: '2026-05-13 17:32:52'
+  tool_calling: false
+  vision: false

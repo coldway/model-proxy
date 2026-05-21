@@ -2,7 +2,7 @@ providers:
   google:
     name: Google AI Studio
     enabled: true
-    priority: 2
+    priority: 1
     url: https://aistudio.google.com/
     description: Google 提供的免费 Gemini 系列模型
     api_key_guide: https://aistudio.google.com/apikey
@@ -14,7 +14,7 @@ providers:
       default_rpm: 5
       category: 推理
       enabled: false
-      priority: 1
+      priority: 5
       tool_calling: false
     - id: gemini-2.5-flash
       name: Gemini 2.5 Flash
@@ -23,7 +23,7 @@ providers:
       default_rpm: 10
       category: 通用
       enabled: false
-      priority: 2
+      priority: 6
       tool_calling: false
     - id: gemini-2.0-flash
       name: Gemini 2.0 Flash
@@ -32,7 +32,7 @@ providers:
       default_rpm: 15
       category: 快速
       enabled: false
-      priority: 3
+      priority: 7
       tool_calling: false
     - id: gemma-4-26b-a4b-it
       name: Gemma 4 26B
@@ -41,7 +41,7 @@ providers:
       default_rpm: 15
       category: 开源
       enabled: true
-      priority: 4
+      priority: 2
       tool_calling: true
     - id: gemma-4-31b-it
       name: Gemma 4 31B
@@ -59,24 +59,23 @@ providers:
       default_rpm: 30
       category: 快速
       tool_calling: false
+      priority: 8
     - id: gemini-2.5-flash-lite
       name: Gemini 2.5 Flash Lite
-      description: 2.5 系列轻量版，免费可用
+      description: 2.5 系列轻量版，免费可用，支持 tool calling
       default_rpd: 1500
       default_rpm: 30
       category: 快速
-      enabled: true
-      priority: 2
-      tool_calling: false
+      tool_calling: true
+      priority: 9
     - id: gemini-3-flash-preview
       name: Gemini 3 Flash Preview
       description: Gemini 3 系列快速版（Preview），支持 tool calling
       default_rpd: 500
       default_rpm: 10
       category: 通用
-      enabled: true
-      priority: 1
       tool_calling: false
+      priority: 10
     - id: gemini-3.1-flash-lite-preview
       name: Gemini 3.1 Flash Lite Preview
       description: Gemini 3.1 轻量版（Preview），免费可用
@@ -84,7 +83,7 @@ providers:
       default_rpm: 30
       category: 快速
       enabled: true
-      priority: 2
+      priority: 3
       tool_calling: true
     - id: gemini-flash-latest
       name: Gemini Flash Latest
@@ -92,18 +91,16 @@ providers:
       default_rpd: 1500
       default_rpm: 15
       category: 通用
-      enabled: true
-      priority: 1
-      tool_calling: false
+      tool_calling: true
+      priority: 11
     - id: gemini-flash-lite-latest
       name: Gemini Flash Lite Latest
-      description: 自动指向最新 Flash Lite 版本，高额度
+      description: 自动指向最新 Flash Lite 版本，高额度，支持 tool calling
       default_rpd: 1500
       default_rpm: 30
       category: 快速
-      enabled: true
-      priority: 2
-      tool_calling: false
+      tool_calling: true
+      priority: 12
     - id: gemini-3.1-flash-lite
       name: Gemini 3.1 Flash Lite
       description: Gemini 3.1 轻量稳定版，支持 tool calling
@@ -111,12 +108,12 @@ providers:
       default_rpm: 30
       category: 快速
       enabled: true
-      priority: 2
+      priority: 1
       tool_calling: true
   groq:
     name: Groq
     enabled: true
-    priority: 1
+    priority: 2
     url: https://console.groq.com/
     description: Groq 提供的高速推理服务
     api_key_guide: https://console.groq.com/keys
@@ -129,7 +126,7 @@ providers:
       default_tpm: 6000
       category: 通用
       enabled: true
-      priority: 5
+      priority: 2
       tool_calling: true
     - id: meta-llama/llama-4-scout-17b-16e-instruct
       name: Llama 4 Scout 17B
@@ -139,7 +136,7 @@ providers:
       default_tpm: 20000
       category: 通用
       enabled: true
-      priority: 3
+      priority: 1
       tool_calling: true
     - id: openai/gpt-oss-120b
       name: GPT-OSS 120B
@@ -168,8 +165,6 @@ providers:
       default_rpm: 30
       default_tpm: 6000
       category: 通用
-      enabled: true
-      priority: 4
       tool_calling: true
     - id: openai/gpt-oss-safeguard-20b
       name: GPT-OSS Safeguard 20B
@@ -179,7 +174,7 @@ providers:
       default_tpm: 20000
       category: 通用
       enabled: true
-      priority: 5
+      priority: 6
       tool_calling: true
     - id: llama-3.1-8b-instant
       name: Llama 3.1 8B Instant
@@ -188,7 +183,7 @@ providers:
       default_rpm: 30
       category: 快速
       enabled: false
-      priority: 5
+      priority: 7
       tool_calling: true
     - id: llama-3.1-70b-versatile
       name: Llama 3.1 70B Versatile
@@ -197,6 +192,7 @@ providers:
       default_rpm: 30
       category: 通用
       tool_calling: true
+      priority: 8
     - id: mixtral-8x7b-32768
       name: Mixtral 8x7B
       description: Mistral MoE 模型，32K 上下文
@@ -204,6 +200,7 @@ providers:
       default_rpm: 30
       category: 通用
       tool_calling: false
+      priority: 9
     - id: gemma2-9b-it
       name: Gemma 2 9B IT
       description: Google Gemma 2 指令调优版
@@ -211,6 +208,7 @@ providers:
       default_rpm: 30
       category: 通用
       tool_calling: false
+      priority: 10
   cerebras:
     name: Cerebras
     enabled: false

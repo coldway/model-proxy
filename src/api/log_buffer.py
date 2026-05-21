@@ -119,5 +119,74 @@ def install(max_records: int = 2000) -> BufferedLogHandler:
     return handler
 
 
+def _tail_lines(filepath, n: int, chunk_size: int = 8192) -> list[str]:
+    """从文件末尾高效读取最后 n 行，避免全量加载。"""
+    with open(filepath, "rb") as f:
+        f.seek(0, 2)
+        size = f.tell()
+        if size == 0:
+            return []
+        buf = b""
+        pos = size
+        lines_found = 0
+        while pos > 0 and lines_found <= n:
+            read_size = min(chunk_size, pos)
+            pos -= read_size
+            f.seek(pos)
+            buf = f.read(read_size) + buf
+            lines_found = buf.count(b"\n")
+        return buf.decode("utf-8", errors="replace").splitlines()[-n:]
+
+
+def preload_from_file(path: str | Path, max_lines: int = 2000) -> int:
+    """从日志文件及其轮转备份预加载最近的日志条目到缓冲区，用于重启后恢复 UI 日志。
+
+    会自动扫描同目录下 ``app.log.YYYY-MM-DD`` 格式的轮转文件，
+    按日期从旧到新加载，最终加载当前 ``app.log``。
+    返回实际加载的行数。
+    """
+    if _instance is None:
+        return 0
+    from pathlib import Path as _P
+    p = _P(path)
+    log_dir = p.parent
+    stem = p.name
+
+    rotated = sorted(
+        f for f in log_dir.iterdir()
+        if f.is_file() and f.name.startswith(stem + ".") and f.name != stem
+    )
+
+    files_newest_first: list[_P] = []
+    if p.is_file():
+        files_newest_first.append(p)
+    files_newest_first.extend(reversed(rotated))
+
+    recent: list[str] = []
+    for rf in files_newest_first:
+        if len(recent) >= max_lines:
+            break
+        remaining = max_lines - len(recent)
+        try:
+            tail_lines = _tail_lines(rf, remaining)
+            recent = tail_lines + recent
+        except Exception:
+            continue
+    if not recent:
+        return 0
+    loaded = 0
+    for line in recent:
+        if not line.strip():
+            continue
+        record = logging.LogRecord(
+            name="(file)", level=logging.INFO,
+            pathname="", lineno=0, msg=line,
+            args=None, exc_info=None,
+        )
+        _instance.emit(record)
+        loaded += 1
+    return loaded
+
+
 def get_instance() -> BufferedLogHandler | None:
     return _instance

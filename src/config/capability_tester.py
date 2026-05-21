@@ -9,10 +9,14 @@
 
 from __future__ import annotations
 
+import asyncio
+import base64
 import json
 import logging
+import struct
 import time
 import uuid
+import zlib
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +25,26 @@ import yaml
 logger = logging.getLogger(__name__)
 
 CAPABILITIES_FILE = Path("conf/model_capabilities.yaml")
+
+# catalog（providers_catalog）中可手动标注的能力字段；与探测缓存合并时以此为准
+_CATALOG_CAP_OVERRIDE_KEYS = frozenset({
+    "tool_calling", "streaming", "multi_turn_tc", "chinese", "vision",
+    "json_mode", "reasoning", "latency_ms",
+})
+
+
+def merge_catalog_capabilities(
+    cached: dict[str, Any] | None,
+    catalog_model: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """合并能力缓存与目录：目录中显式声明的字段覆盖自动探测结果。"""
+    out = dict(cached or {})
+    if not catalog_model:
+        return out
+    for k in _CATALOG_CAP_OVERRIDE_KEYS:
+        if k in catalog_model:
+            out[k] = catalog_model[k]
+    return out
 
 TOOL_CALLING_PROBE = {
     "messages": [{"role": "user", "content": "北京现在几点？"}],
@@ -256,10 +280,6 @@ class CapabilityTester:
         if cls._TEST_IMAGE_B64 is not None:
             return cls._TEST_IMAGE_B64
 
-        import base64
-        import struct
-        import zlib
-
         width, height = 20, 20
         raw_data = b""
         for _ in range(height):
@@ -433,8 +453,6 @@ class CapabilityTester:
                 logger.debug("跳过已测试模型 %s/%s", provider_name, model_id)
                 return {**cached, "cached": True}
 
-        import asyncio
-
         result: dict[str, Any] = {
             "provider": provider_name,
             "model": model_id,
@@ -474,6 +492,15 @@ class CapabilityTester:
             logger.info("测试 %s/%s: 阶段1失败 - %s", provider_name, model_id, result["error"])
             return {**result, "cached": False}
 
+        if tc_result.get("probe_response") == "empty response":
+            result["error"] = "empty_response (模型返回 200 但无内容，可能是软限流)"
+            logger.warning(
+                "测试 %s/%s: 模型返回空内容，跳过后续能力检测",
+                provider_name, model_id,
+            )
+            self._cache.set(provider_name, model_id, result)
+            return {**result, "cached": False}
+
         # ── 阶段 2：多轮 tool calling（仅当单轮通过时） ──
         if result["tool_calling"]:
             try:
@@ -484,45 +511,25 @@ class CapabilityTester:
                 result["multi_turn_tc"] = False
                 result["mt_issue"] = f"error: {str(e)[:60]}"
 
-        # ── 阶段 3：中文能力 ──
-        try:
-            await asyncio.sleep(self._probe_interval)
-            cn_result = await self._test_chinese(provider, model_id)
-            result.update(cn_result)
-        except Exception as e:
-            result["chinese"] = False
+        # ── 阶段 3-7：独立能力并行探测 ──
+        async def _safe_probe(name: str, coro):
+            """安全执行单个探测，失败返回空 dict"""
+            try:
+                await asyncio.sleep(self._probe_interval)
+                return await coro
+            except Exception:
+                return {name: False}
 
-        # ── 阶段 4：视觉/图像理解 ──
-        try:
-            await asyncio.sleep(self._probe_interval)
-            vis_result = await self._test_vision(provider, model_id)
-            result.update(vis_result)
-        except Exception as e:
-            result["vision"] = False
-
-        # ── 阶段 5：结构化 JSON 输出 ──
-        try:
-            await asyncio.sleep(self._probe_interval)
-            json_result = await self._test_json_mode(provider, model_id)
-            result.update(json_result)
-        except Exception as e:
-            result["json_mode"] = False
-
-        # ── 阶段 6：流式输出 ──
-        try:
-            await asyncio.sleep(self._probe_interval)
-            stream_result = await self._test_streaming(provider, model_id)
-            result.update(stream_result)
-        except Exception as e:
-            result["streaming"] = False
-
-        # ── 阶段 7：推理能力 ──
-        try:
-            await asyncio.sleep(self._probe_interval)
-            reason_result = await self._test_reasoning(provider, model_id)
-            result.update(reason_result)
-        except Exception as e:
-            result["reasoning"] = False
+        parallel_tasks = [
+            _safe_probe("chinese", self._test_chinese(provider, model_id)),
+            _safe_probe("vision", self._test_vision(provider, model_id)),
+            _safe_probe("json_mode", self._test_json_mode(provider, model_id)),
+            _safe_probe("streaming", self._test_streaming(provider, model_id)),
+            _safe_probe("reasoning", self._test_reasoning(provider, model_id)),
+        ]
+        parallel_results = await asyncio.gather(*parallel_tasks)
+        for pr in parallel_results:
+            result.update(pr)
 
         self._cache.set(provider_name, model_id, result)
         logger.info(
@@ -544,8 +551,6 @@ class CapabilityTester:
         force: bool = False,
     ) -> list[dict[str, Any]]:
         """批量测试一个厂商的所有模型"""
-        import asyncio
-
         results = []
         for mid in model_ids:
             result = await self.test_model_via_provider(

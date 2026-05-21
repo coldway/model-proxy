@@ -55,6 +55,11 @@ class GitHubProvider(BaseProvider):
             payload["tools"] = [t.model_dump() for t in request.tools]
         if request.tool_choice is not None:
             payload["tool_choice"] = request.tool_choice
+        if request.response_format:
+            rf = {"type": request.response_format.type}
+            if request.response_format.type == "json_schema" and request.response_format.json_schema:
+                rf["json_schema"] = request.response_format.json_schema
+            payload["response_format"] = rf
         return payload
 
     async def chat_completion(
@@ -95,7 +100,7 @@ class GitHubProvider(BaseProvider):
 
     async def stream_chat_completion(
         self, model: str, request: ChatCompletionRequest
-    ) -> AsyncIterator[str]:
+    ) -> AsyncIterator[dict]:
         url = f"{GITHUB_MODELS_BASE}/chat/completions"
         async with self._client.stream(
             "POST", url,
@@ -114,9 +119,9 @@ class GitHubProvider(BaseProvider):
                     choices = chunk.get("choices", [])
                     if not choices:
                         continue
-                    text = choices[0].get("delta", {}).get("content", "")
-                    if text:
-                        yield text
+                    delta = choices[0].get("delta", {})
+                    if delta:
+                        yield delta
                 except (json.JSONDecodeError, IndexError, KeyError):
                     continue
 
@@ -129,7 +134,7 @@ class GitHubProvider(BaseProvider):
             data = resp.json()
             return [m["id"] for m in data.get("data", [])]
         except Exception as e:
-            logger.error(f"获取 GitHub Models 列表失败: {e}")
+            logger.error("获取 GitHub Models 列表失败: %s", e)
             return []
 
     async def health_check(self) -> bool:

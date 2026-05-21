@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 import uuid
@@ -126,6 +127,46 @@ class HuggingFaceProvider(BaseProvider):
             ],
             usage=UsageInfo(),
         )
+
+    async def stream_chat_completion(
+        self, model: str, request: ChatCompletionRequest
+    ):
+        """真流式输出（使用 HuggingFace OpenAI 兼容 chat 接口的 SSE）"""
+        url = f"{HF_CHAT_BASE}/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {self._api_key}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model": model,
+            "messages": [msg_to_dict(m) for m in request.messages],
+            "temperature": request.temperature,
+            "stream": True,
+        }
+        if request.max_tokens:
+            payload["max_tokens"] = request.max_tokens
+
+        try:
+            async with self._client.stream("POST", url, headers=headers, json=payload) as resp:
+                resp.raise_for_status()
+                async for line in resp.aiter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    data_str = line[6:]
+                    if data_str.strip() == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(data_str)
+                        delta = chunk.get("choices", [{}])[0].get("delta", {})
+                        if delta:
+                            yield delta
+                    except (json.JSONDecodeError, IndexError, KeyError):
+                        continue
+        except httpx.HTTPStatusError:
+            result = await self.chat_completion(model, request)
+            content = result.choices[0].message.content if result.choices else ""
+            if content:
+                yield content
 
     async def list_models(self) -> list[str]:
         # HuggingFace 模型数量太多，返回推荐的免费可用模型

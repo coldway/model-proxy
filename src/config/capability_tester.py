@@ -14,6 +14,7 @@ import base64
 import json
 import logging
 import struct
+import threading
 import time
 import uuid
 import zlib
@@ -69,10 +70,11 @@ TOOL_CALLING_PROBE = {
 
 
 class CapabilityCache:
-    """模型能力缓存管理"""
+    """模型能力缓存管理（线程安全）"""
 
     def __init__(self, path: Path | None = None):
         self._path = path or CAPABILITIES_FILE
+        self._lock = threading.Lock()
         self._data: dict[str, dict[str, Any]] = self._load()
 
     def _load(self) -> dict[str, dict[str, Any]]:
@@ -85,10 +87,12 @@ class CapabilityCache:
         return {}
 
     def save(self) -> None:
+        with self._lock:
+            snapshot = dict(self._data)
         self._path.parent.mkdir(parents=True, exist_ok=True)
         with open(self._path, "w", encoding="utf-8") as f:
             yaml.dump(
-                self._data, f,
+                snapshot, f,
                 allow_unicode=True, default_flow_style=False, sort_keys=False,
             )
         logger.info("能力缓存已保存至 %s", self._path)
@@ -97,10 +101,12 @@ class CapabilityCache:
         return f"{provider}/{model_id}"
 
     def get(self, provider: str, model_id: str) -> dict[str, Any] | None:
-        return self._data.get(self._key(provider, model_id))
+        with self._lock:
+            return self._data.get(self._key(provider, model_id))
 
     def has(self, provider: str, model_id: str) -> bool:
-        return self._key(provider, model_id) in self._data
+        with self._lock:
+            return self._key(provider, model_id) in self._data
 
     def set(
         self,
@@ -109,23 +115,27 @@ class CapabilityCache:
         capabilities: dict[str, Any],
     ) -> None:
         key = self._key(provider, model_id)
-        self._data[key] = {
-            **capabilities,
-            "tested_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-        }
+        with self._lock:
+            self._data[key] = {
+                **capabilities,
+                "tested_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            }
 
     def get_all(self) -> dict[str, dict[str, Any]]:
-        return dict(self._data)
+        with self._lock:
+            return dict(self._data)
 
     def remove(self, provider: str, model_id: str) -> bool:
         key = self._key(provider, model_id)
-        if key in self._data:
-            del self._data[key]
-            return True
-        return False
+        with self._lock:
+            if key in self._data:
+                del self._data[key]
+                return True
+            return False
 
     def clear(self) -> None:
-        self._data.clear()
+        with self._lock:
+            self._data.clear()
 
 
 PROBE_INTERVAL_SECONDS = 1

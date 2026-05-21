@@ -69,16 +69,19 @@ class CatalogManager:
     # --- 厂商信息查询 ---
 
     def get_all_providers(self) -> dict[str, Any]:
-        return self._data.get("providers", {})
+        with self._lock:
+            return self._data.get("providers", {})
 
     def get_provider(self, provider_id: str) -> dict[str, Any] | None:
-        return self._data.get("providers", {}).get(provider_id)
+        with self._lock:
+            return self._data.get("providers", {}).get(provider_id)
 
     def get_models(self, provider_id: str) -> list[dict[str, Any]]:
-        provider = self.get_provider(provider_id)
-        if not provider:
-            return []
-        return provider.get("models", [])
+        with self._lock:
+            provider = self._data.get("providers", {}).get(provider_id)
+            if not provider:
+                return []
+            return provider.get("models", [])
 
     def get_model(self, provider_id: str, model_id: str) -> dict[str, Any] | None:
         """按 id 查找目录中的单条模型记录（含 tool_calling 等人工标注）"""
@@ -91,15 +94,16 @@ class CatalogManager:
         """搜索所有厂商的模型（模糊匹配 id、name、description、category）"""
         results = []
         query_lower = query.lower()
-        for prov_id, prov in self._data.get("providers", {}).items():
-            for model in prov.get("models", []):
-                searchable = f"{model.get('id', '')} {model.get('name', '')} {model.get('description', '')} {model.get('category', '')}".lower()
-                if query_lower in searchable:
-                    results.append({
-                        **model,
-                        "provider_id": prov_id,
-                        "provider_name": prov.get("name", prov_id),
-                    })
+        with self._lock:
+            for prov_id, prov in self._data.get("providers", {}).items():
+                for model in prov.get("models", []):
+                    searchable = f"{model.get('id', '')} {model.get('name', '')} {model.get('description', '')} {model.get('category', '')}".lower()
+                    if query_lower in searchable:
+                        results.append({
+                            **model,
+                            "provider_id": prov_id,
+                            "provider_name": prov.get("name", prov_id),
+                        })
         return results
 
     # --- 厂商运行时状态 ---

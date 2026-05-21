@@ -1532,13 +1532,15 @@ async def stream_chat_message(session_id: str, request: ChatCompletionRequest):
             session.add_message("assistant", reply_text, model=model_name)
             memory_mgr.on_turn_complete(session_id, user_msg, reply_text)
         elif stream_broken:
+            session.pop_last_message()
             logger.info(
-                "[流式会话] trace=%s 流式中断，跳过写入助手消息（避免残缺上下文）",
+                "[流式会话] trace=%s 流式中断，已弹出用户消息（避免悬空上下文）",
                 trace_id,
             )
         else:
+            session.pop_last_message()
             logger.info(
-                "[流式会话] trace=%s 输出为空，跳过写入助手消息",
+                "[流式会话] trace=%s 输出为空，已弹出用户消息",
                 trace_id,
             )
         await asyncio.to_thread(_deps.session_mgr.save)

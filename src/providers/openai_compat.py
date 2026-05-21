@@ -105,7 +105,9 @@ class OpenAICompatibleProvider(BaseProvider):
             headers=self._build_headers(),
             json=self._build_payload(model, request, stream=True),
         ) as resp:
-            resp.raise_for_status()
+            if resp.status_code >= 400:
+                await resp.aread()
+                resp.raise_for_status()
             async for line in resp.aiter_lines():
                 if not line.startswith("data: "):
                     continue

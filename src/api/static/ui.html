@@ -133,13 +133,19 @@
         .stat-card:hover::before { opacity: 1; }
 
         /* 拖拽相关样式 */
-        .stat-card.draggable { cursor: grab; }
-        .stat-card.draggable:active { cursor: grabbing; }
+        .stat-card.draggable { cursor: default; }
         .stat-card.dragging { opacity: 0.35; transform: scale(0.97); }
         .stat-card.drag-over {
             border-color: var(--accent-cyan);
             box-shadow: 0 0 0 2px rgba(6, 182, 212, 0.25);
         }
+        /* 文本可选 */
+        .stat-card, .model-item { user-select: text; -webkit-user-select: text; }
+        .stat-card .model-name, .stat-card .stat-item .value,
+        .model-item span { user-select: text; -webkit-user-select: text; }
+        /* 拖拽 handle */
+        .drag-handle { cursor: grab; user-select: none; -webkit-user-select: none; }
+        .drag-handle:active { cursor: grabbing; }
         .guide-btn {
             width: 22px; height: 22px; border-radius: 50%;
             border: 1px solid rgba(51,65,85,0.6); background: transparent;
@@ -1178,10 +1184,10 @@
                     const meta = providerMeta[id] || { name: prov.name || id, icon: id[0].toUpperCase(), color: '', desc: prov.description || '', guide: '' };
                     const modelCount = prov.models?.length || 0;
                     const enabledCount = (prov.models || []).filter(m => m.enabled).length;
-                    return `<div class="stat-card draggable" draggable="true" data-provider-id="${id}" onclick="openProviderModal('${id}')">
+                    return `<div class="stat-card draggable" draggable="false" data-provider-id="${id}" onclick="openProviderModal('${id}')">
                         <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
                             <div style="display:flex;align-items:center;gap:10px;min-width:0">
-                                <span class="priority-badge">${prov.priority}</span>
+                                <span class="priority-badge drag-handle" title="拖拽排序">${prov.priority}</span>
                                 <div class="model-icon ${meta.color}">${meta.icon}</div>
                                 <div style="min-width:0">
                                     <div class="model-name" style="font-size:0.95rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${meta.name}</div>
@@ -1218,6 +1224,11 @@
             const container = document.getElementById('provider-models-list');
             const items = container.querySelectorAll('.model-item');
             items.forEach(item => {
+                const handle = item.querySelector('.drag-handle');
+                if (handle) {
+                    handle.addEventListener('mousedown', () => { item.setAttribute('draggable', 'true'); });
+                    handle.addEventListener('mouseup', () => { item.setAttribute('draggable', 'false'); });
+                }
                 item.addEventListener('dragstart', onModelDragStart);
                 item.addEventListener('dragover', onModelDragOver);
                 item.addEventListener('dragenter', onModelDragEnter);
@@ -1238,6 +1249,7 @@
         function onModelDragLeave() { this.classList.remove('drag-over'); }
         function onModelDragEnd() {
             this.classList.remove('dragging');
+            this.setAttribute('draggable', 'false');
             document.querySelectorAll('.model-item.drag-over').forEach(el => el.classList.remove('drag-over'));
         }
 
@@ -1369,9 +1381,9 @@
                 const capBadgesHtml = buildCapBadges(cap);
                 const capSummaryHtml = buildCapSummary(cap);
                 const noCap = !cap ? '<span style="font-size:0.65rem;color:var(--text-muted)">未测试</span>' : '';
-                return `<div class="model-item" draggable="${isEnabled}" data-model-id="${m.id}" style="display:flex;align-items:center;justify-content:space-between;padding:12px;background:var(--bg-primary);border-radius:8px;margin-bottom:8px;border:1px solid ${borderColor};opacity:${opacity};${isEnabled ? 'cursor:grab' : ''}">
+                return `<div class="model-item" draggable="false" data-model-id="${m.id}" style="display:flex;align-items:center;justify-content:space-between;padding:12px;background:var(--bg-primary);border-radius:8px;margin-bottom:8px;border:1px solid ${borderColor};opacity:${opacity}">
                     <div style="display:flex;align-items:center;gap:12px;flex:1;min-width:0">
-                        <span class="priority-badge">${isEnabled ? (m.priority || 99) : '-'}</span>
+                        <span class="priority-badge drag-handle" title="拖拽排序">${isEnabled ? (m.priority || 99) : '-'}</span>
                         <div style="flex:1;min-width:0">
                             <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
                                 <span style="font-weight:600;font-size:0.9rem">${m.name || m.id}</span>
@@ -1811,13 +1823,18 @@
             showModal('guide');
         }
 
-        // --- 拖拽排序 ---
+        // --- 拖拽排序（通过 handle 触发） ---
         let dragSrcEl = null;
 
         function initDragAndDrop() {
             const grid = document.getElementById('providers-grid');
             const cards = grid.querySelectorAll('.draggable');
             cards.forEach(card => {
+                const handle = card.querySelector('.drag-handle');
+                if (handle) {
+                    handle.addEventListener('mousedown', () => { card.setAttribute('draggable', 'true'); });
+                    handle.addEventListener('mouseup', () => { card.setAttribute('draggable', 'false'); });
+                }
                 card.addEventListener('dragstart', handleDragStart);
                 card.addEventListener('dragover', handleDragOver);
                 card.addEventListener('dragenter', handleDragEnter);
@@ -1868,6 +1885,7 @@
 
         function handleDragEnd(e) {
             this.classList.remove('dragging');
+            this.setAttribute('draggable', 'false');
             document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
         }
 

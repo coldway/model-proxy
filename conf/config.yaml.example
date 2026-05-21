@@ -1,13 +1,24 @@
-# Model Proxy 运行配置
+# Model Proxy 配置模板
 # 复制此文件为 conf/config.yaml 并填入你的 API Key
 # 注意：conf/config.yaml 已被 .gitignore 排除，不会提交到仓库
 #
-# 此文件仅保存 API Key 和服务设置
-# 厂商启用状态、优先级、模型列表等均在 conf/providers_catalog.yaml 中管理
+# 获取方式：
+#   Google:     https://aistudio.google.com/apikey
+#   Groq:       https://console.groq.com/keys
+#   GitHub:     Settings > Developer settings > Personal access tokens
+#   Cerebras:   https://cloud.cerebras.ai/
+#   SambaNova:  https://cloud.sambanova.ai/
+#   OpenRouter: https://openrouter.ai/keys
+#   Mistral:    https://console.mistral.ai/api-keys/
+#   NVIDIA:     https://build.nvidia.com/
+#   Cohere:     https://dashboard.cohere.com/api-keys
+#   DashScope:  https://bailian.console.aliyun.com/ → API-KEY 管理
+#   Cloudflare: Dashboard > AI > Workers AI
+#   HuggingFace: https://huggingface.co/settings/tokens
 
 providers:
   google:
-    api_key: "YOUR_GOOGLE_API_KEY"
+    api_key: ""
   groq:
     api_key: ""
   cerebras:
@@ -19,6 +30,12 @@ providers:
   openrouter:
     api_key: ""
   mistral:
+    api_key: ""
+  nvidia:
+    api_key: ""
+  cohere:
+    api_key: ""
+  dashscope:
     api_key: ""
   cloudflare:
     api_key: ""  # 格式: "account_id:api_token"
@@ -33,11 +50,5 @@ settings:
   default_provider: "google"
   auto_switch: true
   log_level: "info"
-  admin_token: ""              # 管理面板认证令牌，为空则不启用认证
-  route_cache_ttl: 600         # LLM 路由缓存有效期（秒）
-  breaker_threshold: 3         # 连续失败 N 次触发厂商熔断
-  breaker_cooldown: 300        # 熔断冷却时间（秒）
-  max_context_tokens: 8000     # 聊天会话上下文最大 token 数
-  max_sessions: 50             # 最大聊天会话数
-  probe_interval: 5            # 能力探测间隔（秒）
-  cors_origins: ""             # CORS：逗号分隔 Origin；空=不启用跨域；*=任意来源
+  # admin_token: ""    # 管理面板认证 token（可选）
+  # api_token: ""      # OpenAI API 认证 token（可选）

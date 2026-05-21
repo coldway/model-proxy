@@ -29,7 +29,7 @@ class TestToolRegistration:
         assert "search_ollama_library" in names
 
     def test_total_tool_count(self):
-        assert len(get_tool_definitions()) == 6
+        assert len(get_tool_definitions()) == 8
 
 
 class TestAddModelTool:
@@ -278,16 +278,11 @@ class TestSearchOllamaLibrary:
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        mock_tags_resp = MagicMock()
-        mock_tags_resp.status_code = 200
-        mock_tags_resp.json.return_value = {
-            "models": [{"name": "mannix/llama3.1-8b-abliterated:latest", "size": 4675906716}]
-        }
-        mock_ollama_client = MagicMock()
-        mock_ollama_client.get = AsyncMock(return_value=mock_tags_resp)
-
-        mock_prov = MagicMock()
-        mock_prov._client = mock_ollama_client
+        from src.providers.ollama import OllamaProvider
+        mock_prov = MagicMock(spec=OllamaProvider)
+        mock_prov.list_models = AsyncMock(
+            return_value=["mannix/llama3.1-8b-abliterated:latest"]
+        )
 
         mock_deps = MagicMock()
         mock_deps.dispatcher = MagicMock()

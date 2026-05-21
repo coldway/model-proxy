@@ -1,7 +1,7 @@
 providers:
   google:
     name: Google AI Studio
-    enabled: false
+    enabled: true
     priority: 1
     url: https://aistudio.google.com/
     description: Google 提供的免费 Gemini 系列模型
@@ -112,7 +112,7 @@ providers:
       tool_calling: true
   groq:
     name: Groq
-    enabled: false
+    enabled: true
     priority: 2
     url: https://console.groq.com/
     description: Groq 提供的高速推理服务
@@ -276,7 +276,7 @@ providers:
       category: 通用
   github:
     name: GitHub Models
-    enabled: false
+    enabled: true
     priority: 3
     url: https://github.com/marketplace/models
     description: GitHub 模型市场，使用 GitHub Token 调用
@@ -480,6 +480,6 @@ providers:
       name: qwen3:0.6b
       description: 751.63M | qwen3 | Q4_K_M | 0.5GB
       category: 本地
-      tool_calling: true
-      enabled: true
+      tool_calling: false
+      enabled: false
       priority: 50

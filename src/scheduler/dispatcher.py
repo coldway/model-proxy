@@ -384,11 +384,24 @@ class Dispatcher:
         1. 规则快速路径：当规则排序有明显最优解时直接使用（零开销）
         2. LLM 智能路由：用最快模型分析请求特征，推荐最佳模型（缓存 10 分钟）
         3. 规则遍历回退：LLM 路由失败时按能力评分遍历所有可用模型
+
+        当 request.tools 非空时，强制过滤仅保留支持 tool_calling 的模型。
         """
         payload_bytes = estimate_payload_bytes(request)
         available = self._filter_available(enabled_models, payload_bytes)
         if not available:
             raise AllModelsUnavailable("所有模型均不可用（配额耗尽或 payload 超出所有模型上限）")
+
+        if request.tools:
+            tc_available = [
+                (prov, m) for prov, m in available
+                if self._model_supports_tool_calling(prov, m)
+            ]
+            if tc_available:
+                available = tc_available
+                logger.debug("auto 路由: 请求含 tools，限定为 %d 个 TC 模型", len(available))
+            else:
+                logger.warning("auto 路由: 请求含 tools 但无模型支持 TC，使用全部候选兜底")
 
         ordered = self._sort_by_capability(available, request)
         user_hint = self._get_user_hint(request)
@@ -574,6 +587,13 @@ class Dispatcher:
                 continue
             result.append((prov_name, model_cfg))
         return result
+
+    def _model_supports_tool_calling(self, provider: str, model_cfg: ModelConfig) -> bool:
+        """判断模型是否支持 tool calling（结合静态配置和动态能力探测）"""
+        if model_cfg.tool_calling:
+            return True
+        caps = self._get_caps(provider, model_cfg.name)
+        return bool(caps.get("tool_calling"))
 
     def _sort_by_capability(
         self,
@@ -972,6 +992,17 @@ class Dispatcher:
         available = self._filter_available(enabled_models, payload_bytes)
         if not available:
             raise AllModelsUnavailable("所有模型均不可用（配额耗尽或 payload 超出所有模型上限）")
+
+        if request.tools:
+            tc_available = [
+                (prov, m) for prov, m in available
+                if self._model_supports_tool_calling(prov, m)
+            ]
+            if tc_available:
+                available = tc_available
+                logger.debug("流式 auto 路由: 请求含 tools，限定为 %d 个 TC 模型", len(available))
+            else:
+                logger.warning("流式 auto 路由: 请求含 tools 但无模型支持 TC，使用全部候选兜底")
 
         ordered = self._sort_by_capability(available, request)
 

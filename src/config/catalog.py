@@ -90,6 +90,13 @@ class CatalogManager:
                 return m
         return None
 
+    def get_model(self, provider_id: str, model_id: str) -> dict[str, Any] | None:
+        """按 id 查找目录中的单条模型记录（含 tool_calling 等人工标注）"""
+        for m in self.get_models(provider_id):
+            if m.get("id") == model_id:
+                return m
+        return None
+
     def search_models(self, query: str) -> list[dict[str, Any]]:
         """搜索所有厂商的模型（模糊匹配 id、name、description、category）"""
         results = []

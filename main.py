@@ -166,12 +166,17 @@ def create_app() -> FastAPI:
 
         ollama_prov = dispatcher.get_provider("ollama")
         if isinstance(ollama_prov, OllamaProvider):
-            try:
-                added = await ollama_prov.discover_and_register(catalog)
-                if added:
-                    logger.info("Ollama 启动发现 %d 个本地模型", len(added))
-            except Exception as exc:
-                logger.warning("Ollama 启动模型发现失败（服务可能未运行）: %s", exc)
+            ollama_prov.set_breaker(dispatcher._breaker)
+
+            async def _ollama_background_discover():
+                try:
+                    added = await ollama_prov.discover_and_register(catalog)
+                    if added:
+                        logger.info("Ollama 启动发现 %d 个本地模型", len(added))
+                except Exception as exc:
+                    logger.warning("Ollama 启动模型发现失败（服务可能未运行）: %s", exc)
+
+            asyncio.create_task(_ollama_background_discover())
 
         yield
         flush_task.cancel()

@@ -619,6 +619,65 @@ async def pull_ollama_model(model: str):
     )
 
 
+@router.delete("/api/provider/ollama/models/{model_name:path}")
+async def delete_ollama_model(model_name: str):
+    """删除 Ollama 本地模型"""
+    from src.providers.ollama import OllamaProvider
+
+    prov = _deps.dispatcher.get_provider("ollama")
+    if not isinstance(prov, OllamaProvider):
+        raise HTTPException(status_code=400, detail="Ollama 厂商未启用或未注册")
+
+    success = await prov.delete_model(model_name)
+    if not success:
+        raise HTTPException(status_code=500, detail=f"删除模型 {model_name} 失败")
+
+    if _deps.catalog:
+        models = _deps.catalog.get_models("ollama")
+        for m in models:
+            if m.get("id") == model_name:
+                _deps.catalog.remove_model("ollama", model_name)
+                break
+
+    return {"status": "ok", "message": f"模型 {model_name} 已删除"}
+
+
+@router.get("/api/provider/ollama/running")
+async def list_ollama_running():
+    """查询当前加载在 VRAM 中的 Ollama 模型"""
+    from src.providers.ollama import OllamaProvider
+
+    prov = _deps.dispatcher.get_provider("ollama")
+    if not isinstance(prov, OllamaProvider):
+        raise HTTPException(status_code=400, detail="Ollama 厂商未启用或未注册")
+
+    running = await prov.list_running()
+    return {"status": "ok", "models": running}
+
+
+@router.post("/api/provider/ollama/test-tool-calling/{model_name:path}")
+async def test_ollama_tool_calling(model_name: str):
+    """动态测试 Ollama 模型是否支持 tool calling"""
+    from src.providers.ollama import OllamaProvider
+
+    prov = _deps.dispatcher.get_provider("ollama")
+    if not isinstance(prov, OllamaProvider):
+        raise HTTPException(status_code=400, detail="Ollama 厂商未启用或未注册")
+
+    supports = await prov.test_tool_calling(model_name)
+
+    if _deps.catalog:
+        model_entry = _deps.catalog.get_model("ollama", model_name)
+        if model_entry:
+            model_entry["tool_calling"] = supports
+
+    return {
+        "status": "ok",
+        "model": model_name,
+        "tool_calling": supports,
+    }
+
+
 @router.post("/api/provider/priority")
 async def update_provider_priority(provider: str, priority: int):
     """更新厂商优先级"""

@@ -5,9 +5,11 @@
 
 特性：
 - 无需 API Key（Ollama 忽略认证）
-- 实时查询本地已安装模型（/api/tags）
+- 实时查询本地已安装模型（/api/tags），带短时缓存
 - 支持流式 / 非流式 / tool calling
 - base_url 可通过 config.yaml 的 api_key 字段自定义，默认 http://localhost:11434
+- 集成 CircuitBreaker：Ollama 不可用时快速失败
+- 流式响应传递 usage 信息
 """
 
 from __future__ import annotations
@@ -33,8 +35,10 @@ from src.providers.utils import msg_to_dict, parse_tool_calls
 logger = logging.getLogger(__name__)
 
 _DEFAULT_BASE_URL = "http://localhost:11434"
-_CONNECT_TIMEOUT = 5
+_CONNECT_TIMEOUT = 3
 _REQUEST_TIMEOUT = 120
+_TAGS_CACHE_TTL = 30
+_SHOW_TIMEOUT = 5
 
 
 class OllamaProvider(BaseProvider):
@@ -51,6 +55,28 @@ class OllamaProvider(BaseProvider):
         self._client = httpx.AsyncClient(
             timeout=httpx.Timeout(_REQUEST_TIMEOUT, connect=_CONNECT_TIMEOUT),
         )
+        self._tags_cache: list[dict[str, Any]] | None = None
+        self._tags_cache_time: float = 0
+        self._breaker_ref: Any = None
+        self._provider_id: str = "ollama"
+
+    def set_breaker(self, breaker: Any, provider_id: str = "ollama") -> None:
+        """注入 CircuitBreaker 引用，使内部方法能感知熔断状态。"""
+        self._breaker_ref = breaker
+        self._provider_id = provider_id
+
+    def _is_broken(self) -> bool:
+        if self._breaker_ref is None:
+            return False
+        return self._breaker_ref.is_open(self._provider_id)
+
+    def _record_failure(self) -> None:
+        if self._breaker_ref:
+            self._breaker_ref.record_failure(self._provider_id)
+
+    def _record_success(self) -> None:
+        if self._breaker_ref:
+            self._breaker_ref.record_success(self._provider_id)
 
     async def close(self) -> None:
         await self._client.aclose()
@@ -87,13 +113,22 @@ class OllamaProvider(BaseProvider):
     async def chat_completion(
         self, model: str, request: ChatCompletionRequest
     ) -> ChatCompletionResponse:
+        if self._is_broken():
+            raise httpx.ConnectError("Ollama 处于熔断状态，暂时不可用")
+
         url = f"{self._base_url}/v1/chat/completions"
-        resp = await self._client.post(
-            url,
-            headers={"Content-Type": "application/json"},
-            json=self._build_payload(model, request),
-        )
-        resp.raise_for_status()
+        try:
+            resp = await self._client.post(
+                url,
+                headers={"Content-Type": "application/json"},
+                json=self._build_payload(model, request),
+            )
+            resp.raise_for_status()
+        except (httpx.ConnectError, httpx.ConnectTimeout) as e:
+            self._record_failure()
+            raise httpx.ConnectError(f"Ollama 连接失败: {e}") from e
+
+        self._record_success()
         data = resp.json()
 
         choices = data.get("choices") or []
@@ -132,71 +167,109 @@ class OllamaProvider(BaseProvider):
     async def stream_chat_completion(
         self, model: str, request: ChatCompletionRequest
     ) -> AsyncIterator[dict]:
+        if self._is_broken():
+            raise httpx.ConnectError("Ollama 处于熔断状态，暂时不可用")
+
         url = f"{self._base_url}/v1/chat/completions"
-        async with self._client.stream(
-            "POST",
-            url,
-            headers={"Content-Type": "application/json"},
-            json=self._build_payload(model, request, stream=True),
-        ) as resp:
-            if resp.status_code >= 400:
-                await resp.aread()
-                resp.raise_for_status()
-            async for line in resp.aiter_lines():
-                if not line.startswith("data: "):
-                    continue
-                payload = line[6:]
-                if payload.strip() == "[DONE]":
-                    break
-                try:
-                    chunk = json.loads(payload)
-                    choices = chunk.get("choices", [])
-                    if not choices:
+        try:
+            async with self._client.stream(
+                "POST",
+                url,
+                headers={"Content-Type": "application/json"},
+                json=self._build_payload(model, request, stream=True),
+            ) as resp:
+                if resp.status_code >= 400:
+                    await resp.aread()
+                    self._record_failure()
+                    resp.raise_for_status()
+                self._record_success()
+                async for line in resp.aiter_lines():
+                    if not line.startswith("data: "):
                         continue
-                    delta = choices[0].get("delta", {})
-                    if delta:
-                        yield delta
-                except (json.JSONDecodeError, IndexError, KeyError):
-                    continue
+                    payload = line[6:]
+                    if payload.strip() == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(payload)
+                        choices = chunk.get("choices", [])
+                        if not choices:
+                            usage = chunk.get("usage")
+                            if usage:
+                                yield {"usage": usage}
+                            continue
+                        delta = choices[0].get("delta", {})
+                        chunk_usage = chunk.get("usage")
+                        if chunk_usage:
+                            delta["usage"] = chunk_usage
+                        if delta:
+                            yield delta
+                    except (json.JSONDecodeError, IndexError, KeyError):
+                        continue
+        except (httpx.ConnectError, httpx.ConnectTimeout) as e:
+            self._record_failure()
+            raise httpx.ConnectError(f"Ollama 连接失败: {e}") from e
 
     # ------------------------------------------------------------------
-    # 模型列表：通过 Ollama 原生 /api/tags 端点
+    # 模型列表：带 TTL 缓存的 /api/tags
     # ------------------------------------------------------------------
+
+    async def _fetch_tags(self, force: bool = False) -> list[dict[str, Any]]:
+        """获取模型列表，默认使用缓存（TTL=30s）"""
+        now = time.time()
+        if not force and self._tags_cache is not None and (now - self._tags_cache_time) < _TAGS_CACHE_TTL:
+            return self._tags_cache
+
+        if self._is_broken():
+            return self._tags_cache or []
+
+        url = f"{self._base_url}/api/tags"
+        try:
+            resp = await self._client.get(url, timeout=_CONNECT_TIMEOUT)
+            resp.raise_for_status()
+            data = resp.json()
+            self._tags_cache = data.get("models", [])
+            self._tags_cache_time = now
+            self._record_success()
+            return self._tags_cache
+        except (httpx.ConnectError, httpx.ConnectTimeout) as e:
+            self._record_failure()
+            logger.warning("获取 Ollama 模型列表失败（%s）: %s", self._base_url, e)
+            return self._tags_cache or []
+        except Exception as e:
+            logger.warning("获取 Ollama 模型列表失败（%s）: %s", self._base_url, e)
+            return self._tags_cache or []
 
     async def list_models(self) -> list[str]:
         """查询本地 Ollama 已安装的模型列表"""
-        url = f"{self._base_url}/api/tags"
-        try:
-            resp = await self._client.get(url, timeout=_CONNECT_TIMEOUT)
-            resp.raise_for_status()
-            data = resp.json()
-            return [m["name"] for m in data.get("models", [])]
-        except Exception as e:
-            logger.warning("获取 Ollama 本地模型列表失败（%s）: %s", self._base_url, e)
-            return []
+        models = await self._fetch_tags()
+        return [m["name"] for m in models]
 
     async def list_models_detail(self) -> list[dict[str, Any]]:
         """返回模型详情列表（含 size / family / parameter_size 等元数据）"""
-        url = f"{self._base_url}/api/tags"
-        try:
-            resp = await self._client.get(url, timeout=_CONNECT_TIMEOUT)
-            resp.raise_for_status()
-            data = resp.json()
-            return data.get("models", [])
-        except Exception as e:
-            logger.warning("获取 Ollama 模型详情失败（%s）: %s", self._base_url, e)
-            return []
+        return await self._fetch_tags()
 
     async def is_model_installed(self, model: str) -> bool:
-        """检查指定模型是否已安装在本地 Ollama"""
-        installed = await self.list_models()
-        return any(model == m or model == m.split(":")[0] for m in installed)
+        """通过 /api/show 精确查询单个模型是否已安装（O(1)，不拉全量列表）"""
+        if self._is_broken():
+            return False
+        url = f"{self._base_url}/api/show"
+        try:
+            resp = await self._client.post(
+                url, json={"name": model}, timeout=_SHOW_TIMEOUT,
+            )
+            return resp.status_code == 200
+        except (httpx.ConnectError, httpx.ConnectTimeout):
+            self._record_failure()
+            return False
+        except Exception:
+            return False
 
     async def pull_model(self, model: str) -> AsyncIterator[dict]:
-        """触发 Ollama 下载模型，流式返回进度。
+        """触发 Ollama 下载模型，流式返回进度。"""
+        if self._is_broken():
+            yield {"status": "error", "error": "Ollama 处于熔断状态，暂时不可用"}
+            return
 
-        使用独立 httpx client 避免与主 client 的超时/连接冲突。
-        """
         url = f"{self._base_url}/api/pull"
         async with httpx.AsyncClient(
             timeout=httpx.Timeout(3600, connect=10),
@@ -214,6 +287,39 @@ class OllamaProvider(BaseProvider):
                     except json.JSONDecodeError:
                         continue
 
+    async def delete_model(self, model: str) -> bool:
+        """删除本地模型"""
+        if self._is_broken():
+            return False
+        url = f"{self._base_url}/api/delete"
+        try:
+            resp = await self._client.request("DELETE", url, json={"name": model}, timeout=30)
+            if resp.status_code == 200:
+                self._invalidate_cache()
+                return True
+            return False
+        except Exception as e:
+            logger.warning("删除 Ollama 模型 %s 失败: %s", model, e)
+            return False
+
+    async def list_running(self) -> list[dict[str, Any]]:
+        """查询当前加载在 VRAM 中的模型（/api/ps）"""
+        if self._is_broken():
+            return []
+        url = f"{self._base_url}/api/ps"
+        try:
+            resp = await self._client.get(url, timeout=_CONNECT_TIMEOUT)
+            resp.raise_for_status()
+            data = resp.json()
+            return data.get("models", [])
+        except Exception as e:
+            logger.warning("获取 Ollama 运行中模型失败: %s", e)
+            return []
+
+    def _invalidate_cache(self) -> None:
+        self._tags_cache = None
+        self._tags_cache_time = 0
+
     # ------------------------------------------------------------------
     # 健康检查
     # ------------------------------------------------------------------
@@ -224,7 +330,10 @@ class OllamaProvider(BaseProvider):
             resp = await self._client.get(
                 f"{self._base_url}/api/tags", timeout=_CONNECT_TIMEOUT,
             )
-            return resp.status_code == 200
+            ok = resp.status_code == 200
+            if ok:
+                self._record_success()
+            return ok
         except Exception:
             return False
 
@@ -235,11 +344,7 @@ class OllamaProvider(BaseProvider):
     async def discover_and_register(
         self, catalog: Any, provider_id: str = "ollama"
     ) -> list[str]:
-        """查询本地已安装的模型，自动注册到 Catalog，返回新增模型 ID 列表。
-
-        若 Catalog 中不存在该 provider，会先自动创建。
-        已存在于 Catalog 中的模型不会重复添加。
-        """
+        """查询本地已安装的模型，自动注册到 Catalog，返回新增模型 ID 列表。"""
         models = await self.list_models_detail()
         if not models:
             return []
@@ -256,12 +361,19 @@ class OllamaProvider(BaseProvider):
             })
 
         existing_ids = {m["id"] for m in catalog.get_models(provider_id)}
+        seen_digests: set[str] = set()
         added: list[str] = []
 
         for m in models:
             model_id = m["name"]
             if model_id in existing_ids:
                 continue
+
+            digest = m.get("digest", "")
+            if digest and digest in seen_digests:
+                continue
+            if digest:
+                seen_digests.add(digest)
 
             details = m.get("details", {})
             family = details.get("family", "")
@@ -295,9 +407,51 @@ class OllamaProvider(BaseProvider):
             logger.info("Ollama 模型发现: 新增 %d 个模型 — %s", len(added), ", ".join(added))
         return added
 
+    async def test_tool_calling(self, model: str) -> bool:
+        """动态测试模型是否支持 tool calling（发送简单 tool call 请求）"""
+        if self._is_broken():
+            return False
+
+        test_request_data = {
+            "model": model,
+            "messages": [{"role": "user", "content": "What is 2+2?"}],
+            "tools": [{
+                "type": "function",
+                "function": {
+                    "name": "calculator",
+                    "description": "A simple calculator",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"expression": {"type": "string"}},
+                        "required": ["expression"],
+                    },
+                },
+            }],
+            "temperature": 0,
+            "stream": False,
+        }
+        url = f"{self._base_url}/v1/chat/completions"
+        try:
+            resp = await self._client.post(
+                url,
+                headers={"Content-Type": "application/json"},
+                json=test_request_data,
+                timeout=30,
+            )
+            if resp.status_code != 200:
+                return False
+            data = resp.json()
+            choices = data.get("choices", [])
+            if not choices:
+                return False
+            msg = choices[0].get("message", {})
+            return bool(msg.get("tool_calls"))
+        except Exception:
+            return False
+
 
 def _infer_tool_calling(model_id: str, family: str) -> bool:
-    """根据模型名 / family 推断是否支持 tool calling。
+    """根据模型名 / family 推断是否支持 tool calling（快速启发式判断）。
 
     Ollama 中支持 tool calling 的模型族主要包括：
     llama3.1+, qwen2.5+, mistral, command-r, hermes, nemotron, firefunction 等。

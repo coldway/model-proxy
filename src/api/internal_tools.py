@@ -343,7 +343,10 @@ def _register_builtin_tools():
                 resp.raise_for_status()
                 html = resp.text
         except httpx.HTTPError as e:
-            return json.dumps({"error": f"搜索请求失败: {str(e)[:200]}"}, ensure_ascii=False)
+            return json.dumps({
+                "error": f"ollama.com 搜索请求失败: {str(e)[:200]}",
+                "hint": "ollama.com 可能不可达，请尝试直接使用 add_model 工具添加已知模型名（如 qwen3:8b）",
+            }, ensure_ascii=False)
 
         card_re = re.compile(
             r'<a\s+href="(/([^"/]+/[^"]+))"[^>]*>(.*?)</a>',
@@ -365,6 +368,12 @@ def _register_builtin_tools():
 
         models: list[dict] = []
         seen: set[str] = set()
+
+        if "<html" not in html[:500].lower():
+            return json.dumps({
+                "error": "ollama.com 返回格式异常（非 HTML），可能页面结构已变更",
+                "hint": "请直接使用 add_model 工具添加已知模型名",
+            }, ensure_ascii=False)
 
         for match in card_re.finditer(html):
             if len(models) >= max_results:
@@ -439,6 +448,14 @@ def _register_builtin_tools():
                 "has_suitable_size": has_suitable,
                 "url": f"https://ollama.com/{name}",
             })
+
+        if not models:
+            return json.dumps({
+                "query": query,
+                "total_found": 0,
+                "warning": "未匹配到任何模型，可能 ollama.com 页面结构已变更",
+                "hint": "请尝试更宽泛的关键词，或直接使用 add_model 工具添加已知模型名",
+            }, ensure_ascii=False, indent=2)
 
         suitable = [m for m in models if m["has_suitable_size"]]
         unsuitable = [m for m in models if not m["has_suitable_size"]]

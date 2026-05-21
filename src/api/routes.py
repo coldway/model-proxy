@@ -1641,10 +1641,19 @@ async def stream_chat_message(session_id: str, request: ChatCompletionRequest):
         for td in tool_defs_raw
     ]
 
+    from src.scheduler.context_manager import AutoCompactManager, FullContextArchive
+
     start_time = time.time()
+    stream_compact_mgr = AutoCompactManager(context_window=session._max_context_tokens)
 
     def _build_context_request(stream: bool, include_tools: bool):
         context_messages = session.get_context_messages()
+        if stream_compact_mgr.monitor.estimate_utilization(context_messages) >= 0.55:
+            import asyncio as _aio
+            loop = _aio.get_event_loop()
+            if loop.is_running():
+                context_messages, _ = stream_compact_mgr.tool_compactor.compact(context_messages)
+            # LLM 摘要在流式中跳过（避免额外延迟）
         session_memory_ctx = memory_mgr.get_context_injection(session_id, user_msg=user_msg)
         full_memory_ctx = "\n\n".join(filter(None, [long_term_ctx, session_memory_ctx]))
         if full_memory_ctx and context_messages and context_messages[0].get("role") == "system":
@@ -1721,6 +1730,17 @@ async def stream_chat_message(session_id: str, request: ChatCompletionRequest):
     session.add_message("assistant", final_reply, model=model_name)
     session.clear_checkpoint()
     memory_mgr.on_turn_complete(session_id, user_msg, final_reply)
+
+    try:
+        archive = FullContextArchive(session_id)
+        archive.archive_turn(
+            user_msg=user_msg,
+            assistant_msg=final_reply,
+            tool_names=[tc["tool"] for tc in tool_calls_log],
+        )
+    except Exception as arc_err:
+        logger.debug("[Archive] 流式归档失败(非关键): %s", arc_err)
+
     await asyncio.to_thread(_deps.session_mgr.save)
 
     logger.info("[流式会话] trace=%s 完成 | provider=%s model=%s 耗时=%.0fms tools=%d", trace_id, provider_name, model_name, latency, len(tool_calls_log))

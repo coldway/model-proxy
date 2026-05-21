@@ -1,11 +1,11 @@
 # Model Proxy - 免费大模型推理代理
 
-灵活选择免费大模型进行推理的代理服务。支持 10 家模型厂商、自动调度与失败切换、内嵌 Web 管理面板，兼容 OpenAI SDK 格式。
+灵活选择免费大模型进行推理的代理服务。支持 13 家模型厂商、自动调度与失败切换、内嵌 Web 管理面板，兼容 OpenAI SDK 格式。
 
 ## 功能概览
 
 - **统一推理接口**：兼容 OpenAI `/v1/chat/completions` 格式，支持自主选择模型或由系统自动调度
-- **10 家免费厂商**：Google AI Studio、Groq、GitHub Models、Cursor CLI、Cerebras、SambaNova、OpenRouter、Cloudflare、HuggingFace、Mistral AI
+- **13 家免费厂商**：Google AI Studio、Groq、GitHub Models、Cursor CLI、Cerebras、SambaNova、OpenRouter、Cloudflare、HuggingFace、Mistral AI、NVIDIA NIM、Cohere、阿里百炼 (DashScope)
 - **智能调度**：基于厂商优先级 + 模型优先级 + 滑动窗口限速的多级调度，超限/失败自动切换
 - **流式输出**：所有厂商均支持 SSE 流式响应，兼容 OpenAI SDK `stream=True`
 - **Web 管理面板**：内嵌单页 UI，无需额外前端构建，提供使用量监控、模型管理、API Key 配置、问答聊天等功能
@@ -27,6 +27,9 @@
 | **Cloudflare** | Workers AI 每日万次 neurons | ~10,000 neurons/天 |
 | **HuggingFace** | 数千个开源模型免费推理 | 有速率限制但免费 |
 | **Cursor CLI** | 通过 Cursor IDE 登录调用 | 取决于 Cursor 订阅 |
+| **NVIDIA NIM** | 123+ 模型免费推理（Llama/Qwen/DeepSeek） | 有速率限制但免费 |
+| **Cohere** | Command 系列模型 | 20 RPM / 1000 请求/月 |
+| **阿里百炼 (DashScope)** | 通义千问全系列（Qwen3/VL/Long） | 按量计费，新用户有免费额度 |
 
 > 所有厂商均**无新用户限制**，注册即可使用。详细模型列表见 `conf/providers_catalog.yaml`。
 
@@ -92,6 +95,9 @@ pip install -r requirements.txt
 
 # 复制示例配置并填入 API Key
 cp conf/config.yaml.example conf/config.yaml   # Windows: copy conf\config.yaml.example conf\config.yaml
+
+# 安装 pre-commit 密钥扫描 hook（防止误提交 API Key）
+ln -sf ../../scripts/pre-commit-secrets-scan.sh .git/hooks/pre-commit
 
 # 启动服务（支持热重载）
 python main.py
@@ -391,6 +397,25 @@ model-proxy/
 - UI 面板仅监听 localhost，不对外暴露
 - 请求历史只记录元数据（延迟、Token 数、成功/失败），不记录消息内容
 - 禁止在代码或日志中明文输出 API Key
+- 日志输出中 API Key 自动脱敏（`sk-xxxx***`、`gsk_xxxx***` 等）
+
+### Pre-commit 密钥扫描 Hook
+
+项目内置了 pre-commit hook，提交前自动扫描暂存区文件是否包含疑似 API Key（Google / Groq / GitHub / HuggingFace / AWS / GitLab / Slack / OpenAI 等 8 种模式）。检测到时阻止提交。
+
+**安装（克隆仓库后执行一次）：**
+
+```bash
+ln -sf ../../scripts/pre-commit-secrets-scan.sh .git/hooks/pre-commit
+```
+
+**Windows (PowerShell)：**
+
+```powershell
+Copy-Item scripts\pre-commit-secrets-scan.sh .git\hooks\pre-commit
+```
+
+安装后每次 `git commit` 时自动扫描。若确认为误报，可使用 `git commit --no-verify` 跳过。
 
 ## License
 

@@ -122,10 +122,16 @@ class ChatSession:
 
             selected.reverse()
 
+            selected_count = len(selected)
+            first_included = (
+                first_user_idx >= 0
+                and selected_count > 0
+                and (len(self.messages) - selected_count) <= first_user_idx
+            )
             if (
                 first_user_msg
                 and first_user_idx >= 0
-                and first_user_msg not in selected
+                and not first_included
                 and len(self.messages) > 4
             ):
                 first_tokens = len(first_user_msg.get("content") or "") // CHARS_PER_TOKEN
@@ -228,6 +234,10 @@ class ChatSession:
                 self._max_context_tokens = max_context_tokens
             self.updated_at = time.time()
             return old
+
+    def get_max_context_tokens(self) -> int:
+        """获取当前 context 窗口大小"""
+        return self._max_context_tokens
 
     def count_role(self, role: str) -> int:
         """安全地统计指定 role 的消息数量"""

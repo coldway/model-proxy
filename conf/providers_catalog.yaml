@@ -212,7 +212,7 @@ providers:
   cerebras:
     name: Cerebras
     enabled: false
-    priority: 4
+    priority: 6
     url: https://cloud.cerebras.ai/
     description: Cerebras 提供极速推理（~2000 tokens/s），免费层非常慷慨
     api_key_guide: https://cloud.cerebras.ai/ 注册后在 Dashboard 获取 API Key，兼容 OpenAI
@@ -239,7 +239,7 @@ providers:
   sambanova:
     name: SambaNova
     enabled: false
-    priority: 5
+    priority: 7
     url: https://cloud.sambanova.ai/
     description: SambaNova Cloud 免费推理，速度极快，支持 Llama/DeepSeek 等大模型
     api_key_guide: https://cloud.sambanova.ai/ 注册后在 API 页面获取 Key，兼容 OpenAI 格式
@@ -328,7 +328,7 @@ providers:
   openrouter:
     name: OpenRouter
     enabled: false
-    priority: 6
+    priority: 8
     url: https://openrouter.ai/
     description: OpenRouter 聚合平台，部分模型完全免费（标注 :free 后缀）
     api_key_guide: https://openrouter.ai/keys 注册获取 Key，接口完全兼容 OpenAI
@@ -360,7 +360,7 @@ providers:
   mistral:
     name: Mistral AI (La Plateforme)
     enabled: false
-    priority: 7
+    priority: 9
     url: https://console.mistral.ai/
     description: Mistral AI 官方平台，实验接口免费层，支持最新 Mistral 模型
     api_key_guide: https://console.mistral.ai/api-keys/ 注册后生成 API Key
@@ -392,7 +392,7 @@ providers:
   cloudflare:
     name: Cloudflare Workers AI
     enabled: false
-    priority: 8
+    priority: 10
     url: https://ai.cloudflare.com/
     description: Cloudflare 提供免费 AI 推理（每日 10,000 neurons），无需信用卡
     api_key_guide: 在 Cloudflare Dashboard > AI > Workers AI 中获取 Account ID 和 API Token
@@ -424,7 +424,7 @@ providers:
   huggingface:
     name: HuggingFace Inference API
     enabled: false
-    priority: 9
+    priority: 11
     url: https://huggingface.co/inference-api
     description: HuggingFace 免费推理 API，支持数千个开源模型，有速率限制但无需付费
     api_key_guide: https://huggingface.co/settings/tokens 创建 Access Token
@@ -456,7 +456,7 @@ providers:
   cursor:
     name: Cursor Agent CLI
     enabled: false
-    priority: 10
+    priority: 5
     url: https://www.cursor.com/
     description: 通过 Cursor CLI 调用模型能力
     api_key_guide: 安装 Cursor 并登录即可使用
@@ -470,8 +470,8 @@ providers:
       tool_calling: false
   ollama:
     name: Ollama 本地模型
-    enabled: true
-    priority: 3
+    enabled: false
+    priority: 4
     url: https://ollama.com/
     description: 本地运行的开源模型（无需 API Key，模型自动发现）
     api_key_guide: 无需 API Key

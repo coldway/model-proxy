@@ -1245,7 +1245,7 @@ async def switch_session_model(session_id: str, body: dict):
         "status": "ok",
         "old_model": old_model,
         "new_model": new_model,
-        "max_context_tokens": session._max_context_tokens,
+        "max_context_tokens": max_ctx or session.get_max_context_tokens(),
     }
 
 
@@ -1329,7 +1329,7 @@ async def _do_send_chat(session, request, trace_id: str, memory_mgr):
     """send_chat_message 的核心逻辑（在 session async lock 内执行）"""
     from src.api.internal_tools import get_tool_definitions, execute_tool
     from src.models.schemas import ToolDefinition, ToolFunction
-    from src.scheduler.context_manager import AutoCompactManager, FullContextArchive
+    from src.scheduler.context_manager import AutoCompactManager, get_archive
 
     session_id = session.id
     user_msg = ""
@@ -1407,6 +1407,7 @@ async def _do_send_chat(session, request, trace_id: str, memory_mgr):
 
             msg = result.choices[0].message if result.choices else None
             if not msg:
+                reply = "⚠️ 模型返回空响应，请重试"
                 break
 
             if msg.tool_calls and round_idx < max_tool_rounds:
@@ -1445,7 +1446,7 @@ async def _do_send_chat(session, request, trace_id: str, memory_mgr):
         memory_mgr.on_turn_complete(session_id, user_msg, reply)
 
         try:
-            archive = FullContextArchive(session_id)
+            archive = get_archive(session_id)
             archive.archive_turn(
                 user_msg=user_msg,
                 assistant_msg=reply,
@@ -1456,7 +1457,8 @@ async def _do_send_chat(session, request, trace_id: str, memory_mgr):
 
         user_turn_count = session.count_role("user")
         if user_turn_count in (6, 12, 20):
-            asyncio.create_task(memory_mgr.llm_extract_memories(session_id, session.messages))
+            task = asyncio.create_task(memory_mgr.llm_extract_memories(session_id, session.messages))
+            task.add_done_callback(lambda t: t.exception() and logger.warning("[Memory] llm_extract 异常: %s", t.exception()))
 
         await asyncio.to_thread(_deps.session_mgr.save)
 
@@ -1615,17 +1617,8 @@ async def stream_chat_message(session_id: str, request: ChatCompletionRequest):
         trace_id, session_id, user_msg[:200],
     )
 
-    session.set_checkpoint()
-    session.add_message("user", user_msg)
-    is_first_message = len(session.messages) == 1
-    long_term_ctx = ""
-    if is_first_message:
-        session.auto_title()
-        long_term_ctx = memory_mgr.on_session_start(session_id, user_msg)
-
     enabled_models = _deps.config_manager.get_enabled_models()
     if not enabled_models:
-        session.rollback()
         raise HTTPException(status_code=503, detail="没有可用模型")
 
     tool_defs_raw = get_tool_definitions()
@@ -1641,7 +1634,23 @@ async def stream_chat_message(session_id: str, request: ChatCompletionRequest):
         for td in tool_defs_raw
     ]
 
-    from src.scheduler.context_manager import AutoCompactManager, FullContextArchive
+    async with session._async_lock:
+        return await _do_stream_chat(session, request, trace_id, memory_mgr, user_msg, enabled_models, tools)
+
+
+async def _do_stream_chat(session, request, trace_id: str, memory_mgr, user_msg: str, enabled_models, tools):
+    """stream_chat_message 的核心逻辑（在 session async lock 内执行）"""
+    from src.scheduler.context_manager import AutoCompactManager, get_archive
+    from src.api.internal_tools import execute_tool
+
+    session_id = session.id
+    session.set_checkpoint()
+    session.add_message("user", user_msg)
+    is_first_message = len(session.messages) == 1
+    long_term_ctx = ""
+    if is_first_message:
+        session.auto_title()
+        long_term_ctx = memory_mgr.on_session_start(session_id, user_msg)
 
     start_time = time.time()
     stream_compact_mgr = AutoCompactManager(context_window=session._max_context_tokens)
@@ -1649,11 +1658,7 @@ async def stream_chat_message(session_id: str, request: ChatCompletionRequest):
     def _build_context_request(stream: bool, include_tools: bool):
         context_messages = session.get_context_messages()
         if stream_compact_mgr.monitor.estimate_utilization(context_messages) >= 0.55:
-            import asyncio as _aio
-            loop = _aio.get_event_loop()
-            if loop.is_running():
-                context_messages, _ = stream_compact_mgr.tool_compactor.compact(context_messages)
-            # LLM 摘要在流式中跳过（避免额外延迟）
+            context_messages, _ = stream_compact_mgr.tool_compactor.compact(context_messages)
         session_memory_ctx = memory_mgr.get_context_injection(session_id, user_msg=user_msg)
         full_memory_ctx = "\n\n".join(filter(None, [long_term_ctx, session_memory_ctx]))
         if full_memory_ctx and context_messages and context_messages[0].get("role") == "system":
@@ -1722,31 +1727,24 @@ async def stream_chat_message(session_id: str, request: ChatCompletionRequest):
     if _deps.history:
         _deps.history.record(provider=provider_name, model=model_name, success=True, latency_ms=latency)
 
-    final_reply = (msg.content if msg else "") or ""
-    final_reply, thinking = _strip_thinking(final_reply)
+    if msg and not msg.tool_calls:
+        final_ctx_request = _build_context_request(stream=True, include_tools=False)
+        try:
+            stream_prov, stream_model, content_iter = await _deps.dispatcher.dispatch_stream(final_ctx_request, enabled_models, trace_id=trace_id)
+            provider_name, model_name = stream_prov, stream_model
+        except Exception as e:
+            logger.warning("[流式会话] trace=%s 流式 dispatch 失败，降级到分块输出: %s", trace_id, e)
+            content_iter = None
+    else:
+        content_iter = None
+
+    final_reply_fallback = (msg.content if msg else "") or ""
+    final_reply_fallback, thinking = _strip_thinking(final_reply_fallback)
     if thinking:
         logger.info("[流式会话] trace=%s 模型思考过程:\n%s", trace_id, thinking[:500])
 
-    session.add_message("assistant", final_reply, model=model_name)
-    session.clear_checkpoint()
-    memory_mgr.on_turn_complete(session_id, user_msg, final_reply)
-
-    try:
-        archive = FullContextArchive(session_id)
-        archive.archive_turn(
-            user_msg=user_msg,
-            assistant_msg=final_reply,
-            tool_names=[tc["tool"] for tc in tool_calls_log],
-        )
-    except Exception as arc_err:
-        logger.debug("[Archive] 流式归档失败(非关键): %s", arc_err)
-
-    await asyncio.to_thread(_deps.session_mgr.save)
-
-    logger.info("[流式会话] trace=%s 完成 | provider=%s model=%s 耗时=%.0fms tools=%d", trace_id, provider_name, model_name, latency, len(tool_calls_log))
-
-    async def _stream_final_reply():
-        """以 SSE 流式输出最终回复（tool calling 已在上方完成）"""
+    async def _stream_real():
+        """真正的 SSE 流式输出"""
         chat_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
         created = int(time.time())
 
@@ -1758,15 +1756,50 @@ async def stream_chat_message(session_id: str, request: ChatCompletionRequest):
             meta["tool_calls"] = tool_calls_log
         yield f"data: {json.dumps({'meta': meta}, ensure_ascii=False)}\n\n"
 
-        chunk_size = 20
-        for i in range(0, len(final_reply), chunk_size):
-            segment = final_reply[i:i + chunk_size]
-            data = {
-                "id": chat_id, "object": "chat.completion.chunk", "created": created,
-                "model": model_name,
-                "choices": [{"index": 0, "delta": {"content": segment}, "finish_reason": None}],
-            }
-            yield f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+        collected_reply = ""
+        if content_iter is not None:
+            async for chunk in content_iter:
+                if isinstance(chunk, dict):
+                    content = chunk.get("choices", [{}])[0].get("delta", {}).get("content", "") if "choices" in chunk else ""
+                else:
+                    content = str(chunk)
+                if content:
+                    collected_reply += content
+                    data = {
+                        "id": chat_id, "object": "chat.completion.chunk", "created": created,
+                        "model": model_name,
+                        "choices": [{"index": 0, "delta": {"content": content}, "finish_reason": None}],
+                    }
+                    yield f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+        else:
+            collected_reply = final_reply_fallback
+            chunk_size = 20
+            for i in range(0, len(collected_reply), chunk_size):
+                segment = collected_reply[i:i + chunk_size]
+                data = {
+                    "id": chat_id, "object": "chat.completion.chunk", "created": created,
+                    "model": model_name,
+                    "choices": [{"index": 0, "delta": {"content": segment}, "finish_reason": None}],
+                }
+                yield f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+        final_reply = collected_reply or final_reply_fallback
+        session.add_message("assistant", final_reply, model=model_name)
+        session.clear_checkpoint()
+        memory_mgr.on_turn_complete(session_id, user_msg, final_reply)
+
+        try:
+            archive = get_archive(session_id)
+            archive.archive_turn(
+                user_msg=user_msg,
+                assistant_msg=final_reply,
+                tool_names=[tc["tool"] for tc in tool_calls_log],
+            )
+        except Exception:
+            pass
+
+        await asyncio.to_thread(_deps.session_mgr.save)
+        logger.info("[流式会话] trace=%s 完成 | provider=%s model=%s tools=%d", trace_id, provider_name, model_name, len(tool_calls_log))
 
         end_data = {
             "id": chat_id, "object": "chat.completion.chunk", "created": created,
@@ -1782,7 +1815,7 @@ async def stream_chat_message(session_id: str, request: ChatCompletionRequest):
 
     from starlette.responses import StreamingResponse
     return StreamingResponse(
-        _stream_final_reply(),
+        _stream_real(),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
     )

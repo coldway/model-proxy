@@ -155,11 +155,12 @@ class ToolResultCompactor:
 
         for i, msg in enumerate(messages):
             if i in indices_to_clear:
-                result.append({
-                    **msg,
-                    "content": CLEARED_MARKER,
-                    "_compressed": True,
-                })
+                cleared_msg = {"role": msg.get("role", "tool"), "content": CLEARED_MARKER}
+                if msg.get("tool_call_id"):
+                    cleared_msg["tool_call_id"] = msg["tool_call_id"]
+                if msg.get("name"):
+                    cleared_msg["name"] = msg["name"]
+                result.append(cleared_msg)
                 cleared_count += 1
             else:
                 result.append(msg)
@@ -432,6 +433,16 @@ class ArchivedTurn:
     token_count: int = 0
     summary: str = ""
     was_compacted: bool = False
+
+
+_archive_instances: dict[str, "FullContextArchive"] = {}
+
+
+def get_archive(session_id: str) -> "FullContextArchive":
+    """获取或创建 FullContextArchive 实例（避免每次 O(n) 扫描文件）"""
+    if session_id not in _archive_instances:
+        _archive_instances[session_id] = FullContextArchive(session_id)
+    return _archive_instances[session_id]
 
 
 class FullContextArchive:

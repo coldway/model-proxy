@@ -13,7 +13,9 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
+import tempfile
 import threading
 import time
 import uuid
@@ -221,14 +223,23 @@ class LongTermMemoryStore:
         except Exception as e:
             logger.warning("加载长期记忆失败: %s", e)
 
+    def save(self) -> None:
+        """持久化长期记忆到磁盘（原子写入）"""
+        self._save()
+
     def _save(self) -> None:
         try:
             data = {"memories": [e.to_dict() for e in self._entries], "updated_at": time.time()}
-            self._file.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+            content = json.dumps(data, ensure_ascii=False, indent=2)
+            self._file.parent.mkdir(parents=True, exist_ok=True)
+            fd, tmp_path = tempfile.mkstemp(dir=str(self._file.parent), suffix=".tmp")
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(content)
+            os.replace(tmp_path, str(self._file))
         except Exception as e:
             logger.error("保存长期记忆失败: %s", e)
 
-    def add(self, entry: MemoryEntry) -> None:
+    def add(self, entry: MemoryEntry, *, auto_save: bool = True) -> None:
         """添加新记忆（去重：相同内容不重复添加，但提升重要性）"""
         with self._lock:
             for existing in self._entries:
@@ -236,73 +247,79 @@ class LongTermMemoryStore:
                     existing.importance = min(1.0, existing.importance + 0.1)
                     existing.access_count += 1
                     existing.last_accessed = time.time()
-                    self._save()
+                    if auto_save:
+                        self._save()
                     return
             self._entries.append(entry)
-            self._save()
+            if auto_save:
+                self._save()
 
     def retrieve(self, query: str, max_results: int = 10) -> list[MemoryEntry]:
-        """基于 n-gram 相似度 + 关键词匹配 + 重要性 + 时效性的混合检索"""
+        """基于 n-gram 相似度 + 关键词匹配 + 重要性 + 时效性的混合检索（线程安全）"""
         with self._lock:
-            if not self._entries:
-                return []
+            snapshot = list(self._entries)
+        if not snapshot:
+            return []
 
-            query_lower = query.lower()
-            query_tokens = set(re.findall(r"[\w\u4e00-\u9fff]+", query_lower))
-            query_bigrams = _compute_bigrams(query_lower)
+        query_lower = query.lower()
+        query_tokens = set(re.findall(r"[\w\u4e00-\u9fff]+", query_lower))
+        query_bigrams = _compute_bigrams(query_lower)
 
-            scored: list[tuple[float, MemoryEntry]] = []
-            now = time.time()
+        scored: list[tuple[float, MemoryEntry]] = []
+        now = time.time()
 
+        for entry in snapshot:
+            content_lower = entry.content.lower()
+            content_tokens = set(re.findall(r"[\w\u4e00-\u9fff]+", content_lower))
+            tag_tokens = set(t.lower() for t in entry.tags)
+
+            overlap = query_tokens & (content_tokens | tag_tokens)
+            keyword_score = len(overlap) / max(len(query_tokens), 1)
+
+            content_bigrams = _compute_bigrams(content_lower)
+            bigram_score = _bigram_similarity(query_bigrams, content_bigrams)
+
+            substring_score = 0.0
+            for token in query_tokens:
+                if len(token) > 1 and token in content_lower:
+                    substring_score += 0.15
+
+            relevance = max(keyword_score, bigram_score) + min(substring_score, 0.3)
+
+            if relevance < 0.05:
+                continue
+
+            recency = max(0, 1.0 - (now - entry.last_accessed) / (30 * 86400))
+            score = relevance * 0.4 + entry.importance * 0.35 + recency * 0.25
+
+            scored.append((score, entry))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+
+        result_ids = {id(entry) for _, entry in scored[:max_results]}
+        results = [entry for _, entry in scored[:max_results]]
+        with self._lock:
             for entry in self._entries:
-                content_lower = entry.content.lower()
-                content_tokens = set(re.findall(r"[\w\u4e00-\u9fff]+", content_lower))
-                tag_tokens = set(t.lower() for t in entry.tags)
-
-                overlap = query_tokens & (content_tokens | tag_tokens)
-                keyword_score = len(overlap) / max(len(query_tokens), 1)
-
-                content_bigrams = _compute_bigrams(content_lower)
-                bigram_score = _bigram_similarity(query_bigrams, content_bigrams)
-
-                substring_score = 0.0
-                for token in query_tokens:
-                    if len(token) > 1 and token in content_lower:
-                        substring_score += 0.15
-
-                relevance = max(keyword_score, bigram_score) + min(substring_score, 0.3)
-
-                if relevance < 0.05:
-                    continue
-
-                recency = max(0, 1.0 - (now - entry.last_accessed) / (30 * 86400))
-                score = relevance * 0.4 + entry.importance * 0.35 + recency * 0.25
-
-                scored.append((score, entry))
-
-            scored.sort(key=lambda x: x[0], reverse=True)
-
-            results = [entry for _, entry in scored[:max_results]]
-            for entry in results:
-                entry.access_count += 1
-                entry.last_accessed = now
+                if id(entry) in result_ids:
+                    entry.access_count += 1
+                    entry.last_accessed = now
             if results:
                 self._save()
 
-            return results
+        return results
 
     def get_core_memories(self, importance_threshold: float = 0.6) -> list[MemoryEntry]:
         """获取核心记忆：高重要性偏好和语义知识，始终注入 system prompt"""
         with self._lock:
             core = [e for e in self._entries if e.importance >= importance_threshold]
-            core.sort(key=lambda e: e.importance, reverse=True)
-            return core[:10]
+        core.sort(key=lambda e: e.importance, reverse=True)
+        return core[:10]
 
     def get_recent(self, n: int = 5) -> list[MemoryEntry]:
         """获取最近的 N 条记忆"""
         with self._lock:
             sorted_entries = sorted(self._entries, key=lambda e: e.created_at, reverse=True)
-            return sorted_entries[:n]
+        return sorted_entries[:n]
 
     def get_all(self) -> list[MemoryEntry]:
         with self._lock:
@@ -329,6 +346,16 @@ class LongTermMemoryStore:
             logger.info("记忆衰减清理: 移除 %d 条低重要性记忆", removed)
             return removed
 
+    def remove_by_id(self, entry_id: str) -> bool:
+        """按 ID 删除记忆条目（线程安全）"""
+        with self._lock:
+            before = len(self._entries)
+            self._entries = [e for e in self._entries if e.id != entry_id]
+            if len(self._entries) < before:
+                self._save()
+                return True
+            return False
+
     @staticmethod
     def _is_similar(a: str, b: str) -> bool:
         """简单判断两条记忆是否语义重复"""
@@ -354,7 +381,7 @@ class MemoryConsolidator:
         self._store = store
 
     def consolidate(self, session_id: str, session_memory: SessionMemoryStore) -> int:
-        """将 Session Memory 巩固到 Long-term Memory，返回新增条目数"""
+        """将 Session Memory 巩固到 Long-term Memory，返回新增条目数（批量保存）"""
         added = 0
         now = time.time()
 
@@ -373,10 +400,11 @@ class MemoryConsolidator:
                     tags=session_memory.topics[:3],
                     source_session=session_id,
                 )
-                self._store.add(entry)
+                self._store.add(entry, auto_save=False)
                 added += 1
 
         if added > 0:
+            self._store.save()
             logger.info("记忆巩固: session=%s 写入 %d 条到长期记忆", session_id, added)
             self._store.decay()
 
@@ -394,6 +422,7 @@ class MemoryManager:
         self._consolidator = MemoryConsolidator(self._store)
         self._extractor = SessionMemoryExtractor()
         self._lock = threading.Lock()
+        self._closed = False
         self._session_memories: dict[str, SessionMemoryStore] = {}
         self._session_last_active: dict[str, float] = {}
         self._auto_consolidate_timer: threading.Timer | None = None
@@ -477,15 +506,16 @@ class MemoryManager:
 
         try:
             from src.models.schemas import ChatCompletionRequest, ChatMessage, ResponseFormat
-            from src.config.manager import get_config_manager
+            from src.api.routes import _deps
 
-            config_mgr = get_config_manager()
-            enabled = config_mgr.get_enabled_models()
+            if not _deps.config_manager or not _deps.dispatcher:
+                logger.debug("[Memory] LLM 提取跳过: 依赖未初始化")
+                return {}
+            enabled = _deps.config_manager.get_enabled_models()
             if not enabled:
                 return {}
 
-            from src.scheduler.dispatcher import get_dispatcher
-            dispatcher = get_dispatcher()
+            dispatcher = _deps.dispatcher
 
             req = ChatCompletionRequest(
                 model="auto",
@@ -548,9 +578,17 @@ class MemoryManager:
         except Exception as e:
             logger.warning("[Memory] 自动巩固检查异常: %s", e)
         finally:
-            self._auto_consolidate_timer = threading.Timer(60.0, self._check_idle_sessions)
-            self._auto_consolidate_timer.daemon = True
-            self._auto_consolidate_timer.start()
+            if not self._closed:
+                self._auto_consolidate_timer = threading.Timer(60.0, self._check_idle_sessions)
+                self._auto_consolidate_timer.daemon = True
+                self._auto_consolidate_timer.start()
+
+    def close(self) -> None:
+        """停止自动巩固定时器（用于优雅关闭）"""
+        self._closed = True
+        if self._auto_consolidate_timer:
+            self._auto_consolidate_timer.cancel()
+            self._auto_consolidate_timer = None
 
     def get_context_injection(self, session_id: str) -> str:
         """获取当前会话需要注入 system prompt 的完整 memory 文本"""
@@ -575,11 +613,14 @@ class MemoryManager:
 
 
 _memory_manager: MemoryManager | None = None
+_memory_manager_lock = threading.Lock()
 
 
 def get_memory_manager() -> MemoryManager:
-    """获取全局 MemoryManager 单例"""
+    """获取全局 MemoryManager 单例（线程安全双重检查锁）"""
     global _memory_manager
     if _memory_manager is None:
-        _memory_manager = MemoryManager()
+        with _memory_manager_lock:
+            if _memory_manager is None:
+                _memory_manager = MemoryManager()
     return _memory_manager

@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import httpx
+import yaml
 
 from src.models.schemas import (
     ChatCompletionRequest,
@@ -228,7 +229,6 @@ class Dispatcher:
         if not self._SESSION_BIND_FILE.exists():
             return
         try:
-            import yaml
             raw = yaml.safe_load(self._SESSION_BIND_FILE.read_text(encoding="utf-8")) or {}
             now = time.time()
             loaded = 0
@@ -247,31 +247,36 @@ class Dispatcher:
 
     def _schedule_bindings_save(self) -> None:
         """延迟保存会话绑定到磁盘"""
-        if not hasattr(self, "_bind_save_timer") or self._bind_save_timer is None or not self._bind_save_timer.is_alive():
-            self._bind_save_timer = threading.Timer(self._SESSION_BIND_SAVE_DEBOUNCE, self._persist_bindings)
-            self._bind_save_timer.daemon = True
-            self._bind_save_timer.start()
+        with self._session_lock:
+            if self._bind_save_timer is None or not self._bind_save_timer.is_alive():
+                self._bind_save_timer = threading.Timer(self._SESSION_BIND_SAVE_DEBOUNCE, self._persist_bindings)
+                self._bind_save_timer.daemon = True
+                self._bind_save_timer.start()
 
     def _persist_bindings(self) -> None:
-        """实际写入会话绑定到磁盘"""
+        """实际写入会话绑定到磁盘（原子写入）"""
+        import os
+        import tempfile
         try:
-            import yaml
             with self._session_lock:
                 snapshot = {
                     sid: {"provider": prov, "model": model, "ts": ts}
                     for sid, (prov, model, ts) in self._session_bindings.items()
                 }
             self._SESSION_BIND_FILE.parent.mkdir(parents=True, exist_ok=True)
-            self._SESSION_BIND_FILE.write_text(
-                yaml.dump(snapshot, allow_unicode=True, default_flow_style=False),
-                encoding="utf-8",
+            content = yaml.dump(snapshot, allow_unicode=True, default_flow_style=False)
+            fd, tmp_path = tempfile.mkstemp(
+                dir=str(self._SESSION_BIND_FILE.parent), suffix=".tmp",
             )
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(content)
+            os.replace(tmp_path, str(self._SESSION_BIND_FILE))
         except Exception as e:
             logger.warning("保存会话绑定文件失败: %s", e)
 
     def flush_session_bindings(self) -> None:
         """立即持久化会话绑定（用于优雅关闭）"""
-        if hasattr(self, "_bind_save_timer") and self._bind_save_timer:
+        if self._bind_save_timer:
             self._bind_save_timer.cancel()
         self._persist_bindings()
 
@@ -946,7 +951,7 @@ class Dispatcher:
                         result = await self._try_stream(candidates[0][0], candidates[0][1], request, trace_id=trace_id)
                         _route_strategy_var.set("会话绑定")
                         return result
-                    except ProviderCallError as e:
+                    except Exception as e:
                         logger.warning("流式会话绑定 %s:%s 失败: %s，清除绑定并降级到正常路由", prov, model, e)
                         self.clear_session_binding(request.session_id)
 
@@ -978,6 +983,7 @@ class Dispatcher:
         if self._can_skip_routing(ordered, request):
             prov_name, model_cfg = ordered[0]
             try:
+                _route_strategy_var.set("规则快速路径")
                 return _bind_on_success(await self._try_stream(prov_name, model_cfg, request, trace_id=trace_id))
             except ProviderCallError as e:
                 logger.warning("流式快速路径 %s 失败: %s，继续尝试", model_cfg.name, e)
@@ -989,6 +995,7 @@ class Dispatcher:
                 for i, (prov_name, model_cfg) in enumerate(ordered):
                     if model_cfg.name == recommended:
                         try:
+                            _route_strategy_var.set("LLM 智能路由")
                             return _bind_on_success(await self._try_stream(prov_name, model_cfg, request, trace_id=trace_id))
                         except ProviderCallError as e:
                             logger.warning("流式推荐模型 %s 失败: %s，回退遍历", recommended, e)
@@ -998,6 +1005,7 @@ class Dispatcher:
         errors: list[str] = []
         for prov_name, model_cfg in ordered:
             try:
+                _route_strategy_var.set("规则遍历回退")
                 return _bind_on_success(await self._try_stream(prov_name, model_cfg, request, trace_id=trace_id))
             except ProviderCallError as e:
                 errors.append(f"{prov_name}:{model_cfg.name} {e}")

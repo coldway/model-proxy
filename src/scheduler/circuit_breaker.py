@@ -64,7 +64,7 @@ class CircuitBreaker:
         with self._lock:
             if key in self._half_open:
                 self._half_open.discard(key)
-                extended_cooldown = min(self._cooldown * 2, self._cooldown * 3)
+                extended_cooldown = int(self._cooldown * 1.5)
                 self._breaker[key] = now + extended_cooldown
                 self._failures[key] = []
                 logger.warning(

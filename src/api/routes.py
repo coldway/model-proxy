@@ -140,23 +140,15 @@ def _extract_json_from_response(content: str) -> str:
                 return candidate
             except (json.JSONDecodeError, ValueError):
                 pass
-    # 尝试从文本中找到第一个 { 或 [ 开始的 JSON
-    for start_char, end_char in [("{", "}"), ("[", "]")]:
+    # 逐位置尝试从 { 或 [ 开始解析 JSON（兼容字符串内的花括号）
+    for start_char in ("{", "["):
         start = stripped.find(start_char)
         if start >= 0:
-            depth = 0
-            for i in range(start, len(stripped)):
-                if stripped[i] == start_char:
-                    depth += 1
-                elif stripped[i] == end_char:
-                    depth -= 1
-                    if depth == 0:
-                        candidate = stripped[start:i + 1]
-                        try:
-                            json.loads(candidate)
-                            return candidate
-                        except (json.JSONDecodeError, ValueError):
-                            break
+            try:
+                obj = json.loads(stripped[start:])
+                return json.dumps(obj, ensure_ascii=False)
+            except (json.JSONDecodeError, ValueError):
+                pass
     return content
 
 
@@ -190,8 +182,8 @@ async def chat_completions(request: ChatCompletionRequest):
                 model=model_name,
                 success=True,
                 latency_ms=latency,
-                prompt_tokens=result.usage.prompt_tokens,
-                completion_tokens=result.usage.completion_tokens,
+                prompt_tokens=result.usage.prompt_tokens if result.usage else 0,
+                completion_tokens=result.usage.completion_tokens if result.usage else 0,
                 route_strategy=route_strategy,
             )
         bound = _deps.dispatcher.get_session_binding(request.session_id) if request.session_id else None
@@ -245,34 +237,13 @@ async def _handle_stream(request: ChatCompletionRequest, enabled_models, trace_i
     start_time = time.time()
     try:
         provider_name, model_name, content_iter = await _deps.dispatcher.dispatch_stream(request, enabled_models, trace_id=trace_id)
-    except RateLimitExceeded as e:
-        _record_failure(start_time, str(e))
-        logger.warning("[API] trace=%s%s 流式限流: %s", trace_id, sid_tag, e)
-        raise HTTPException(status_code=429, detail=str(e))
-    except ModelNotFound as e:
-        _record_failure(start_time, str(e))
-        logger.warning("[API] trace=%s%s 流式模型未找到: %s", trace_id, sid_tag, e)
-        raise HTTPException(status_code=404, detail=str(e))
-    except AllModelsUnavailable as e:
-        _record_failure(start_time, str(e))
-        logger.error("[API] trace=%s 流式所有模型不可用: %s", trace_id, e)
-        raise HTTPException(status_code=503, detail="所有模型均不可用，请稍后重试")
-    except ProviderCallError as e:
-        _record_failure(start_time, str(e))
-        logger.warning("[API] trace=%s 流式厂商调用失败（可恢复）: %s", trace_id, e)
-        raise HTTPException(status_code=503, detail="模型服务暂时不可用，请稍后重试")
     except Exception as e:
         _record_failure(start_time, str(e))
-        logger.error("[API] trace=%s 流式请求异常: %s", trace_id, e, exc_info=True)
-        raise HTTPException(status_code=500, detail="推理服务内部错误，请稍后重试")
+        raise _map_dispatch_error(e, trace_id)
 
     latency = (time.time() - start_time) * 1000
     route_strategy = _deps.dispatcher.last_route_strategy or ""
-    if _deps.history:
-        _deps.history.record(
-            provider=provider_name, model=model_name,
-            success=True, latency_ms=latency,
-        )
+    # 流式历史记录延迟到流结束后，此处仅记录连接建立（不标记 success）
     logger.info("[API] trace=%s%s 流式连接建立 | provider=%s model=%s 耗时=%.0fms", trace_id, sid_tag, provider_name, model_name, latency)
     bound = _deps.dispatcher.get_session_binding(request.session_id) if request.session_id else None
     info = ProxyInfo(
@@ -321,7 +292,12 @@ def _map_dispatch_error(e: Exception, trace_id: str = "") -> HTTPException:
 
 @router.get("/v1/models", response_model=ModelListResponse)
 async def list_models():
-    """列出所有已配置模型（含已探测的能力信息）"""
+    """列出所有已配置模型（含已探测的能力信息）
+
+    注意：此端点遍历 config.providers（静态配置），而 dispatch 使用
+    get_enabled_models()（catalog 动态源）。两者可能存在差异——
+    此处展示的模型不保证 dispatch 时可用。
+    """
 
     models = []
     for prov_name, prov in _deps.config_manager.config.providers.items():
@@ -552,7 +528,7 @@ async def toggle_provider(provider: str, enabled: bool):
                     return {"status": "ok", "message": f"{provider} 已启用并加载"}
                 except Exception as e:
                     logger.error("动态注册 %s 失败: %s", provider, e)
-                    return {"status": "ok", "message": f"{provider} 已启用，但加载失败: {e}"}
+                    return {"status": "ok", "message": f"{provider} 已启用，但加载失败，请检查 API Key 是否正确"}
             else:
                 return {"status": "ok", "message": f"{provider} 已启用，但 API Key 未配置，请先填写 API Key"}
     elif not enabled and _deps.dispatcher.has_provider(provider):
@@ -1206,8 +1182,8 @@ async def send_chat_message(session_id: str, request: ChatCompletionRequest):
                 model=model_name,
                 success=True,
                 latency_ms=latency,
-                prompt_tokens=result.usage.prompt_tokens,
-                completion_tokens=result.usage.completion_tokens,
+                prompt_tokens=result.usage.prompt_tokens if result.usage else 0,
+                completion_tokens=result.usage.completion_tokens if result.usage else 0,
                 route_strategy=_deps.dispatcher.last_route_strategy,
             )
 
@@ -1229,7 +1205,7 @@ async def send_chat_message(session_id: str, request: ChatCompletionRequest):
             "reply": reply,
             "model": result.model,
             "provider": provider_name,
-            "usage": result.usage.model_dump(),
+            "usage": result.usage.model_dump() if result.usage else {},
             "tokens_est": session.total_tokens_est,
             "context_messages": len(session.get_context_messages()),
             "total_messages": len(session.messages),
@@ -1295,6 +1271,11 @@ async def add_memory_entry(body: dict):
     mem_type = body.get("type", "semantic")
     if not content:
         raise HTTPException(status_code=400, detail="content 不能为空")
+    if len(content) > 1000:
+        raise HTTPException(status_code=400, detail="content 长度不能超过 1000 字符")
+    _VALID_TYPES = {"semantic", "episodic", "preference"}
+    if mem_type not in _VALID_TYPES:
+        raise HTTPException(status_code=400, detail=f"type 必须为 {', '.join(_VALID_TYPES)} 之一")
     mgr = get_memory_manager()
     now = _time.time()
     entry = MemoryEntry(
@@ -1316,24 +1297,26 @@ async def delete_memory_entry(entry_id: str):
     """删除一条长期记忆"""
     from src.scheduler.memory import get_memory_manager
     mgr = get_memory_manager()
-    store = mgr._store
-    before = len(store._entries)
-    store._entries = [e for e in store._entries if e.id != entry_id]
-    if len(store._entries) < before:
-        store._save()
+    if mgr._store.remove_by_id(entry_id):
         return {"status": "ok"}
     raise HTTPException(status_code=404, detail="记忆条目不存在")
 
 
 @router.post("/api/memory/import")
 async def import_memory(body: dict):
-    """导入记忆数据"""
+    """导入记忆数据（单次最多 500 条）"""
     from src.scheduler.memory import get_memory_manager, MemoryEntry
     mgr = get_memory_manager()
     entries = body.get("entries", [])
+    if not isinstance(entries, list):
+        raise HTTPException(status_code=400, detail="entries 必须为数组")
+    _IMPORT_MAX = 500
+    if len(entries) > _IMPORT_MAX:
+        raise HTTPException(status_code=400, detail=f"单次最多导入 {_IMPORT_MAX} 条")
     imported = 0
     for e in entries:
-        if not e.get("content"):
+        content = (e.get("content") or "").strip()
+        if not content or len(content) > 1000:
             continue
         entry = MemoryEntry.from_dict(e)
         mgr._store.add(entry)

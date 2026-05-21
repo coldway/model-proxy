@@ -6,6 +6,8 @@
 from __future__ import annotations
 
 import logging
+import os
+import tempfile
 import threading
 import time
 import uuid
@@ -81,7 +83,11 @@ class ChatSession:
         self.total_tokens_est = total_chars // CHARS_PER_TOKEN
 
     def get_context_messages(self) -> list[dict[str, str]]:
-        """获取用于 API 调用的消息列表（含系统提示、自动截断）"""
+        """获取用于 API 调用的消息列表（含系统提示、自动截断）
+
+        截断时保证 tool_call 链完整性：assistant(tool_calls) 和后续的
+        tool 回复消息作为一组，要么全部保留要么全部丢弃。
+        """
         with self._lock:
             result = [{"role": "system", "content": self.system_prompt}]
             budget = self._max_context_tokens - RESERVED_SYSTEM_TOKENS
@@ -97,7 +103,17 @@ class ChatSession:
 
             selected.reverse()
 
-            if selected and selected[0]["role"] == "assistant" and not selected[0].get("tool_calls"):
+            # 确保不以孤立的 tool 回复开头（其前序 assistant tool_calls 被截掉）
+            while selected and selected[0].get("role") == "tool":
+                selected = selected[1:]
+
+            # 如果截断后首条是带 tool_calls 但后续 tool 回复被截掉的 assistant 消息，也需移除
+            if (
+                selected
+                and selected[0]["role"] == "assistant"
+                and selected[0].get("tool_calls")
+                and (len(selected) < 2 or selected[1].get("role") != "tool")
+            ):
                 selected = selected[1:]
 
             for m in selected:
@@ -361,16 +377,16 @@ class SessionManager:
             "_active": {sid: s.to_dict() for sid, s in self._sessions.items()},
             "_trash": {sid: {"session": entry["session"].to_dict(), "deleted_at": entry["deleted_at"]} for sid, entry in self._trash.items()},
         }
-        tmp_file = SESSION_FILE.with_suffix(".tmp")
         try:
-            tmp_file.write_text(
-                yaml.dump(data, allow_unicode=True, default_flow_style=False),
-                encoding="utf-8",
-            )
-            tmp_file.replace(SESSION_FILE)
+            content = yaml.dump(data, allow_unicode=True, default_flow_style=False)
+            fd, tmp_path = tempfile.mkstemp(dir=str(DATA_DIR), suffix=".tmp")
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(content)
+            os.replace(tmp_path, str(SESSION_FILE))
         except Exception as e:
             logger.error("保存会话数据失败: %s", e)
-            tmp_file.unlink(missing_ok=True)
+            if "tmp_path" in locals():
+                Path(tmp_path).unlink(missing_ok=True)
 
     def _load(self) -> None:
         if not SESSION_FILE.exists():

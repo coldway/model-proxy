@@ -5,19 +5,22 @@
 Model Proxy 采用分层架构，将推理请求的接收、调度、执行三个职责分离。
 
 ```
-┌─────────────────────────────────┐
-│          FastAPI 应用层          │
-│  routes.py  │  ui.py  │ streaming│
-├──────────┬──────────────────────┤
-│ 配置层   │      调度层           │
-│ manager  │  dispatcher          │
-│ catalog  │  rate_limiter         │
-│          │  history              │
-├──────────┴──────────────────────┤
-│         厂商适配层               │
-│  google │ groq │ github │ ...   │
-│  openai_compat │ cloudflare     │
-└─────────────────────────────────┘
+┌─────────────────────────────────────────────┐
+│              FastAPI 应用层                   │
+│  routes.py  │  ui.py  │ streaming │ thinking│
+├──────────┬──────────────────┬───────────────┤
+│ 配置层   │      调度层       │   记忆层      │
+│ manager  │  dispatcher      │  memory.py    │
+│ catalog  │  rate_limiter    │  L1: Session  │
+│          │  circuit_breaker │  L2: 长期持久化│
+│          │  payload_tracker │  巩固 + 检索   │
+│          │  session         │               │
+│          │  history         │               │
+├──────────┴──────────────────┴───────────────┤
+│               厂商适配层                      │
+│  google │ groq │ github │ huggingface │ ... │
+│  openai_compat │ cloudflare │ cursor        │
+└─────────────────────────────────────────────┘
 ```
 
 ## 核心模块
@@ -26,7 +29,8 @@ Model Proxy 采用分层架构，将推理请求的接收、调度、执行三�
 |------|------|------|
 | **API 层** | `src/api/` | 接收 HTTP 请求，返回推理结果和管理操作 |
 | **配置层** | `src/config/` | 管理 API Key（config.yaml）和厂商目录（providers_catalog.yaml） |
-| **调度层** | `src/scheduler/` | 模型选择、速率限制、失败切换、请求历史 |
+| **调度层** | `src/scheduler/` | 模型选择、速率限制、熔断器、payload 追踪、会话管理、请求历史 |
+| **记忆层** | `src/scheduler/memory.py` | L1 会话记忆 + L2 跨会话长期记忆，规则/LLM 提取 + bigram 检索，详见 [memory.md](memory.md) |
 | **厂商层** | `src/providers/` | 各厂商 API 的具体适配实现 |
 | **数据模型** | `src/models/` | Pydantic 数据结构定义 |
 

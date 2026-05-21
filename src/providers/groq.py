@@ -221,8 +221,13 @@ class GroqProvider(BaseProvider):
                             return
                 except (json.JSONDecodeError, KeyError):
                     pass
-                resp.raise_for_status()
-            else:
+                raise httpx.HTTPStatusError(
+                    f"Groq API 400: {body[:200].decode(errors='replace')}",
+                    request=resp.request,
+                    response=resp,
+                )
+            elif resp.status_code >= 400:
+                await resp.aread()
                 resp.raise_for_status()
             async for line in resp.aiter_lines():
                 if not line.startswith("data: "):

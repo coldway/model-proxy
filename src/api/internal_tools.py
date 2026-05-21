@@ -480,4 +480,10 @@ def _register_builtin_tools():
     )
 
 
-_register_builtin_tools()
+def ensure_tools_registered():
+    """幂等注册：多次调用安全"""
+    if not _TOOLS:
+        _register_builtin_tools()
+
+
+ensure_tools_registered()

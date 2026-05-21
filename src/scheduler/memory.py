@@ -18,6 +18,7 @@ import re
 import tempfile
 import threading
 import time
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -325,7 +326,8 @@ class LongTermMemoryStore:
             return list(self._entries)
 
     def size(self) -> int:
-        return len(self._entries)
+        with self._lock:
+            return len(self._entries)
 
     def decay(self, max_entries: int = 200) -> int:
         """衰减清理：当超过上限时，移除最不重要且最久未访问的条目"""
@@ -389,7 +391,7 @@ class MemoryConsolidator:
                 if len(item) < 5:
                     continue
                 entry = MemoryEntry(
-                    id=f"{mem_type}_{int(now)}_{added}",
+                    id=f"{mem_type}_{uuid.uuid4().hex[:8]}",
                     type=mem_type,
                     content=item,
                     importance=base_importance,
@@ -409,7 +411,7 @@ class MemoryConsolidator:
         return added
 
 
-AUTO_CONSOLIDATE_IDLE_SECONDS = 600  # 10 分钟空闲后自动巩固
+AUTO_CONSOLIDATE_IDLE_SECONDS = 1800  # 30 分钟空闲后自动巩固（原 10 分钟过短）
 
 
 class MemoryManager:
@@ -473,6 +475,7 @@ class MemoryManager:
             if not session_mem:
                 return 0
             self._session_memories.pop(session_id, None)
+            self._session_last_active.pop(session_id, None)
         added = self._consolidator.consolidate(session_id, session_mem)
         return added
 
@@ -553,7 +556,7 @@ class MemoryManager:
         self._auto_consolidate_timer.start()
 
     def _check_idle_sessions(self) -> None:
-        """检查空闲会话并自动巩固"""
+        """检查空闲会话并自动巩固（巩固后保留记忆，不清除 session_memories）"""
         try:
             now = time.time()
             with self._lock:
@@ -563,9 +566,13 @@ class MemoryManager:
                     and sid in self._session_memories
                 ]
             for sid in idle_sessions:
-                added = self.on_session_end(sid)
+                with self._lock:
+                    session_mem = self._session_memories.get(sid)
+                    if not session_mem:
+                        continue
+                added = self._consolidator.consolidate(sid, session_mem)
                 if added > 0:
-                    logger.info("[Memory] 自动巩固空闲会话 %s: %d 条", sid, added)
+                    logger.info("[Memory] 自动巩固空闲会话 %s: %d 条（记忆保留）", sid, added)
                 with self._lock:
                     self._session_last_active.pop(sid, None)
         except Exception as e:
@@ -585,15 +592,12 @@ class MemoryManager:
 
     def get_context_injection(self, session_id: str) -> str:
         """获取当前会话需要注入 system prompt 的完整 memory 文本"""
-        parts = []
-
-        session_mem = self._session_memories.get(session_id)
-        if session_mem:
-            section = session_mem.to_system_section()
-            if section:
-                parts.append(section)
-
-        return "\n\n".join(parts)
+        with self._lock:
+            session_mem = self._session_memories.get(session_id)
+        if not session_mem:
+            return ""
+        section = session_mem.to_system_section()
+        return section or ""
 
     def get_long_term_stats(self) -> dict[str, Any]:
         """获取长期记忆统计"""

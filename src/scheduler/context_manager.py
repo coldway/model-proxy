@@ -473,11 +473,12 @@ class FullContextArchive:
         return turn.turn_id
 
     def search(self, query: str, limit: int = 5) -> list[ArchivedTurn]:
-        """关键词检索归档"""
+        """子串 + token 混合检索归档"""
         if not self._file.exists():
             return []
 
-        query_tokens = set(re.findall(r"[\w\u4e00-\u9fff]+", query.lower()))
+        query_lower = query.lower()
+        query_tokens = set(re.findall(r"[\w\u4e00-\u9fff]+", query_lower))
         scored: list[tuple[float, ArchivedTurn]] = []
 
         with open(self._file, "r", encoding="utf-8") as f:
@@ -485,10 +486,20 @@ class FullContextArchive:
                 data = json.loads(line)
                 turn = ArchivedTurn(**data)
                 text = (turn.user_msg + " " + turn.assistant_msg).lower()
-                text_tokens = set(re.findall(r"[\w\u4e00-\u9fff]+", text))
-                overlap = len(query_tokens & text_tokens)
-                if overlap > 0:
-                    score = overlap / max(len(query_tokens), 1)
+
+                score = 0.0
+                if query_lower in text:
+                    score += 1.0
+                else:
+                    text_tokens = set(re.findall(r"[\w\u4e00-\u9fff]+", text))
+                    overlap = len(query_tokens & text_tokens)
+                    if overlap > 0:
+                        score += overlap / max(len(query_tokens), 1)
+                    for qt in query_tokens:
+                        if len(qt) >= 2 and qt in text:
+                            score += 0.3
+
+                if score > 0:
                     scored.append((score, turn))
 
         scored.sort(key=lambda x: x[0], reverse=True)

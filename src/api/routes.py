@@ -1681,6 +1681,7 @@ async def _do_stream_chat(session, request, trace_id: str, memory_mgr, user_msg:
     except (RateLimitExceeded, ModelNotFound, AllModelsUnavailable) as e:
         session.rollback()
         _record_failure(start_time, str(e))
+        await asyncio.to_thread(_deps.session_mgr.save)
         logger.warning("[流式会话] trace=%s session=%s 失败: %s", trace_id, session_id, e)
         status = 429 if isinstance(e, RateLimitExceeded) else (404 if isinstance(e, ModelNotFound) else 503)
         _detail_map = {429: "请求过于频繁，请稍后重试", 404: "模型未找到", 503: "所有模型均不可用，请稍后重试"}
@@ -1688,11 +1689,13 @@ async def _do_stream_chat(session, request, trace_id: str, memory_mgr, user_msg:
     except ProviderCallError as e:
         session.rollback()
         _record_failure(start_time, str(e))
+        await asyncio.to_thread(_deps.session_mgr.save)
         logger.warning("[流式会话] trace=%s session=%s 厂商调用失败: %s", trace_id, session_id, e)
         raise HTTPException(status_code=503, detail="模型服务暂时不可用，请稍后重试")
     except Exception as e:
         session.rollback()
         _record_failure(start_time, str(e))
+        await asyncio.to_thread(_deps.session_mgr.save)
         logger.error("[流式会话] trace=%s session=%s 异常: %s", trace_id, session_id, e, exc_info=True)
         raise HTTPException(status_code=500, detail="推理服务内部错误，请稍后重试")
 
@@ -1727,24 +1730,13 @@ async def _do_stream_chat(session, request, trace_id: str, memory_mgr, user_msg:
     if _deps.history:
         _deps.history.record(provider=provider_name, model=model_name, success=True, latency_ms=latency)
 
-    if msg and not msg.tool_calls:
-        final_ctx_request = _build_context_request(stream=True, include_tools=False)
-        try:
-            stream_prov, stream_model, content_iter = await _deps.dispatcher.dispatch_stream(final_ctx_request, enabled_models, trace_id=trace_id)
-            provider_name, model_name = stream_prov, stream_model
-        except Exception as e:
-            logger.warning("[流式会话] trace=%s 流式 dispatch 失败，降级到分块输出: %s", trace_id, e)
-            content_iter = None
-    else:
-        content_iter = None
-
-    final_reply_fallback = (msg.content if msg else "") or ""
-    final_reply_fallback, thinking = _strip_thinking(final_reply_fallback)
+    final_reply = (msg.content if msg else "") or ""
+    final_reply, thinking = _strip_thinking(final_reply)
     if thinking:
         logger.info("[流式会话] trace=%s 模型思考过程:\n%s", trace_id, thinking[:500])
 
     async def _stream_real():
-        """真正的 SSE 流式输出"""
+        """SSE 流式输出（分块发送已有结果，避免重复调用 LLM）"""
         chat_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
         created = int(time.time())
 
@@ -1756,26 +1748,10 @@ async def _do_stream_chat(session, request, trace_id: str, memory_mgr, user_msg:
             meta["tool_calls"] = tool_calls_log
         yield f"data: {json.dumps({'meta': meta}, ensure_ascii=False)}\n\n"
 
-        collected_reply = ""
-        if content_iter is not None:
-            async for chunk in content_iter:
-                if isinstance(chunk, dict):
-                    content = chunk.get("choices", [{}])[0].get("delta", {}).get("content", "") if "choices" in chunk else ""
-                else:
-                    content = str(chunk)
-                if content:
-                    collected_reply += content
-                    data = {
-                        "id": chat_id, "object": "chat.completion.chunk", "created": created,
-                        "model": model_name,
-                        "choices": [{"index": 0, "delta": {"content": content}, "finish_reason": None}],
-                    }
-                    yield f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
-        else:
-            collected_reply = final_reply_fallback
-            chunk_size = 20
-            for i in range(0, len(collected_reply), chunk_size):
-                segment = collected_reply[i:i + chunk_size]
+        chunk_size = 20
+        for i in range(0, max(len(final_reply), 1), chunk_size):
+            segment = final_reply[i:i + chunk_size]
+            if segment:
                 data = {
                     "id": chat_id, "object": "chat.completion.chunk", "created": created,
                     "model": model_name,
@@ -1783,7 +1759,6 @@ async def _do_stream_chat(session, request, trace_id: str, memory_mgr, user_msg:
                 }
                 yield f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
 
-        final_reply = collected_reply or final_reply_fallback
         session.add_message("assistant", final_reply, model=model_name)
         session.clear_checkpoint()
         memory_mgr.on_turn_complete(session_id, user_msg, final_reply)
@@ -1798,7 +1773,10 @@ async def _do_stream_chat(session, request, trace_id: str, memory_mgr, user_msg:
         except Exception:
             pass
 
-        await asyncio.to_thread(_deps.session_mgr.save)
+        try:
+            await asyncio.to_thread(_deps.session_mgr.save)
+        except Exception as save_err:
+            logger.error("[流式会话] trace=%s 保存会话失败(非中断): %s", trace_id, save_err)
         logger.info("[流式会话] trace=%s 完成 | provider=%s model=%s tools=%d", trace_id, provider_name, model_name, len(tool_calls_log))
 
         end_data = {

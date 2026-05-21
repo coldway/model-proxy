@@ -436,12 +436,19 @@ class ArchivedTurn:
 
 
 _archive_instances: dict[str, "FullContextArchive"] = {}
+_ARCHIVE_CACHE_MAX = 50
 
 
 def get_archive(session_id: str) -> "FullContextArchive":
-    """获取或创建 FullContextArchive 实例（避免每次 O(n) 扫描文件）"""
+    """获取或创建 FullContextArchive 实例（带 LRU 淘汰，避免内存泄漏）"""
     if session_id not in _archive_instances:
+        if len(_archive_instances) >= _ARCHIVE_CACHE_MAX:
+            oldest_key = next(iter(_archive_instances))
+            del _archive_instances[oldest_key]
         _archive_instances[session_id] = FullContextArchive(session_id)
+    else:
+        inst = _archive_instances.pop(session_id)
+        _archive_instances[session_id] = inst
     return _archive_instances[session_id]
 
 

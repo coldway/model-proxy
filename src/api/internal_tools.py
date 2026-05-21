@@ -361,8 +361,12 @@ def _register_builtin_tools():
                 if isinstance(prov, OllamaProvider):
                     installed = await prov.list_models()
                     for m in installed:
-                        installed_names.add(m.split(":")[0].lower())
-                        installed_names.add(m.lower())
+                        m_lower = m.lower()
+                        installed_names.add(m_lower)
+                        installed_names.add(m_lower.split(":")[0])
+                        base_name = m_lower.split("/")[-1]
+                        installed_names.add(base_name)
+                        installed_names.add(base_name.split(":")[0])
         except Exception:
             pass
 

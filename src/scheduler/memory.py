@@ -545,12 +545,12 @@ class LongTermMemoryStore:
             scored.append((score, entry))
 
         scored.sort(key=lambda x: x[0], reverse=True)
-
-        result_ids = {id(entry) for _, entry in scored[:max_results]}
+        result_ids = {entry.id for _, entry in scored[:max_results]}
         results = [entry for _, entry in scored[:max_results]]
+
         with self._lock:
             for entry in self._entries:
-                if id(entry) in result_ids:
+                if entry.id in result_ids:
                     entry.access_count += 1
                     entry.last_accessed = now
             if results:
@@ -583,22 +583,26 @@ class LongTermMemoryStore:
         """指数衰减清理（源自 CrewAI Recency Decay + Half-life 公式）
 
         effective_score = importance * exp(-0.693 * days / half_life)
-        低于 min_score 阈值或超出上限的条目被移除。
+        用临时 effective_score 排序，不修改原始 importance。
+        低于阈值或超出上限的条目被移除。
         """
         with self._lock:
             if len(self._entries) <= max_entries:
                 return 0
             now = time.time()
+
+            scored: list[tuple[float, MemoryEntry]] = []
             for entry in self._entries:
                 days_ago = (now - entry.last_accessed) / 86400
                 recency = math.exp(-0.693 * days_ago / half_life_days)
-                entry.importance = entry.importance * recency
+                effective = entry.importance * recency
                 if entry.access_count > 10:
-                    entry.importance = max(entry.importance, 0.3)
+                    effective = max(effective, 0.3)
+                scored.append((effective, entry))
 
-            self._entries.sort(key=lambda e: e.importance, reverse=True)
-            removed = len(self._entries) - max_entries
-            self._entries = self._entries[:max_entries]
+            scored.sort(key=lambda x: x[0], reverse=True)
+            self._entries = [entry for _, entry in scored[:max_entries]]
+            removed = len(scored) - max_entries
             self._save()
             logger.info("记忆衰减清理: 移除 %d 条低重要性记忆 (half_life=%.1fd)", removed, half_life_days)
             return removed
@@ -851,7 +855,14 @@ class MemoryManager:
                     session_mem = self._session_memories.get(sid)
                     if not session_mem:
                         continue
-                added = self._consolidator.consolidate(sid, session_mem)
+                    snapshot = SessionMemoryStore(
+                        goals=list(session_mem.goals),
+                        decisions=list(session_mem.decisions),
+                        preferences=list(session_mem.preferences),
+                        tech_context=list(session_mem.tech_context),
+                        topics=list(session_mem.topics),
+                    )
+                added = self._consolidator.consolidate(sid, snapshot)
                 if added > 0:
                     logger.info("[Memory] 自动巩固空闲会话 %s: %d 条（记忆保留）", sid, added)
                 with self._lock:

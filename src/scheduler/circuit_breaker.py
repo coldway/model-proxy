@@ -110,6 +110,7 @@ class CircuitBreaker:
 
         now = time.time()
         with self._lock:
+            any_active_open = False
             for key in keys_to_check:
                 if key not in self._breaker:
                     continue
@@ -117,9 +118,9 @@ class CircuitBreaker:
                     if key not in self._half_open:
                         self._half_open.add(key)
                         logger.info("熔断进入半开状态: %s（允许探测请求）", key)
-                    return False
-                return True
-        return False
+                else:
+                    any_active_open = True
+            return any_active_open
 
     def is_half_open(self, provider: str, model: str | None = None) -> bool:
         """是否处于半开探测状态"""

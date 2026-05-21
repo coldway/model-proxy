@@ -1,11 +1,26 @@
 github/gpt-4o-mini:
-  available: true
-  error: null
-  latency_ms: 3749
-  model: gpt-4o-mini
   provider: github
-  tested_at: '2026-05-17 02:27:55'
+  model: gpt-4o-mini
+  available: true
   tool_calling: true
+  multi_turn_tc: true
+  chinese: true
+  vision: true
+  json_mode: true
+  streaming: true
+  reasoning: true
+  latency_ms: 3750
+  error: null
+  probe_response: get_current_time({"city":"北京"})
+  mt_response: 现在北京的时间是2026年5月13日16:00。
+  chinese_response: 和弦是由多个音符同时发声形成的音乐组合。
+  vision_response: Red
+  json_sample: "{\n  \"instruments\": [\n    {\n      \"name\": \"钢琴\",\n      \"\
+    type\": \"键盘乐器\"\n    },\n    {"
+  stream_chunks: 5
+  stream_ttfb_ms: 3233
+  reasoning_response: 打开一个开关，等几分钟后关掉，再打开另一个，进房间检查灯的状态和温度。
+  tested_at: '2026-05-21 13:34:00'
 google/deep-research-max-preview-04-2026:
   available: true
   chinese: false
@@ -259,51 +274,51 @@ google/gemini-3.1-flash-image-preview:
   tool_calling: false
   vision: false
 google/gemini-3.1-flash-lite:
-  available: true
-  chinese: true
-  chinese_response: 三个或以上不同音高的音，按一定音程关系结合。
-  error: null
-  json_mode: true
-  json_sample: "{\n  \"instruments\": [\n    {\n      \"name\": \"钢琴\",\n      \"\
-    type\": \"键盘乐器\"\n    },\n    {"
-  latency_ms: 5379
+  provider: google
   model: gemini-3.1-flash-lite
-  mt_issue: 'error: Client error ''400 Bad Request'' for url ''https://generativela'
-  multi_turn_tc: false
-  probe_response: 'get_current_time({"city": "北京"})'
-  provider: google
-  reasoning: true
-  reasoning_response: 开一盏灯一段时间后关掉，再开第二盏，进屋摸灯泡。
-  stream_chunks: 2
-  stream_ttfb_ms: 1867
-  streaming: true
-  tested_at: '2026-05-17 02:27:55'
-  tool_calling: true
-  vision: true
-  vision_response: Red
-google/gemini-3.1-flash-lite-preview:
   available: true
+  tool_calling: true
+  multi_turn_tc: true
   chinese: true
-  chinese_response: 三个或以上不同音高的音，按一定音程关系结合。
-  error: null
+  vision: true
   json_mode: true
+  streaming: true
+  reasoning: true
+  latency_ms: 3619
+  error: null
+  probe_response: 'get_current_time({"city": "北京"})'
+  mt_response: 北京现在是 2026 年 5 月 13 日，星期三，下午 4:00。
+  chinese_response: 三个或以上不同音高的音，按一定音程关系结合。
+  vision_response: Red
   json_sample: "{\n  \"instruments\": [\n    {\n      \"name\": \"钢琴\",\n      \"\
     type\": \"键盘乐器\"\n    },\n    {"
-  latency_ms: 31255
-  model: gemini-3.1-flash-lite-preview
-  mt_issue: 'error: Client error ''400 Bad Request'' for url ''https://generativela'
-  multi_turn_tc: false
-  probe_response: 'get_current_time({"city": "北京"})'
-  provider: google
-  reasoning: true
-  reasoning_response: 开启两盏灯，过会儿关掉一盏，进屋摸灯泡温度。
   stream_chunks: 2
-  stream_ttfb_ms: 857
-  streaming: true
-  tested_at: '2026-05-17 02:27:55'
+  stream_ttfb_ms: 4155
+  reasoning_response: 开启两盏灯，过会儿关掉一盏，进屋摸灯泡温度。
+  tested_at: '2026-05-21 13:32:10'
+google/gemini-3.1-flash-lite-preview:
+  provider: google
+  model: gemini-3.1-flash-lite-preview
+  available: true
   tool_calling: true
+  multi_turn_tc: true
+  chinese: true
   vision: true
+  json_mode: true
+  streaming: true
+  reasoning: true
+  latency_ms: 4649
+  error: null
+  probe_response: 'get_current_time({"city": "北京"})'
+  mt_response: 北京现在是 2026 年 5 月 13 日，星期三，下午 4:00。
+  chinese_response: 三个或以上不同音高的音，按一定音程关系结合。
   vision_response: Red
+  json_sample: "{\n  \"instruments\": [\n    {\n      \"name\": \"钢琴\",\n      \"\
+    type\": \"键盘乐器\"\n    },\n    {"
+  stream_chunks: 2
+  stream_ttfb_ms: 1429
+  reasoning_response: 开启两盏灯，过会儿关掉一盏，进屋摸灯泡温度。
+  tested_at: '2026-05-21 13:32:43'
 google/gemini-3.1-flash-tts-preview:
   available: true
   chinese: false
@@ -427,56 +442,56 @@ google/gemini-robotics-er-1.6-preview:
   vision: false
   vision_response: empty
 google/gemma-4-26b-a4b-it:
-  available: true
-  chinese: true
-  chinese_response: "*   Topic: What is a chord (什么是和弦)?\n    *   Language: Chines"
-  error: null
-  json_mode: false
-  json_sample: "*   Role: Assistant that outputs *only* JSON.\n    *   Constraint:\
-    \ No other conte"
-  latency_ms: 2399
-  model: gemma-4-26b-a4b-it
-  mt_response: 北京现在是 2026年5月13日 16:00:00。
-  multi_turn_tc: true
-  probe_response: 'get_current_time({"city": "北京"})'
   provider: google
-  reasoning: false
-  stream_chunks: 3
-  stream_ttfb_ms: 6905
-  streaming: true
-  tested_at: '2026-05-17 02:27:55'
+  model: gemma-4-26b-a4b-it
+  available: true
   tool_calling: true
+  multi_turn_tc: true
+  chinese: true
   vision: true
+  json_mode: false
+  streaming: true
+  reasoning: false
+  latency_ms: 6928
+  error: null
+  probe_response: 'get_current_time({"city": "北京"})'
+  mt_response: 'The user is asking for the current time in Beijing.
+
+    I have already called the `g'
+  chinese_response: "*   Topic: What is a chord (什么是和弦)?\n    *   Language: Chines"
   vision_response: 'The user wants to know the color of the provided image.
 
     The '
+  json_sample: "*   Task: List 3 musical instruments.\n    *   Format: JSON.\n   \
+    \ *   Specific str"
+  stream_chunks: 3
+  stream_ttfb_ms: 1440
+  tested_at: '2026-05-21 13:31:46'
 google/gemma-4-31b-it:
-  available: true
-  chinese: true
-  chinese_response: "*   Topic: What is a chord (和弦)?\n    *   Language: Chinese ("
-  error: null
-  json_mode: false
-  json_sample: "*   Role: JSON-only output assistant.\n    *   Constraint: No other\
-    \ content besid"
-  latency_ms: 3034
-  model: gemma-4-31b-it
-  mt_response: The user is asking for the current time in Beijing. I have already
-    called the `g
-  multi_turn_tc: true
-  probe_response: 'get_current_time({"city": "北京"})'
   provider: google
+  model: gemma-4-31b-it
+  available: true
+  tool_calling: true
+  multi_turn_tc: true
+  chinese: true
+  vision: true
+  json_mode: false
+  streaming: false
   reasoning: true
+  latency_ms: 9691
+  error: null
+  probe_response: 'get_current_time({"city": "北京"})'
+  mt_response: 'The user asked for the current time in Beijing.
+
+    The tool `get_current_time` was '
+  chinese_response: "*   Topic: What is a chord (和弦)?\n    *   Language: Chinese ("
+  vision_response: 'The user wants to know the color of the provided image.
+
+    The '
+  stream_error: Google API 500
   reasoning_response: "*   Scenario: 3 lamps in a room, 3 switches outside.\n    *\
     \   Constraint: Only on"
-  stream_chunks: 3
-  stream_ttfb_ms: 4715
-  streaming: true
-  tested_at: '2026-05-17 02:27:55'
-  tool_calling: false
-  vision: true
-  vision_response: 'The user wants to know the color of the provided image.
-
-    The '
+  tested_at: '2026-05-21 13:29:17'
 google/lyria-3-clip-preview:
   available: false
   chinese: false
@@ -613,51 +628,51 @@ groq/llama-3.1-8b-instant:
   vision: false
   vision_error: not_supported
 groq/llama-3.3-70b-versatile:
+  provider: groq
+  model: llama-3.3-70b-versatile
   available: true
+  tool_calling: true
+  multi_turn_tc: true
   chinese: true
-  chinese_response: 和弦是同时发出的多个音符。
-  error: null
+  vision: false
   json_mode: true
+  streaming: true
+  reasoning: true
+  latency_ms: 566
+  error: null
+  probe_response: get_current_time({"city":"北京"})
+  mt_response: 北京现在是16:00。
+  chinese_response: 和弦是多个音符同时发声。
+  vision_error: not_supported
   json_sample: '{"instruments": [{"name": "钢琴", "type": "键盘乐器"}, {"name": "小提琴", "type":
     "弦乐器"},'
-  latency_ms: 664
-  model: llama-3.3-70b-versatile
-  mt_response: 北京现在是16:00。
-  multi_turn_tc: true
-  probe_response: get_current_time({"city":"北京"})
-  provider: groq
-  reasoning: true
-  reasoning_response: 打开开关1 5分钟，然后关闭。打开开关2，进入房间。热的灯对应开关1，亮的对应开关2，剩下的对应开关3。
   stream_chunks: 5
-  stream_ttfb_ms: 307
-  streaming: true
-  tested_at: '2026-05-17 02:27:55'
-  tool_calling: true
-  vision: false
-  vision_error: not_supported
+  stream_ttfb_ms: 422
+  reasoning_response: 打开开关1 5分钟，然后关闭。打开开关2，进入房间。热的灯对应开关1，亮的对应开关2，剩下的对应开关3。
+  tested_at: '2026-05-21 13:33:07'
 groq/meta-llama/llama-4-scout-17b-16e-instruct:
+  provider: groq
+  model: meta-llama/llama-4-scout-17b-16e-instruct
   available: true
+  tool_calling: true
+  multi_turn_tc: true
   chinese: true
-  chinese_response: 和弦是音乐中多个音同时发声的组合，常用于歌曲伴奏或编曲中。
-  error: null
+  vision: true
   json_mode: true
+  streaming: true
+  reasoning: true
+  latency_ms: 744
+  error: null
+  probe_response: get_current_time({"city":"北京"})
+  mt_response: 北京现在是16:00。
+  chinese_response: 和弦是音乐中多个音同时发声的组合，常用于歌曲伴奏和编曲。
+  vision_response: Red.
   json_sample: "{\"instruments\": [\n    {\"name\": \"吉他\", \"type\": \"弦乐器\"},\n\
     \    {\"name\": \"鼓\", \"type\": \""
-  latency_ms: 259
-  model: meta-llama/llama-4-scout-17b-16e-instruct
-  mt_response: 北京现在是16:00。
-  multi_turn_tc: true
-  probe_response: get_current_time({"city":"北京"})
-  provider: groq
-  reasoning: true
-  reasoning_response: 打开两个开关2分钟，关闭一个。进入房间，摸热灯对应开关，亮灯对应已开开关，剩下的灯对应剩下的开关。
   stream_chunks: 5
-  stream_ttfb_ms: 255
-  streaming: true
-  tested_at: '2026-05-17 02:27:55'
-  tool_calling: true
-  vision: true
-  vision_response: Red.
+  stream_ttfb_ms: 677
+  reasoning_response: 打开两个开关2分钟，关闭一个。进入房间，摸热灯对应开关，亮灯对应已开开关，剩下的灯对应剩余开关。
+  tested_at: '2026-05-21 13:32:54'
 groq/meta-llama/llama-prompt-guard-2-22m:
   available: true
   chinese: false
@@ -687,71 +702,72 @@ groq/meta-llama/llama-prompt-guard-2-86m:
   tool_calling: false
   vision: false
 groq/openai/gpt-oss-120b:
-  available: true
-  chinese: false
-  chinese_response: ''
-  error: null
-  json_mode: true
-  json_sample: '{"instruments":[{"name":"Piano","type":"Keyboard"},{"name":"Violin","type":"Stri'
-  latency_ms: 263
+  provider: groq
   model: openai/gpt-oss-120b
-  mt_response: 北京现在是 2026 年 5 月 13 日 16:00（下午四点）。
+  available: true
+  tool_calling: true
   multi_turn_tc: true
+  chinese: false
+  vision: false
+  json_mode: true
+  streaming: true
+  reasoning: false
+  latency_ms: 545
+  error: null
   probe_response: get_current_time({"city":"Beijing"})
-  provider: groq
-  reasoning: false
-  reasoning_response: ''
-  stream_chunks: 0
-  stream_ttfb_ms: 0
-  streaming: false
-  tested_at: '2026-05-17 02:27:55'
-  tool_calling: true
-  vision: false
+  mt_response: 北京现在是 2026‑05‑13 16:00（中国标准时间，CST）。
+  chinese_response: ''
   vision_error: not_supported
+  json_sample: "{\n  \"instruments\": [\n    {\n      \"name\": \"钢琴\",\n      \"\
+    type\": \"键盘乐器\"\n    },\n    {"
+  stream_chunks: 5
+  stream_ttfb_ms: 401
+  reasoning_response: ''
+  tested_at: '2026-05-21 13:33:25'
 groq/openai/gpt-oss-20b:
-  available: true
-  chinese: false
-  chinese_response: ''
-  error: null
-  json_mode: true
-  json_sample: '{"instruments":[{"name":"Violin","type":"String"},{"name":"Piano","type":"Keyboa'
-  latency_ms: 260
+  provider: groq
   model: openai/gpt-oss-20b
-  mt_response: 现在北京时间是 2026‑05‑13 16:00 （即 下午 4:00）。
-  multi_turn_tc: true
-  probe_response: get_current_time({"city":"北京"})
-  provider: groq
-  reasoning: false
-  reasoning_response: ''
-  stream_chunks: 0
-  stream_ttfb_ms: 0
-  streaming: false
-  tested_at: '2026-05-17 02:27:55'
-  tool_calling: true
-  vision: false
-  vision_error: not_supported
-groq/openai/gpt-oss-safeguard-20b:
   available: true
-  chinese: false
-  chinese_response: ''
-  error: null
-  json_mode: true
-  json_sample: '{"instruments":[{"name":"小提琴","type":"弦乐器"},{"name":"钢琴","type":"键盘乐器"},{"name":'
-  latency_ms: 291
-  model: openai/gpt-oss-safeguard-20b
-  mt_response: 现在北京的时间是 2026‑05‑13 16:00:00 （北京时间，CST）。
-  multi_turn_tc: true
-  probe_response: get_current_time({"city":"北京"})
-  provider: groq
-  reasoning: false
-  reasoning_response: ''
-  stream_chunks: 0
-  stream_ttfb_ms: 0
-  streaming: false
-  tested_at: '2026-05-17 02:27:55'
   tool_calling: true
+  multi_turn_tc: true
+  chinese: false
   vision: false
+  json_mode: true
+  streaming: true
+  reasoning: false
+  latency_ms: 466
+  error: null
+  probe_response: get_current_time({"city":"北京"})
+  mt_response: 现在北京时间是 2026‑05‑13 16:00 （即 下午 4:00）。
+  chinese_response: ''
   vision_error: not_supported
+  json_sample: '{"instruments":[{"name":"小提琴","type":"弦乐器"},{"name":"萨克斯管","type":"木管乐器"},{"name'
+  stream_chunks: 5
+  stream_ttfb_ms: 372
+  reasoning_response: ''
+  tested_at: '2026-05-21 13:33:37'
+groq/openai/gpt-oss-safeguard-20b:
+  provider: groq
+  model: openai/gpt-oss-safeguard-20b
+  available: true
+  tool_calling: true
+  multi_turn_tc: true
+  chinese: false
+  vision: false
+  json_mode: true
+  streaming: true
+  reasoning: false
+  latency_ms: 283
+  error: null
+  probe_response: get_current_time({"city":"北京"})
+  mt_response: 现在北京的时间是 2026‑05‑13 16:00 （CST）。
+  chinese_response: ''
+  vision_error: not_supported
+  json_sample: '{"instruments":[{"name":"钢琴","type":"键盘乐器"},{"name":"小提琴","type":"弦乐器"},{"name":'
+  stream_chunks: 5
+  stream_ttfb_ms: 398
+  reasoning_response: ''
+  tested_at: '2026-05-21 13:33:42'
 groq/qwen/qwen3-32b:
   provider: groq
   model: qwen/qwen3-32b
@@ -808,3 +824,17 @@ groq/whisper-large-v3-turbo:
   tested_at: '2026-05-13 17:32:52'
   tool_calling: false
   vision: false
+cursor/cursor-agent:
+  provider: cursor
+  model: cursor-agent
+  available: false
+  tool_calling: false
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: ''
+  tested_at: '2026-05-21 00:38:52'

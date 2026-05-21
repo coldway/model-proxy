@@ -22,6 +22,10 @@ from src.providers.utils import msg_to_dict
 logger = logging.getLogger(__name__)
 
 
+from src.providers import register_provider
+
+
+@register_provider("cloudflare")
 class CloudflareProvider(BaseProvider):
     """Cloudflare Workers AI 适配器。
 
@@ -41,7 +45,8 @@ class CloudflareProvider(BaseProvider):
         else:
             self._account_id = ""
             self._token = api_key
-        self._client = httpx.AsyncClient(timeout=60.0)
+        from src.providers.utils import create_http_client
+        self._client = create_http_client(timeout=60.0)
 
     async def close(self) -> None:
         await self._client.aclose()

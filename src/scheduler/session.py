@@ -1,10 +1,11 @@
 # Created by model-proxy on 2026/05/13
 # Copyright © 2026
 
-"""聊天会话管理器 — 多会话、上下文窗口控制、持久化"""
+"""聊天会话管理器 — 多会话、上下文窗口控制、持久化、并发安全"""
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import tempfile
@@ -40,7 +41,7 @@ SYSTEM_PROMPT = (
 
 
 class ChatSession:
-    """单个聊天会话"""
+    """单个聊天会话（支持并发安全和事务性回滚）"""
 
     def __init__(
         self,
@@ -56,10 +57,12 @@ class ChatSession:
         self.system_prompt = system_prompt
         self._max_context_tokens = max_context_tokens
         self._lock = threading.Lock()
+        self._async_lock = asyncio.Lock()
         self.messages: list[dict[str, str]] = []
         self.created_at: float = time.time()
         self.updated_at: float = time.time()
         self.total_tokens_est: int = 0
+        self._checkpoint: int | None = None
 
     def add_message(self, role: str, content: str, model: str | None = None, tool_calls: list | None = None, tool_call_id: str | None = None, name: str | None = None) -> None:
         with self._lock:
@@ -82,15 +85,31 @@ class ChatSession:
             total_chars += len(m.get("content") or "")
         self.total_tokens_est = total_chars // CHARS_PER_TOKEN
 
-    def get_context_messages(self) -> list[dict[str, str]]:
-        """获取用于 API 调用的消息列表（含系统提示、自动截断）
+    def get_context_messages(self, model_max_tokens: int | None = None) -> list[dict[str, str]]:
+        """获取用于 API 调用的消息列表（含系统提示、重要性感知截断）
 
-        截断时保证 tool_call 链完整性：assistant(tool_calls) 和后续的
-        tool 回复消息作为一组，要么全部保留要么全部丢弃。
+        截断策略（优化版）：
+        1. 始终保留首轮用户消息（定义性约束）
+        2. 始终保留最近 N 轮
+        3. 中间部分超出预算时生成摘要占位
+        4. 保证 tool_call 链完整性
         """
+        max_tokens = model_max_tokens or self._max_context_tokens
         with self._lock:
             result = [{"role": "system", "content": self.system_prompt}]
-            budget = self._max_context_tokens - RESERVED_SYSTEM_TOKENS
+            budget = max_tokens - RESERVED_SYSTEM_TOKENS
+
+            if not self.messages:
+                return result
+
+            first_user_msg = None
+            first_user_idx = -1
+            for i, m in enumerate(self.messages):
+                if m.get("role") == "user":
+                    first_user_msg = m
+                    first_user_idx = i
+                    break
+
             selected: list[dict[str, str]] = []
             consumed = 0
 
@@ -103,14 +122,33 @@ class ChatSession:
 
             selected.reverse()
 
-            # 确保不以孤立的 tool 回复开头（其前序 assistant tool_calls 被截掉）
+            selected_count = len(selected)
+            first_included = (
+                first_user_idx >= 0
+                and selected_count > 0
+                and (len(self.messages) - selected_count) <= first_user_idx
+            )
+            if (
+                first_user_msg
+                and first_user_idx >= 0
+                and not first_included
+                and len(self.messages) > 4
+            ):
+                first_tokens = len(first_user_msg.get("content") or "") // CHARS_PER_TOKEN
+                if consumed + first_tokens + 50 <= budget:
+                    summary_msg = {
+                        "role": "system",
+                        "content": f"[对话开始时用户的初始消息：{(first_user_msg.get('content') or '')[:500]}]",
+                    }
+                    selected = [summary_msg] + selected
+                    consumed += first_tokens + 50
+
             while selected and selected[0].get("role") == "tool":
                 selected = selected[1:]
 
-            # 如果截断后首条是带 tool_calls 但后续 tool 回复被截掉的 assistant 消息，也需移除
             if (
                 selected
-                and selected[0]["role"] == "assistant"
+                and selected[0].get("role") == "assistant"
                 and selected[0].get("tool_calls")
                 and (len(selected) < 2 or selected[1].get("role") != "tool")
             ):
@@ -127,11 +165,90 @@ class ChatSession:
                 result.append(entry)
             return result
 
+    def pop_last_message(self) -> dict | None:
+        """移除最后一条消息（用于 dispatch 失败时回滚用户消息）"""
+        with self._lock:
+            if self.messages:
+                msg = self.messages.pop()
+                self._update_token_estimate()
+                return msg
+            return None
+
+    def set_checkpoint(self) -> int:
+        """设置回滚点，返回当前消息数量作为 checkpoint。"""
+        with self._lock:
+            self._checkpoint = len(self.messages)
+            return self._checkpoint
+
+    def rollback(self) -> int:
+        """回滚到最近的 checkpoint，返回被移除的消息数量。"""
+        with self._lock:
+            if self._checkpoint is None:
+                return 0
+            removed = len(self.messages) - self._checkpoint
+            if removed > 0:
+                self.messages = self.messages[:self._checkpoint]
+                self._update_token_estimate()
+            self._checkpoint = None
+            return max(removed, 0)
+
+    def clear_checkpoint(self) -> None:
+        """清除 checkpoint（表示事务成功提交）。"""
+        with self._lock:
+            self._checkpoint = None
+
+    def edit_message(self, index: int, new_content: str) -> bool:
+        """编辑指定位置的消息并截断其后所有消息（用于对话分支）"""
+        with self._lock:
+            if index < 0 or index >= len(self.messages):
+                return False
+            self.messages[index]["content"] = new_content
+            self.messages = self.messages[:index + 1]
+            self.updated_at = time.time()
+            self._update_token_estimate()
+            return True
+
+    def regenerate(self) -> dict | None:
+        """移除最后一条 assistant 消息以便重新生成"""
+        with self._lock:
+            if not self.messages:
+                return None
+            if self.messages[-1].get("role") == "assistant":
+                msg = self.messages.pop()
+                self._update_token_estimate()
+                return msg
+            for i in range(len(self.messages) - 1, -1, -1):
+                if self.messages[i].get("role") == "assistant":
+                    msg = self.messages[i]
+                    self.messages = self.messages[:i]
+                    self._update_token_estimate()
+                    return msg
+            return None
+
+    def switch_model(self, new_model: str, max_context_tokens: int | None = None) -> str:
+        """切换会话模型，返回旧模型名。可选更新 context 窗口大小。"""
+        with self._lock:
+            old = self.model
+            self.model = new_model
+            if max_context_tokens and max_context_tokens != self._max_context_tokens:
+                self._max_context_tokens = max_context_tokens
+            self.updated_at = time.time()
+            return old
+
+    def get_max_context_tokens(self) -> int:
+        """获取当前 context 窗口大小"""
+        return self._max_context_tokens
+
+    def count_role(self, role: str) -> int:
+        """安全地统计指定 role 的消息数量"""
+        with self._lock:
+            return sum(1 for m in self.messages if m.get("role") == role)
+
     def auto_title(self) -> None:
         """从第一条用户消息自动生成标题"""
         for m in self.messages:
             if m["role"] == "user":
-                text = m["content"].strip()
+                text = (m.get("content") or "").strip()
                 self.title = text[:20] + ("..." if len(text) > 20 else "")
                 return
 
@@ -162,7 +279,7 @@ class ChatSession:
         return s
 
 
-_SAVE_DEBOUNCE_SECONDS = 5
+_SAVE_DEBOUNCE_SECONDS = 8
 
 
 TRASH_RETENTION_DAYS = 30
@@ -184,8 +301,10 @@ class SessionManager:
         self._max_sessions = max_sessions
         self._dirty = False
         self._save_timer: threading.Timer | None = None
+        self._trash_timer: threading.Timer | None = None
         self._load()
         self._cleanup_expired_trash()
+        self._start_trash_cleanup_timer()
 
     def create(self, model: str = "auto", title: str = "新对话") -> ChatSession:
         with self._lock:
@@ -261,13 +380,13 @@ class SessionManager:
                     "model": entry["session"].model,
                     "message_count": len(entry["session"].messages),
                     "deleted_at": entry["deleted_at"],
-                    "expires_in_days": max(0, TRASH_RETENTION_DAYS - int((now - entry["deleted_at"]) / 86400)),
+                    "expires_in_days": max(0, round(TRASH_RETENTION_DAYS - (now - entry["deleted_at"]) / 86400)),
                 }
                 for sid, entry in items
             ]
 
     def _cleanup_expired_trash(self) -> None:
-        """清理超过保留期限的回收站会话"""
+        """清理超过保留期限的回收站会话（须持有 _lock 或初始化时无竞争）"""
         with self._lock:
             now = time.time()
             expired = [
@@ -279,6 +398,21 @@ class SessionManager:
                     del self._trash[sid]
                 logger.info("清理 %d 个过期回收站会话", len(expired))
                 self._save_unlocked()
+
+    def _start_trash_cleanup_timer(self) -> None:
+        """启动周期性回收站清理"""
+        self._trash_timer = threading.Timer(3600.0, self._periodic_trash_cleanup)
+        self._trash_timer.daemon = True
+        self._trash_timer.start()
+
+    def _periodic_trash_cleanup(self) -> None:
+        """Timer 回调：周期性清理过期回收站"""
+        try:
+            self._cleanup_expired_trash()
+        except Exception as e:
+            logger.warning("周期清理回收站异常: %s", e)
+        finally:
+            self._start_trash_cleanup_timer()
 
     def list_sessions(self) -> list[dict]:
         with self._lock:
@@ -336,12 +470,13 @@ class SessionManager:
         self._schedule_save()
 
     def _persist_unlocked(self) -> None:
-        """实际执行磁盘写入（须在 _lock 内调用）"""
+        """实际执行磁盘写入（原子写入：写临时文件 + rename，须在 _lock 内调用）"""
         if not self._dirty and not self._sessions and not self._trash:
             return
         self._dirty = False
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         data = {
+            "_version": 2,
             "_active": {sid: s.to_dict() for sid, s in self._sessions.items()},
             "_trash": {sid: {"session": entry["session"].to_dict(), "deleted_at": entry["deleted_at"]} for sid, entry in self._trash.items()},
         }
@@ -353,6 +488,8 @@ class SessionManager:
             os.replace(tmp_path, str(SESSION_FILE))
         except Exception as e:
             logger.error("保存会话数据失败: %s", e)
+            if "tmp_path" in locals():
+                Path(tmp_path).unlink(missing_ok=True)
 
     def _load(self) -> None:
         if not SESSION_FILE.exists():

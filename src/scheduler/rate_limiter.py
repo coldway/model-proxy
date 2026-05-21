@@ -135,7 +135,9 @@ class RateLimiter:
         self._flush_blacklist()
 
     def _save(self) -> None:
-        """将每日使用量持久化到磁盘（仅保存 daily_count 和 last_reset_day）"""
+        """将每日使用量持久化到磁盘（原子写入：先写临时文件再 rename）"""
+        import os
+        import tempfile
         if not self._persist:
             return
         try:
@@ -150,12 +152,15 @@ class RateLimiter:
                     "daily_tokens": usage.daily_tokens,
                     "last_reset_day": usage.last_reset_day,
                 }
-            USAGE_FILE.write_text(
-                yaml.dump(snapshot, allow_unicode=True, default_flow_style=False),
-                encoding="utf-8",
-            )
+            content = yaml.dump(snapshot, allow_unicode=True, default_flow_style=False)
+            fd, tmp_path = tempfile.mkstemp(dir=str(USAGE_FILE.parent), suffix=".tmp")
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(content)
+            os.replace(tmp_path, str(USAGE_FILE))
         except Exception as e:
             logger.warning("保存使用量持久化文件失败: %s", e)
+            if "tmp_path" in locals():
+                Path(tmp_path).unlink(missing_ok=True)
 
     def _can_request_unlocked(
         self, provider: str, model: str,
@@ -408,7 +413,9 @@ class RateLimiter:
             self._blacklist_save_timer.start()
 
     def _flush_blacklist(self) -> None:
-        """实际执行黑名单写盘"""
+        """实际执行黑名单写盘（原子写入）"""
+        import os
+        import tempfile
         if not self._blacklist_dirty:
             return
         self._blacklist_dirty = False
@@ -416,12 +423,15 @@ class RateLimiter:
             BLACKLIST_FILE.parent.mkdir(parents=True, exist_ok=True)
             with self._lock:
                 snapshot = dict(self._blacklist)
-            BLACKLIST_FILE.write_text(
-                yaml.dump(snapshot, allow_unicode=True, default_flow_style=False),
-                encoding="utf-8",
-            )
+            content = yaml.dump(snapshot, allow_unicode=True, default_flow_style=False)
+            fd, tmp_path = tempfile.mkstemp(dir=str(BLACKLIST_FILE.parent), suffix=".tmp")
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(content)
+            os.replace(tmp_path, str(BLACKLIST_FILE))
         except Exception as e:
             logger.warning("保存 429 黑名单失败: %s", e)
+            if "tmp_path" in locals():
+                Path(tmp_path).unlink(missing_ok=True)
 
     def _save_blacklist(self) -> None:
         """标记黑名单需持久化（延迟写盘，可在锁内安全调用）"""

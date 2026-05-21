@@ -14,6 +14,7 @@ import base64
 import json
 import logging
 import struct
+import threading
 import time
 import uuid
 import zlib
@@ -69,10 +70,11 @@ TOOL_CALLING_PROBE = {
 
 
 class CapabilityCache:
-    """模型能力缓存管理"""
+    """模型能力缓存管理（线程安全）"""
 
     def __init__(self, path: Path | None = None):
         self._path = path or CAPABILITIES_FILE
+        self._lock = threading.Lock()
         self._data: dict[str, dict[str, Any]] = self._load()
 
     def _load(self) -> dict[str, dict[str, Any]]:
@@ -85,10 +87,12 @@ class CapabilityCache:
         return {}
 
     def save(self) -> None:
+        with self._lock:
+            snapshot = dict(self._data)
         self._path.parent.mkdir(parents=True, exist_ok=True)
         with open(self._path, "w", encoding="utf-8") as f:
             yaml.dump(
-                self._data, f,
+                snapshot, f,
                 allow_unicode=True, default_flow_style=False, sort_keys=False,
             )
         logger.info("能力缓存已保存至 %s", self._path)
@@ -97,10 +101,12 @@ class CapabilityCache:
         return f"{provider}/{model_id}"
 
     def get(self, provider: str, model_id: str) -> dict[str, Any] | None:
-        return self._data.get(self._key(provider, model_id))
+        with self._lock:
+            return self._data.get(self._key(provider, model_id))
 
     def has(self, provider: str, model_id: str) -> bool:
-        return self._key(provider, model_id) in self._data
+        with self._lock:
+            return self._key(provider, model_id) in self._data
 
     def set(
         self,
@@ -109,23 +115,27 @@ class CapabilityCache:
         capabilities: dict[str, Any],
     ) -> None:
         key = self._key(provider, model_id)
-        self._data[key] = {
-            **capabilities,
-            "tested_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-        }
+        with self._lock:
+            self._data[key] = {
+                **capabilities,
+                "tested_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            }
 
     def get_all(self) -> dict[str, dict[str, Any]]:
-        return dict(self._data)
+        with self._lock:
+            return dict(self._data)
 
     def remove(self, provider: str, model_id: str) -> bool:
         key = self._key(provider, model_id)
-        if key in self._data:
-            del self._data[key]
-            return True
-        return False
+        with self._lock:
+            if key in self._data:
+                del self._data[key]
+                return True
+            return False
 
     def clear(self) -> None:
-        self._data.clear()
+        with self._lock:
+            self._data.clear()
 
 
 PROBE_INTERVAL_SECONDS = 1
@@ -472,6 +482,7 @@ class CapabilityTester:
 
         # ── 阶段 1：单轮 tool calling（同时测延迟） ──
         t0 = time.time()
+        tc_400 = False
         try:
             tc_result = await self._test_tool_calling(provider, model_id, tools)
             result["latency_ms"] = round((time.time() - t0) * 1000)
@@ -481,18 +492,27 @@ class CapabilityTester:
             err_str = str(e)
             if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
                 result["error"] = "rate_limited (429)"
+                self._cache.set(provider_name, model_id, result)
+                logger.info("测试 %s/%s: 阶段1失败 - %s", provider_name, model_id, result["error"])
+                return {**result, "cached": False}
             elif "503" in err_str or "UNAVAILABLE" in err_str:
                 result["error"] = "unavailable (503)"
+                self._cache.set(provider_name, model_id, result)
+                logger.info("测试 %s/%s: 阶段1失败 - %s", provider_name, model_id, result["error"])
+                return {**result, "cached": False}
             elif "400" in err_str:
                 result["available"] = True
-                result["error"] = f"bad_request (400): {err_str[:80]}"
+                result["tool_calling"] = False
+                result["tc_note"] = f"bad_request (400): {err_str[:80]}"
+                tc_400 = True
+                logger.info("测试 %s/%s: tool_calling 不支持 (400)，继续测试其他能力", provider_name, model_id)
             else:
                 result["error"] = err_str[:120]
-            self._cache.set(provider_name, model_id, result)
-            logger.info("测试 %s/%s: 阶段1失败 - %s", provider_name, model_id, result["error"])
-            return {**result, "cached": False}
+                self._cache.set(provider_name, model_id, result)
+                logger.info("测试 %s/%s: 阶段1失败 - %s", provider_name, model_id, result["error"])
+                return {**result, "cached": False}
 
-        if tc_result.get("probe_response") == "empty response":
+        if not tc_400 and tc_result.get("probe_response") == "empty response":
             result["error"] = "empty_response (模型返回 200 但无内容，可能是软限流)"
             logger.warning(
                 "测试 %s/%s: 模型返回空内容，跳过后续能力检测",
@@ -500,6 +520,21 @@ class CapabilityTester:
             )
             self._cache.set(provider_name, model_id, result)
             return {**result, "cached": False}
+
+        # ── 阶段 1b: 400 时测量延迟（用简单请求代替 tool calling） ──
+        if tc_400 and result["latency_ms"] == 0:
+            try:
+                from src.models.schemas import ChatCompletionRequest, ChatMessage
+                t1 = time.time()
+                lat_req = ChatCompletionRequest(
+                    model=model_id,
+                    messages=[ChatMessage(role="user", content="hi")],
+                    temperature=0.1, max_tokens=10,
+                )
+                await provider.chat_completion(model_id, lat_req)
+                result["latency_ms"] = round((time.time() - t1) * 1000)
+            except Exception:
+                pass
 
         # ── 阶段 2：多轮 tool calling（仅当单轮通过时） ──
         if result["tool_calling"]:

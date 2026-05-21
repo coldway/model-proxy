@@ -19,6 +19,9 @@ logger = logging.getLogger(__name__)
 CONFIG_FILE = Path("conf/config.yaml")
 
 
+_ENABLED_MODELS_CACHE_TTL = 5.0
+
+
 class ConfigManager:
     """配置管理器
     config.yaml 仅保存 API Key 和服务设置
@@ -30,6 +33,8 @@ class ConfigManager:
         self._catalog = catalog
         self._api_keys: dict[str, str] = {}
         self._settings = AppSettings()
+        self._enabled_models_cache: list[tuple[str, ModelConfig]] | None = None
+        self._enabled_models_cache_ts: float = 0.0
         self._load()
 
     @property
@@ -116,7 +121,12 @@ class ConfigManager:
         return AppConfig(providers=providers, settings=self._settings)
 
     def get_enabled_models(self) -> list[tuple[str, ModelConfig]]:
-        """获取所有已启用的模型，按厂商优先级 + 模型优先级排序"""
+        """获取所有已启用的模型，按厂商优先级 + 模型优先级排序（带 5s TTL 缓存）"""
+        import time
+        now = time.time()
+        if self._enabled_models_cache is not None and (now - self._enabled_models_cache_ts) < _ENABLED_MODELS_CACHE_TTL:
+            return self._enabled_models_cache
+
         if not self._catalog:
             return []
         result: list[tuple[str, ModelConfig]] = []
@@ -136,7 +146,13 @@ class ConfigManager:
                 tool_calling=model_data.get("tool_calling", False),
             )
             result.append((prov_id, mc))
+        self._enabled_models_cache = result
+        self._enabled_models_cache_ts = now
         return result
+
+    def invalidate_enabled_models_cache(self) -> None:
+        """手动失效缓存（模型启用/停用变更后调用）"""
+        self._enabled_models_cache = None
 
     def get_providers_sorted(self) -> list[tuple[str, ProviderConfig]]:
         """获取所有厂商，按优先级排序"""
@@ -175,6 +191,7 @@ class ConfigManager:
     def toggle_model(self, provider: str, model_name: str, enabled: bool) -> None:
         if self._catalog:
             self._catalog.set_model_enabled(provider, model_name, enabled)
+            self.invalidate_enabled_models_cache()
 
     def update_model_priority(self, provider: str, model_name: str, priority: int) -> None:
         if self._catalog:
@@ -194,6 +211,7 @@ class ConfigManager:
                     "category": "通用",
                 })
             self._catalog.activate_model(provider, model.name, model.priority)
+            self.invalidate_enabled_models_cache()
 
     def update_provider_priority(self, provider: str, priority: int) -> None:
         if self._catalog:

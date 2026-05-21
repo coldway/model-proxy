@@ -34,7 +34,8 @@ class OpenAICompatibleProvider(BaseProvider):
         super().__init__(api_key)
         self._base_url = base_url.rstrip("/")
         self._provider_name = provider_name
-        self._client = httpx.AsyncClient(timeout=120.0)
+        from src.providers.utils import create_http_client
+        self._client = create_http_client(timeout=120.0)
 
     async def close(self) -> None:
         await self._client.aclose()
@@ -105,7 +106,9 @@ class OpenAICompatibleProvider(BaseProvider):
             headers=self._build_headers(),
             json=self._build_payload(model, request, stream=True),
         ) as resp:
-            resp.raise_for_status()
+            if resp.status_code >= 400:
+                await resp.aread()
+                resp.raise_for_status()
             async for line in resp.aiter_lines():
                 if not line.startswith("data: "):
                     continue

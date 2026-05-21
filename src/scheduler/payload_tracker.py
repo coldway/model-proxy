@@ -100,15 +100,20 @@ class PayloadTracker:
         self._dirty = True
 
     def _persist(self) -> None:
-        """实际写入磁盘"""
+        """实际写入磁盘（原子写入：先写临时文件再 rename）"""
+        import os
+        import tempfile
         try:
             self._path.parent.mkdir(parents=True, exist_ok=True)
-            self._path.write_text(
-                yaml.dump(self._limits, allow_unicode=True, default_flow_style=False),
-                encoding="utf-8",
-            )
+            content = yaml.dump(self._limits, allow_unicode=True, default_flow_style=False)
+            fd, tmp_path = tempfile.mkstemp(dir=str(self._path.parent), suffix=".tmp")
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(content)
+            os.replace(tmp_path, str(self._path))
         except Exception as e:
             logger.warning("保存 payload 上限文件失败: %s", e)
+            if "tmp_path" in locals():
+                Path(tmp_path).unlink(missing_ok=True)
 
     def _schedule_flush(self) -> None:
         """启动周期性自动 flush 定时器"""

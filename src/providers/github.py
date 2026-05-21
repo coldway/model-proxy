@@ -26,12 +26,17 @@ logger = logging.getLogger(__name__)
 GITHUB_MODELS_BASE = "https://models.inference.ai.azure.com"
 
 
+from src.providers import register_provider
+
+
+@register_provider("github")
 class GitHubProvider(BaseProvider):
     """GitHub Models 适配器（支持 tool calling）"""
 
     def __init__(self, api_key: str):
         super().__init__(api_key)
-        self._client = httpx.AsyncClient(timeout=60.0)
+        from src.providers.utils import create_http_client
+        self._client = create_http_client(timeout=60.0)
 
     async def close(self) -> None:
         await self._client.aclose()

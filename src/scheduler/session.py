@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import tempfile
@@ -20,7 +21,8 @@ import yaml
 logger = logging.getLogger(__name__)
 
 DATA_DIR = Path("data")
-SESSION_FILE = DATA_DIR / "chat_sessions.yaml"
+SESSION_FILE = DATA_DIR / "chat_sessions.json"
+_LEGACY_SESSION_FILE = DATA_DIR / "chat_sessions.yaml"
 
 # 上下文窗口 token 估算：中英混合 ≈ 2 chars/token
 CHARS_PER_TOKEN = 2
@@ -67,6 +69,7 @@ class ChatSession:
     def add_message(self, role: str, content: str, model: str | None = None, tool_calls: list | None = None, tool_call_id: str | None = None, name: str | None = None) -> None:
         with self._lock:
             msg: dict[str, Any] = {"role": role, "content": content}
+            added_chars = len(content or "")
             if model:
                 msg["model"] = model
             if tool_calls:
@@ -77,9 +80,10 @@ class ChatSession:
                 msg["name"] = name
             self.messages.append(msg)
             self.updated_at = time.time()
-            self._update_token_estimate()
+            self.total_tokens_est += added_chars // CHARS_PER_TOKEN
 
     def _update_token_estimate(self) -> None:
+        """全量重算 token 估算（用于 truncate/rollback/deserialize 等场景）"""
         total_chars = len(self.system_prompt)
         for m in self.messages:
             total_chars += len(m.get("content") or "")
@@ -481,7 +485,7 @@ class SessionManager:
             "_trash": {sid: {"session": entry["session"].to_dict(), "deleted_at": entry["deleted_at"]} for sid, entry in self._trash.items()},
         }
         try:
-            content = yaml.dump(data, allow_unicode=True, default_flow_style=False)
+            content = json.dumps(data, ensure_ascii=False)
             fd, tmp_path = tempfile.mkstemp(dir=str(DATA_DIR), suffix=".tmp")
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 f.write(content)
@@ -492,10 +496,19 @@ class SessionManager:
                 Path(tmp_path).unlink(missing_ok=True)
 
     def _load(self) -> None:
-        if not SESSION_FILE.exists():
+        load_path: Path | None = None
+        if SESSION_FILE.exists():
+            load_path = SESSION_FILE
+        elif _LEGACY_SESSION_FILE.exists():
+            load_path = _LEGACY_SESSION_FILE
+        if load_path is None:
             return
         try:
-            data = yaml.safe_load(SESSION_FILE.read_text(encoding="utf-8"))
+            raw = load_path.read_text(encoding="utf-8")
+            if load_path.suffix == ".json":
+                data = json.loads(raw)
+            else:
+                data = yaml.safe_load(raw)
             if not isinstance(data, dict):
                 return
             with self._lock:
@@ -516,6 +529,10 @@ class SessionManager:
                         )
                 n = len(self._sessions)
                 t = len(self._trash)
-            logger.info("已加载 %d 个聊天会话, %d 个回收站会话", n, t)
+            logger.info("已加载 %d 个聊天会话, %d 个回收站会话 (from %s)", n, t, load_path.name)
+            if load_path != SESSION_FILE:
+                self._dirty = True
+                self._persist_unlocked()
+                logger.info("已迁移会话数据从 YAML → JSON")
         except Exception as e:
             logger.error("加载会话数据失败: %s", e)

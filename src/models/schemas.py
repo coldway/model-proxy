@@ -66,6 +66,10 @@ class AppSettings(BaseModel):
         default=3600,
         description="会话模型绑定的 TTL（秒），过期后绑定自动失效",
     )
+    per_consumer_rpm: int = Field(
+        default=0,
+        description="单个 API consumer（按 Bearer token 区分）的每分钟请求数上限，0=不限制",
+    )
 
 
 class AppConfig(BaseModel):

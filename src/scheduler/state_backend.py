@@ -75,7 +75,6 @@ class LocalMemoryBackend(StateBackend):
 class RedisBackend(StateBackend):
     """Redis 后端（多 Worker 模式）
 
-    TODO: 实现 Redis 连接和操作
     需要安装: pip install redis[hiredis]
 
     使用方式:

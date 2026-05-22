@@ -19,7 +19,7 @@ import logging
 import threading
 import time
 import uuid
-from collections import deque
+from collections import OrderedDict, deque
 from typing import TYPE_CHECKING, Any
 
 from src.models.schemas import (
@@ -101,7 +101,7 @@ class Dispatcher(
         self._history = history
         self._payload_tracker = payload_tracker or PayloadTracker()
         self._breaker = CircuitBreaker(threshold=breaker_threshold, cooldown=breaker_cooldown)
-        self._route_cache: dict[str, tuple[str, float]] = {}
+        self._route_cache: OrderedDict[str, tuple[str, float]] = OrderedDict()
         self._route_cache_lock = threading.Lock()
         self._route_log: deque[dict[str, Any]] = deque(maxlen=ROUTE_LOG_MAX)
         self._route_hit_counter: dict[str, int] = {}
@@ -209,8 +209,13 @@ class Dispatcher(
                 else:
                     try:
                         rlim = self._rate_limits_for(enabled_models, prov, model)
+                        model_timeout = next(
+                            (m.timeout for p, m in enabled_models if p == prov and m.name == model),
+                            60,
+                        )
                         result = await self._call_provider(
-                            prov, model, request, trace_id=trace_id, rate_limits=rlim,
+                            prov, model, request,
+                            timeout=model_timeout, trace_id=trace_id, rate_limits=rlim,
                         )
                         return prov, model, result
                     except Exception as e:
@@ -237,7 +242,8 @@ class Dispatcher(
                     )
 
                 result = await self._call_provider(
-                    provider_name, model_cfg.name, request, trace_id=trace_id, rate_limits=rlim,
+                    provider_name, model_cfg.name, request,
+                    timeout=model_cfg.timeout, trace_id=trace_id, rate_limits=rlim,
                 )
                 return provider_name, model_cfg.name, result
 
@@ -250,8 +256,8 @@ class Dispatcher(
         trace_id: str = "",
     ) -> tuple[str, str, ChatCompletionResponse]:
         """智能自动选择模型（三级路由策略）"""
-        payload_bytes = estimate_payload_bytes(request)
-        available = self._filter_available(enabled_models, payload_bytes)
+        _payload_bytes = estimate_payload_bytes(request)
+        available = self._filter_available(enabled_models, _payload_bytes)
         if not available:
             raise AllModelsUnavailable("所有模型均不可用（配额耗尽或 payload 超出所有模型上限）")
 
@@ -292,7 +298,9 @@ class Dispatcher(
             try:
                 rlim = self._unpack_rate_limit(model_cfg)
                 result = await self._call_provider(
-                    prov_name, model_cfg.name, request, trace_id=trace_id, rate_limits=rlim,
+                    prov_name, model_cfg.name, request,
+                    timeout=model_cfg.timeout, trace_id=trace_id,
+                    rate_limits=rlim, payload_bytes=_payload_bytes,
                 )
                 _route_strategy_var.set("规则快速路径")
                 logger.info("规则快速路径: %s:%s", prov_name, model_cfg.name)
@@ -318,7 +326,9 @@ class Dispatcher(
                         try:
                             rlim = self._unpack_rate_limit(model_cfg)
                             result = await self._call_provider(
-                                prov_name, model_cfg.name, request, trace_id=trace_id, rate_limits=rlim,
+                                prov_name, model_cfg.name, request,
+                                timeout=model_cfg.timeout, trace_id=trace_id,
+                                rate_limits=rlim, payload_bytes=_payload_bytes,
                             )
                             strategy_name = "LLM 智能路由" + ("（缓存）" if was_cached else "")
                             _route_strategy_var.set(strategy_name)
@@ -341,7 +351,9 @@ class Dispatcher(
             try:
                 rlim = self._unpack_rate_limit(model_cfg)
                 result = await self._call_provider(
-                    provider_name, model_cfg.name, request, trace_id=trace_id, rate_limits=rlim,
+                    provider_name, model_cfg.name, request,
+                    timeout=model_cfg.timeout, trace_id=trace_id,
+                    rate_limits=rlim, payload_bytes=_payload_bytes,
                 )
                 _route_strategy_var.set("规则遍历回退")
                 self._log_route_decision(

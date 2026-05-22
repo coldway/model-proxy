@@ -26,7 +26,8 @@ from src.models.schemas import ChatCompletionRequest
 logger = logging.getLogger(__name__)
 
 _DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
-_LIMITS_FILE = _DATA_DIR / "payload_limits.yaml"
+_LIMITS_FILE = _DATA_DIR / "payload_limits.json"
+_LEGACY_LIMITS_FILE = _DATA_DIR / "payload_limits.yaml"
 
 # 客户端估算与网关实际限制可能有偏差，比较与 413 记录统一使用加缓冲后的估算值
 _PAYLOAD_ESTIMATE_BUFFER = 1.1
@@ -85,13 +86,26 @@ class PayloadTracker:
         self._schedule_flush()
 
     def _load(self) -> None:
-        if not self._path.exists():
+        load_path: Path | None = None
+        if self._path.exists():
+            load_path = self._path
+        elif _LEGACY_LIMITS_FILE.exists():
+            load_path = _LEGACY_LIMITS_FILE
+        if load_path is None:
             return
         try:
-            raw = yaml.safe_load(self._path.read_text(encoding="utf-8"))
+            text = load_path.read_text(encoding="utf-8")
+            if load_path.suffix == ".json":
+                raw = json.loads(text)
+            else:
+                raw = yaml.safe_load(text)
             if isinstance(raw, dict):
                 self._limits = raw
-                logger.info("已加载 %d 个模型的 payload 上限记录", len(self._limits))
+                logger.info("已加载 %d 个模型的 payload 上限记录 (from %s)", len(self._limits), load_path.name)
+                if load_path != self._path:
+                    self._dirty = True
+                    self._persist()
+                    logger.info("已迁移 payload 上限数据从 YAML → JSON")
         except Exception as e:
             logger.warning("加载 payload 上限文件失败: %s", e)
 
@@ -105,7 +119,7 @@ class PayloadTracker:
         import tempfile
         try:
             self._path.parent.mkdir(parents=True, exist_ok=True)
-            content = yaml.dump(self._limits, allow_unicode=True, default_flow_style=False)
+            content = json.dumps(self._limits, ensure_ascii=False)
             fd, tmp_path = tempfile.mkstemp(dir=str(self._path.parent), suffix=".tmp")
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 f.write(content)

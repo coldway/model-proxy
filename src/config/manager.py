@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -86,11 +87,23 @@ class ConfigManager:
 
     # --- API Key 管理 ---
 
+    @staticmethod
+    def _resolve_key(raw_key: str) -> str:
+        """解析 API Key 值，支持 $ENV_VAR 和 ${ENV_VAR} 引用"""
+        if not raw_key:
+            return ""
+        if raw_key.startswith("${") and raw_key.endswith("}"):
+            return os.environ.get(raw_key[2:-1], "")
+        if raw_key.startswith("$") and raw_key[1:].isidentifier():
+            return os.environ.get(raw_key[1:], "")
+        return raw_key
+
     def get_api_key(self, provider: str) -> str:
         rotator = self._key_rotators.get(provider)
         if rotator:
             return rotator.get_key()
-        return self._api_keys.get(provider, "")
+        raw = self._api_keys.get(provider, "")
+        return self._resolve_key(raw)
 
     def get_key_rotator(self, provider: str) -> KeyRotator | None:
         return self._key_rotators.get(provider)
@@ -104,29 +117,36 @@ class ConfigManager:
 
     # --- 兼容旧接口：通过 catalog 提供统一视图 ---
 
+    @staticmethod
+    def _build_model_config(model_data: dict[str, Any]) -> ModelConfig:
+        """从 catalog 模型数据构建 ModelConfig 实例（统一工厂方法）"""
+        rl = None
+        rpd = model_data.get("default_rpd", 0)
+        rpm = model_data.get("default_rpm", 0)
+        tpm = model_data.get("default_tpm", 0)
+        tpd = model_data.get("default_tpd", 0)
+        if rpd or rpm or tpm or tpd:
+            rl = RateLimit(rpd=rpd, rpm=rpm, tpm=tpm, tpd=tpd)
+        return ModelConfig(
+            name=model_data["id"],
+            enabled=True,
+            priority=model_data.get("priority", 99),
+            rate_limit=rl,
+            tool_calling=model_data.get("tool_calling", False),
+            timeout=model_data.get("timeout", 60),
+        )
+
     @property
     def config(self) -> AppConfig:
         """兼容旧接口：构造 AppConfig 对象"""
         providers: dict[str, ProviderConfig] = {}
         if self._catalog:
             for prov_id, prov_data in self._catalog.get_all_providers().items():
-                models = []
-                for m in prov_data.get("models", []):
-                    if m.get("enabled"):
-                        rl = None
-                        rpd = m.get("default_rpd", 0)
-                        rpm = m.get("default_rpm", 0)
-                        tpm = m.get("default_tpm", 0)
-                        tpd = m.get("default_tpd", 0)
-                        if rpd or rpm or tpm or tpd:
-                            rl = RateLimit(rpd=rpd, rpm=rpm, tpm=tpm, tpd=tpd)
-                        models.append(ModelConfig(
-                            name=m["id"],
-                            enabled=True,
-                            priority=m.get("priority", 99),
-                            rate_limit=rl,
-                            tool_calling=m.get("tool_calling", False),
-                        ))
+                models = [
+                    self._build_model_config(m)
+                    for m in prov_data.get("models", [])
+                    if m.get("enabled")
+                ]
                 providers[prov_id] = ProviderConfig(
                     api_key=self._api_keys.get(prov_id, ""),
                     enabled=prov_data.get("enabled", False),
@@ -146,21 +166,7 @@ class ConfigManager:
             return []
         result: list[tuple[str, ModelConfig]] = []
         for prov_id, model_data in self._catalog.get_all_active_models_sorted():
-            rl = None
-            rpd = model_data.get("default_rpd", 0)
-            rpm = model_data.get("default_rpm", 0)
-            tpm = model_data.get("default_tpm", 0)
-            tpd = model_data.get("default_tpd", 0)
-            if rpd or rpm or tpm or tpd:
-                rl = RateLimit(rpd=rpd, rpm=rpm, tpm=tpm, tpd=tpd)
-            mc = ModelConfig(
-                name=model_data["id"],
-                enabled=True,
-                priority=model_data.get("priority", 99),
-                rate_limit=rl,
-                tool_calling=model_data.get("tool_calling", False),
-            )
-            result.append((prov_id, mc))
+            result.append((prov_id, self._build_model_config(model_data)))
         self._enabled_models_cache = result
         self._enabled_models_cache_ts = now
         return result
@@ -175,23 +181,11 @@ class ConfigManager:
             return []
         result = []
         for prov_id, prov_data in self._catalog.get_providers_sorted():
-            models = []
-            for m in prov_data.get("models", []):
-                if m.get("enabled"):
-                    rl = None
-                    rpd = m.get("default_rpd", 0)
-                    rpm = m.get("default_rpm", 0)
-                    tpm = m.get("default_tpm", 0)
-                    tpd = m.get("default_tpd", 0)
-                    if rpd or rpm or tpm or tpd:
-                        rl = RateLimit(rpd=rpd, rpm=rpm, tpm=tpm, tpd=tpd)
-                    models.append(ModelConfig(
-                        name=m["id"],
-                        enabled=True,
-                        priority=m.get("priority", 99),
-                        rate_limit=rl,
-                        tool_calling=m.get("tool_calling", False),
-                    ))
+            models = [
+                self._build_model_config(m)
+                for m in prov_data.get("models", [])
+                if m.get("enabled")
+            ]
             pc = ProviderConfig(
                 api_key=self._api_keys.get(prov_id, ""),
                 enabled=prov_data.get("enabled", False),

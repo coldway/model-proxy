@@ -40,6 +40,7 @@ class ProviderCallMixin:
         trace_id: str = "",
         *,
         rate_limits: tuple[int, int, int, int] | None = None,
+        payload_bytes: int = 0,
     ) -> ChatCompletionResponse:
         if not trace_id:
             trace_id = self.generate_trace_id()
@@ -54,7 +55,8 @@ class ProviderCallMixin:
         tag = "路由" if is_routing else "推理"
         sid_tag = f" session={request.session_id}" if request.session_id else ""
         msg_summary = self._summarize_messages(request.messages)
-        payload_bytes = estimate_payload_bytes(request)
+        if not payload_bytes:
+            payload_bytes = estimate_payload_bytes(request)
         tools_tag = ""
         if request.tools:
             tnames = [t.function.name for t in request.tools[:5]]
@@ -77,6 +79,8 @@ class ProviderCallMixin:
             ),
         )
 
+        _SLOW_REQUEST_THRESHOLD_MS = 10_000
+
         start_ns = time.monotonic_ns()
         try:
             async with self._request_semaphore:
@@ -85,6 +89,11 @@ class ProviderCallMixin:
                     timeout=timeout,
                 )
             elapsed_ms = (time.monotonic_ns() - start_ns) / 1_000_000
+            if not is_routing and elapsed_ms > _SLOW_REQUEST_THRESHOLD_MS:
+                logger.warning(
+                    "[慢请求] trace=%s %s:%s 耗时 %.0fms 超过阈值 %dms",
+                    trace_id, provider_name, model_name, elapsed_ms, _SLOW_REQUEST_THRESHOLD_MS,
+                )
             total_tokens = result.usage.total_tokens if result.usage else 0
             if not is_routing:
                 rpd, rpm, tpm, tpd = rate_limits if rate_limits is not None else (0, 0, 0, 0)

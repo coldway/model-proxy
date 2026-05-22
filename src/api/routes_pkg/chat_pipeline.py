@@ -20,6 +20,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
+from src import LogTag
 from src.api.routes_pkg.deps import _deps, record_failure
 from src.api.thinking import strip_thinking as _strip_thinking
 from src.models.schemas import ChatCompletionRequest, ChatMessage
@@ -126,7 +127,8 @@ class ChatPipeline:
 
         for round_idx in range(self.max_tool_rounds + 1):
             context_messages = self.session.get_context_messages()
-            if compact_mgr.monitor.estimate_utilization(context_messages) >= 0.55:
+            utilization = compact_mgr.monitor.estimate_utilization(context_messages)
+            if utilization >= 0.55:
                 context_messages = await compact_mgr.maybe_compact(context_messages)
 
             ctx_request = self.build_context_request(
@@ -144,7 +146,7 @@ class ChatPipeline:
                 self.session.add_message("assistant", msg.content or "", tool_calls=tc_data)
 
                 for tc in msg.tool_calls:
-                    logger.info("[会话] trace=%s 调用工具: %s(%s)", self.trace_id, tc.function.name, tc.function.arguments[:100])
+                    logger.info(f"{LogTag.SESSION} trace=%s 调用工具: %s(%s)", self.trace_id, tc.function.name, tc.function.arguments[:100])
                     tool_result = await execute_tool(tc.function.name, tc.function.arguments)
                     tool_calls_log.append({"tool": tc.function.name, "result_len": len(tool_result)})
                     self.session.add_message("tool", tool_result, tool_call_id=tc.id, name=tc.function.name)
@@ -189,7 +191,7 @@ class ChatPipeline:
         rolled = self.session.rollback()
         record_failure(self._start_time or time.time(), str(e))
         await asyncio.to_thread(_deps.session_mgr.save)
-        logger.warning("[会话] trace=%s session=%s 失败（回滚 %d 条）: %s", self.trace_id, self.session.id, rolled, e)
+        logger.warning(f"{LogTag.SESSION} trace=%s session=%s 失败（回滚 %d 条）: %s", self.trace_id, self.session.id, rolled, e)
 
         if isinstance(e, RateLimitExceeded):
             return 429, "请求过于频繁，请稍后重试"

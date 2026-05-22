@@ -287,7 +287,9 @@ class Dispatcher(
                 available = tc_available
                 logger.debug("auto 路由: 请求含 tools，限定为 %d 个 TC 模型", len(available))
             else:
-                logger.warning("auto 路由: 请求含 tools 但无模型支持 TC，使用全部候选兜底")
+                raise AllModelsUnavailable(
+                    "请求含 tools 但无支持 tool_calling 的模型可用（配额耗尽或全部熔断）"
+                )
 
         ordered = self._sort_by_capability(available, request)
         user_hint = self._get_user_hint(request)

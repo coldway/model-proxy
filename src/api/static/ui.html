@@ -1300,6 +1300,15 @@
             await loadProviderModels(providerId);
         }
 
+        function formatCapErrorLabel(error) {
+            const err = (error || '').toLowerCase();
+            if (err.includes('429') || err.includes('rate_limit')) return '限流';
+            if (err.includes('out of usage') || err.includes('usage limit')) return '额度用尽';
+            if (err.includes('503') || err.includes('unavailable')) return '不可用';
+            if (err.includes('authentication') || err.includes('login')) return '未认证';
+            return '异常';
+        }
+
         function buildCapBadges(cap) {
             if (!cap) return '';
             const items = [
@@ -1315,7 +1324,7 @@
             const badges = items.filter(([v]) => v).map(([, text, bg, fg]) =>
                 `<span style="font-size:0.6rem;padding:1px 5px;border-radius:6px;background:${bg};color:${fg}">${text}</span>`
             ).join('');
-            const errTag = cap.error ? `<span style="font-size:0.6rem;color:var(--accent-red)" title="${escapeHtml(cap.error)}">⚠ ${cap.error.includes('429') ? '限流' : '异常'}</span>` : '';
+            const errTag = cap.error ? `<span style="font-size:0.6rem;color:var(--accent-red)" title="${escapeHtml(cap.error)}">⚠ ${formatCapErrorLabel(cap.error)}</span>` : '';
             return `<div style="display:flex;gap:3px;flex-wrap:wrap;align-items:center;margin-top:4px">${latTag}${badges}${errTag}</div>`;
         }
 
@@ -1432,7 +1441,11 @@
                     if (r.reasoning) caps.push('推理');
                     const capStr = caps.length > 0 ? caps.join('、') : '无特殊能力';
                     const latStr = r.latency_ms ? `${r.latency_ms}ms` : '-';
-                    toast(`${modelId} 测试完成: ${capStr} | 延迟 ${latStr}`, 'success');
+                    if (r.error) {
+                        toast(`${modelId} 测试失败: ${formatCapErrorLabel(r.error)} — ${r.error.slice(0, 80)}`, 'error');
+                    } else {
+                        toast(`${modelId} 测试完成: ${capStr} | 延迟 ${latStr}`, 'success');
+                    }
                 } else {
                     toast(`${modelId} 测试完成（无结果）`, 'info');
                 }

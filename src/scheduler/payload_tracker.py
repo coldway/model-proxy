@@ -94,20 +94,58 @@ class PayloadTracker:
         if load_path is None:
             return
         try:
-            text = load_path.read_text(encoding="utf-8")
-            if load_path.suffix == ".json":
-                raw = json.loads(text)
-            else:
-                raw = yaml.safe_load(text)
-            if isinstance(raw, dict):
-                self._limits = raw
-                logger.info("已加载 %d 个模型的 payload 上限记录 (from %s)", len(self._limits), load_path.name)
-                if load_path != self._path:
+            text = load_path.read_text(encoding="utf-8").strip()
+            if not text:
+                logger.info("payload 上限文件为空，使用默认空记录: %s", load_path.name)
+                self._limits = {}
+                if load_path == self._path:
                     self._dirty = True
                     self._persist()
-                    logger.info("已迁移 payload 上限数据从 YAML → JSON")
+                return
+
+            raw: Any = None
+            used_yaml_fallback = False
+            if load_path.suffix == ".json":
+                try:
+                    raw = json.loads(text)
+                except json.JSONDecodeError:
+                    raw = yaml.safe_load(text)
+                    used_yaml_fallback = raw is not None
+            else:
+                raw = yaml.safe_load(text)
+
+            if isinstance(raw, dict):
+                self._limits = raw
+                logger.info(
+                    "已加载 %d 个模型的 payload 上限记录 (from %s)",
+                    len(self._limits), load_path.name,
+                )
+                if load_path != self._path or used_yaml_fallback:
+                    self._dirty = True
+                    self._persist()
+                    if load_path != self._path:
+                        logger.info("已迁移 payload 上限数据从 YAML → JSON")
+                    elif used_yaml_fallback:
+                        logger.info("已修复 payload_limits.json 格式（YAML → JSON）")
+                return
+
+            logger.warning(
+                "payload 上限文件格式无效（期望 dict）: %s，将重置为空记录",
+                load_path.name,
+            )
+            self._limits = {}
+            if load_path == self._path:
+                self._dirty = True
+                self._persist()
         except Exception as e:
-            logger.warning("加载 payload 上限文件失败: %s", e)
+            logger.warning("加载 payload 上限文件失败: %s，将重置为空记录", e)
+            self._limits = {}
+            if load_path == self._path:
+                try:
+                    self._dirty = True
+                    self._persist()
+                except Exception:
+                    pass
 
     def _save(self) -> None:
         """标记为脏，由内部定时器自动持久化"""

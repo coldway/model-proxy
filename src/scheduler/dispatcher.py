@@ -120,6 +120,10 @@ class Dispatcher(
     def last_route_strategy(self) -> str:
         return _route_strategy_var.get("")
 
+    @property
+    def payload_tracker(self) -> PayloadTracker:
+        return self._payload_tracker
+
     # --- 熔断相关 ---
 
     def _record_provider_failure(self, provider_name: str, model_name: str | None = None) -> None:

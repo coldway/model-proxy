@@ -340,7 +340,8 @@ async def fetch_provider_models(provider_name: str, force: bool = False):
 
     result = {"provider": provider_name, "available_models": models}
 
-    if _deps.capability_tester:
+    skip_bulk_test = getattr(provider, "skip_bulk_capability_test", False)
+    if _deps.capability_tester and not skip_bulk_test:
         to_test = []
         skipped = []
         for mid in models:

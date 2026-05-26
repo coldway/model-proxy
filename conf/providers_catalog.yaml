@@ -643,7 +643,7 @@ providers:
       default_rpd: 0
       default_rpm: 0
       category: 代码
-      enabled: true
+      enabled: false
       priority: 2
       tool_calling: true
       timeout: 300

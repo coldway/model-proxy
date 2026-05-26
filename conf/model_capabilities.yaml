@@ -824,17 +824,53 @@ groq/whisper-large-v3-turbo:
   tested_at: '2026-05-13 17:32:52'
   tool_calling: false
   vision: false
-cursor/cursor-agent:
+cursor/auto:
   provider: cursor
-  model: cursor-agent
-  available: false
-  tool_calling: false
-  multi_turn_tc: false
-  chinese: false
-  vision: false
-  json_mode: false
+  model: auto
+  available: true
+  tool_calling: true
+  tc_method: native
+  multi_turn_tc: true
+  chinese: true
+  vision: true
+  json_mode: true
   streaming: false
-  reasoning: false
-  latency_ms: 0
-  error: ''
-  tested_at: '2026-05-21 00:38:52'
+  reasoning: true
+  latency_ms: 33338
+  error: null
+  probe_response: 'get_current_time({"city": "北京"})'
+  mt_response: 北京现在是 2026-05-13 16:00:00 CST
+  chinese_response: 三个及以上音同时发声的组合。
+  vision_response: Unknown
+  json_sample: '{"instruments":[{"name":"钢琴","type":"键盘乐器"},{"name":"小提琴","type":"弦乐器"},{"name":'
+  stream_chunks: 0
+  stream_ttfb_ms: 0
+  reasoning_response: 先开一会儿关掉，再开另一盏，进屋看亮灭和余温。
+  tested_at: '2026-05-26 16:43:38'
+cursor/composer-2.5:
+  provider: cursor
+  model: composer-2.5
+  available: true
+  tool_calling: true
+  tc_method: native
+  multi_turn_tc: true
+  chinese: true
+  vision: true
+  json_mode: true
+  streaming: false
+  reasoning: true
+  latency_ms: 39147
+  error: null
+  probe_response: 'get_current_time({"city": "北京"})'
+  mt_response: 北京现在是 2026年5月13日 16:00:00（CST，中国标准时间）。
+  chinese_response: 三个及以上不同音高同时发声的组合。
+  vision_response: '我这边看不到你提到的图片——当前消息里没有附带图像，工作区里也没有找到相关图片文件。
+
+
+    请重新发送那张图片，我才能用一个'
+  json_sample: '{"instruments": [{"name": "钢琴", "type": "键盘"}, {"name": "小提琴", "type":
+    "弦乐"}, {"'
+  stream_chunks: 0
+  stream_ttfb_ms: 0
+  reasoning_response: 先开一盏数分钟关掉，再开另一盏进房：亮、热、冷对应三开关。
+  tested_at: '2026-05-26 16:45:28'

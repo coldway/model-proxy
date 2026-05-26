@@ -636,6 +636,7 @@ providers:
       enabled: true
       priority: 1
       tool_calling: true
+      timeout: 300
     - id: composer-2.5
       name: Composer 2.5
       description: Composer 2.5（全量测试确认可用，响应约 30s）
@@ -645,6 +646,7 @@ providers:
       enabled: true
       priority: 2
       tool_calling: true
+      timeout: 300
   ollama:
     name: Ollama 本地模型
     enabled: false

@@ -45,6 +45,10 @@ class ProviderCallMixin:
         if not trace_id:
             trace_id = self.generate_trace_id()
 
+        # Cursor CLI 为子进程调用，探针 latency ~30s，长文档/大 max_tokens 常超过默认 60s
+        if provider_name == "cursor":
+            timeout = max(timeout, 180)
+
         if self.is_provider_broken(provider_name, model_name):
             raise ProviderCallError(f"厂商 {provider_name} 模型 {model_name} 处于熔断状态，{self._breaker.cooldown}秒后自动恢复")
 

@@ -298,6 +298,7 @@ class Dispatcher(
         ordered = self._sort_by_capability(available, request)
         user_hint = self._get_user_hint(request)
         candidate_names = [m.name for _, m in ordered]
+        errors: list[str] = []
 
         if self._can_skip_routing(ordered, request):
             prov_name, model_cfg = ordered[0]
@@ -320,6 +321,7 @@ class Dispatcher(
                 return prov_name, model_cfg.name, result
             except (RateLimitExceeded, ProviderCallError, PayloadTooLarge) as e:
                 logger.warning("快速路径 %s 失败: %s，继续尝试", model_cfg.name, e)
+                errors.append(f"{prov_name}:{model_cfg.name} 调用失败: {e}")
                 ordered = ordered[1:]
 
         if len(ordered) > 1:
@@ -352,7 +354,6 @@ class Dispatcher(
                             ordered = [x for j, x in enumerate(ordered) if j != i]
                             break
 
-        errors: list[str] = []
         for provider_name, model_cfg in ordered:
             try:
                 rlim = self._unpack_rate_limit(model_cfg)
@@ -379,7 +380,8 @@ class Dispatcher(
             except ProviderCallError as e:
                 errors.append(f"{provider_name}:{model_cfg.name} 调用失败: {e}")
 
-        raise AllModelsUnavailable(f"所有模型均不可用: {'; '.join(errors)}")
+        detail = "; ".join(errors) if errors else "无可用候选模型（可能仅剩一个模型且快速路径已失败）"
+        raise AllModelsUnavailable(f"所有模型均不可用: {detail}")
 
 
 __all__ = [

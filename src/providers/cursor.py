@@ -243,7 +243,7 @@ class CursorProvider(BaseProvider):
     ) -> ChatCompletionResponse:
         expect_tools = bool(request.tools)
         prompt = self._build_prompt(request)
-        timeout = 180 if expect_tools else 120
+        timeout = 300 if expect_tools else 240
 
         try:
             output = await self._run_cli(

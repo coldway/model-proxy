@@ -110,6 +110,9 @@ class ChatPipeline:
             max_tokens=self.request.max_tokens,
             stream=stream,
             tools=tools if include_tools else None,
+            mode=self.request.mode,
+            force=self.request.force,
+            sandbox=self.request.sandbox,
         )
 
     async def run_tool_loop(self, tools) -> PipelineResult:

@@ -124,7 +124,21 @@ class CursorProvider(BaseProvider):
         *,
         stream: bool = False,
         json_output: bool = False,
+        mode: str | None = None,
+        force: bool = False,
+        sandbox: str | None = None,
     ) -> list[str]:
+        """构建 Cursor CLI 命令参数
+        
+        Args:
+            model: 模型名称
+            prompt: 用户输入
+            stream: 是否流式输出
+            json_output: 是否要求 JSON 输出
+            mode: 执行模式 (plan/ask/agent)
+            force: 是否强制执行命令(--force/--yolo)
+            sandbox: 沙箱模式 (enabled/disabled)
+        """
         cmd_args = [
             "cursor", "agent",
             "--print", "--trust",
@@ -136,6 +150,25 @@ class CursorProvider(BaseProvider):
             cmd_args.extend(["--output-format", "json"])
         if self._api_key:
             cmd_args.extend(["--api-key", self._api_key])
+        
+        # 添加 mode 参数支持（plan / ask）
+        if mode == "plan":
+            cmd_args.append("--plan")
+        elif mode == "ask":
+            cmd_args.extend(["--mode", "ask"])
+        elif mode and mode not in ("agent", ""):
+            logger.warning("未知的 mode '%s'，忽略（支持: plan, ask, agent）", mode)
+        
+        # 添加 force 参数支持
+        if force:
+            cmd_args.append("--force")
+        
+        # 添加 sandbox 参数支持
+        if sandbox in ("enabled", "disabled"):
+            cmd_args.extend(["--sandbox", sandbox])
+        elif sandbox:
+            logger.warning("未知的 sandbox 值 '%s'，忽略（支持: enabled, disabled）", sandbox)
+        
         cmd_args.append(prompt)
         return cmd_args
 
@@ -222,8 +255,18 @@ class CursorProvider(BaseProvider):
         stream: bool = False,
         json_output: bool = False,
         timeout: float = 120,
+        mode: str | None = None,
+        force: bool = False,
+        sandbox: str | None = None,
     ) -> str:
-        cmd_args = self._build_cmd_args(model, prompt, stream=stream, json_output=json_output)
+        cmd_args = self._build_cmd_args(
+            model, prompt,
+            stream=stream,
+            json_output=json_output,
+            mode=mode,
+            force=force,
+            sandbox=sandbox,
+        )
         proc = await asyncio.create_subprocess_exec(
             *cmd_args,
             stdout=asyncio.subprocess.PIPE,
@@ -244,6 +287,13 @@ class CursorProvider(BaseProvider):
         expect_tools = bool(request.tools)
         prompt = self._build_prompt(request)
         timeout = 300 if expect_tools else 240
+        mode = getattr(request, "mode", None)
+        force = getattr(request, "force", False)
+        sandbox = getattr(request, "sandbox", None)
+        
+        # plan/ask 模式下忽略 force 参数
+        if mode in ("plan", "ask"):
+            force = False
 
         try:
             output = await self._run_cli(
@@ -251,6 +301,9 @@ class CursorProvider(BaseProvider):
                 prompt,
                 json_output=expect_tools,
                 timeout=timeout,
+                mode=mode,
+                force=force,
+                sandbox=sandbox,
             )
         except FileNotFoundError:
             raise RuntimeError("未找到 cursor 命令，请确认 Cursor CLI 已安装并在 PATH 中")
@@ -295,7 +348,15 @@ class CursorProvider(BaseProvider):
             return
 
         prompt = self._build_prompt(request)
-        cmd_args = self._build_cmd_args(model, prompt, stream=True)
+        mode = getattr(request, "mode", None)
+        force = getattr(request, "force", False)
+        sandbox = getattr(request, "sandbox", None)
+        
+        # plan/ask 模式下忽略 force 参数
+        if mode in ("plan", "ask"):
+            force = False
+        
+        cmd_args = self._build_cmd_args(model, prompt, stream=True, mode=mode, force=force, sandbox=sandbox)
 
         try:
             proc = await asyncio.create_subprocess_exec(

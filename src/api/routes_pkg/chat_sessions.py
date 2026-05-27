@@ -357,6 +357,9 @@ async def _do_stream_chat(session, request, trace_id: str, memory_mgr, user_msg:
             messages=[ChatMessage(role=m["role"], content=m["content"], tool_calls=m.get("tool_calls"), tool_call_id=m.get("tool_call_id"), name=m.get("name")) for m in context_messages],
             temperature=request.temperature, max_tokens=request.max_tokens, stream=stream,
             tools=tools if include_tools else None,
+            mode=request.mode,
+            force=request.force,
+            sandbox=request.sandbox,
         )
 
     try:

@@ -152,7 +152,19 @@ class ChatCompletionRequest(BaseModel):
     )
     session_id: str | None = Field(
         default=None,
-        description="会话标识：首次请求成功后自动绑定模型，后续携带相同 session_id 的请求将路由到同一模型",
+        description="会话标识：首次请求成功后自动绑定模型,后续携带相同 session_id 的请求将路由到同一模型",
+    )
+    mode: str | None = Field(
+        default=None,
+        description="执行模式（仅 Cursor provider）：plan（规划模式，只读）、ask（问答模式，只读）、agent（默认，全权限）",
+    )
+    force: bool = Field(
+        default=False,
+        description="强制执行命令（仅 Cursor provider，plan/ask 模式下无效）：允许修改文件无需确认",
+    )
+    sandbox: str | None = Field(
+        default=None,
+        description="沙箱模式（仅 Cursor provider）：enabled（启用沙箱）、disabled（禁用沙箱）",
     )
 
 

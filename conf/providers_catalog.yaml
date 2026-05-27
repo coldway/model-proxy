@@ -625,7 +625,27 @@ providers:
     priority: 1
     url: https://www.cursor.com/
     description: 通过 Cursor CLI 调用模型。全量测试（111 个）后仅 auto / composer-2.5 确认可用
-    api_key_guide: 安装 Cursor 并登录即可使用
+    api_key_guide: |
+      安装 Cursor CLI 并登录即可使用（无需 API Key）
+
+      安装: curl https://cursor.com/install -fsS | bash
+      验证: agent --version
+      登录: agent login
+
+      推荐模型: auto / composer-2.5
+
+      通过 model-proxy 扩展字段控制 Cursor CLI 执行模式:
+      - mode=plan  只读规划（CLI --plan）
+      - mode=ask   只读问答（CLI --mode ask）
+      - mode=agent 默认，可改代码/执行命令
+
+      可选参数:
+      - force=true    强制执行（plan/ask 下无效）
+      - sandbox=enabled|disabled
+
+      请求示例:
+      POST /v1/chat/completions
+      {"model":"auto","messages":[{"role":"user","content":"分析架构"}],"mode":"plan"}
     models:
     - id: auto
       name: Auto

@@ -26,7 +26,7 @@
 | **Mistral AI** | 官方平台免费层 | Codestral 代码模型免费 |
 | **Cloudflare** | Workers AI 每日万次 neurons | ~10,000 neurons/天 |
 | **HuggingFace** | 数千个开源模型免费推理 | 有速率限制但免费 |
-| **Cursor CLI** | 通过 Cursor IDE 登录调用 | 取决于 Cursor 订阅 |
+| **Cursor CLI** | 通过 Cursor IDE 登录调用，支持 plan/ask/agent 三种模式 | 取决于 Cursor 订阅 |
 | **NVIDIA NIM** | 123+ 模型免费推理（Llama/Qwen/DeepSeek） | 有速率限制但免费 |
 | **Cohere** | Command 系列模型 | 20 RPM / 1000 请求/月 |
 | **阿里百炼 (DashScope)** | 通义千问全系列（Qwen3/VL/Long） | 按量计费，新用户有免费额度 |
@@ -180,6 +180,35 @@ providers:
 ## API 使用
 
 所有接口兼容 OpenAI SDK 格式。
+
+### Cursor Agent CLI 特性
+
+Cursor provider 支持三种执行模式和扩展参数：
+
+```python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://127.0.0.1:8000/v1", api_key="unused")
+
+# Plan 模式：只分析不修改代码
+response = client.chat.completions.create(
+    model="cursor-agent",
+    messages=[{"role": "user", "content": "分析这个项目的架构"}],
+    extra_body={
+        "mode": "plan",       # plan/ask/agent (默认 agent)
+        "force": False,       # --force 参数
+        "sandbox": "enabled"  # enabled/disabled
+    }
+)
+```
+
+| 参数 | 说明 | 值 |
+|------|------|---|
+| `mode` | 执行模式 | `plan`(只读规划)、`ask`(只读问答)、`agent`(默认,全权限) |
+| `force` | 强制执行命令 | `true`/`false`(plan/ask 模式下无效) |
+| `sandbox` | 沙箱模式 | `"enabled"`/`"disabled"` |
+
+详见[Cursor Plan 模式使用指南](docs/cursor-plan-mode.md)。
 
 ### 推理请求
 

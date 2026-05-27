@@ -17,6 +17,40 @@
 | temperature | float | 否 | 0.7 | 温度参数 |
 | max_tokens | int | 否 | null | 最大输出 token 数 |
 | stream | bool | 否 | false | 是否启用流式输出 |
+| mode | string | 否 | null | **Cursor 专用**: 执行模式 (`plan`/`ask`/`agent`) |
+| force | bool | 否 | false | **Cursor 专用**: 强制执行命令(plan/ask模式下无效) |
+| sandbox | string | 否 | null | **Cursor 专用**: 沙箱模式 (`enabled`/`disabled`) |
+
+#### Cursor Agent CLI 特性
+
+当使用 Cursor provider 时，支持以下扩展参数：
+
+| 参数 | 说明 | 可选值 | CLI参数 |
+|------|------|--------|---------|
+| `mode` | 执行模式 | `plan`(只读规划)、`ask`(只读问答)、`agent`(默认,全权限) | `--plan` / `--mode ask` |
+| `force` | 强制执行命令 | `true`/`false`，在plan/ask模式下自动忽略 | `--force` |
+| `sandbox` | 沙箱模式 | `"enabled"`/`"disabled"` | `--sandbox enabled` |
+
+**Cursor 模式说明：**
+
+- **plan 模式**: 只读分析，适合架构设计、方案规划
+- **ask 模式**: 只读问答，适合代码解释、快速问答
+- **agent 模式**: 默认模式，具有文件修改和命令执行权限
+
+详见 [Cursor Plan 模式使用指南](cursor-plan-mode.md)。
+
+**Cursor 请求示例**
+
+```json
+{
+  "model": "auto",
+  "messages": [
+    {"role": "user", "content": "分析这个项目的架构"}
+  ],
+  "mode": "plan",
+  "sandbox": "enabled"
+}
+```
 
 **请求示例**
 

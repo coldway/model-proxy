@@ -67,9 +67,86 @@ class BaseProvider(ABC):
 | 项目 | 值 |
 |------|---|
 | API 格式 | 本地 CLI 子进程 |
-| 依赖 | `cursor` 命令在 PATH 中 |
+| 依赖 | `cursor` 或 `agent` 命令在 PATH 中 |
 | 认证方式 | 无需 API Key，依赖 Cursor IDE 登录状态 |
-| 特点 | 通过 subprocess 调用 `cursor` 命令行工具 |
+| 特点 | 通过 subprocess 调用 `cursor agent --print` 命令行工具 |
+
+#### 特殊能力：三种执行模式
+
+Cursor provider 是唯一支持**执行模式**的 provider，通过 `mode` 参数控制：
+
+| 模式 | CLI 参数 | 权限 | 使用场景 |
+|------|----------|------|----------|
+| **agent** | (默认) | 读写文件、执行命令 | 完整编码、重构、执行任务 |
+| **plan** | `--plan` | 只读 | 架构分析、方案设计、规划 |
+| **ask** | `--mode ask` | 只读 | 代码问答、解释说明 |
+
+#### 扩展参数
+
+| 参数 | 说明 | CLI 参数 | 限制 |
+|------|------|----------|------|
+| `force` | 强制执行命令 | `--force` | plan/ask 模式下自动忽略 |
+| `sandbox` | 沙箱模式 | `--sandbox enabled\|disabled` | 控制命令执行环境 |
+
+#### 使用示例
+
+```python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://127.0.0.1:8000/v1", api_key="unused")
+
+# 1. Plan 模式 - 只读分析
+plan = client.chat.completions.create(
+    model="auto",
+    messages=[{"role": "user", "content": "分析 auth 模块架构"}],
+    extra_body={"mode": "plan"}
+)
+
+# 2. Ask 模式 - 快速问答
+ask = client.chat.completions.create(
+    model="auto",
+    messages=[{"role": "user", "content": "这个函数做什么?"}],
+    extra_body={"mode": "ask"}
+)
+
+# 3. Agent 模式 - 完整执行
+agent = client.chat.completions.create(
+    model="auto",
+    messages=[{"role": "user", "content": "重构 auth 为 JWT"}],
+    extra_body={"mode": "agent", "force": True, "sandbox": "enabled"}
+)
+```
+
+#### 典型工作流
+
+```python
+# 步骤1: 用 plan 模式先分析
+plan_response = client.chat.completions.create(
+    model="auto",
+    messages=[{"role": "user", "content": "分析重构方案"}],
+    extra_body={"mode": "plan"}
+)
+
+# 步骤2: 确认后用 agent 模式执行
+agent_response = client.chat.completions.create(
+    model="auto",
+    messages=[
+        {"role": "user", "content": "分析重构方案"},
+        {"role": "assistant", "content": plan_response.choices[0].message.content},
+        {"role": "user", "content": "执行上述方案"}
+    ]
+    # mode 默认为 "agent"
+)
+```
+
+#### 实现细节
+
+- **Tool Calling**: 通过 prompt 注入实现（无原生 OpenAI tools 协议）
+- **流式输出**: plan/ask/agent 模式均支持 `stream=True`
+- **超时设置**: Tool calling 场景默认 300s，普通场景 240s
+- **命令构建**: `cursor agent --print --trust --model X [mode/force/sandbox参数] "prompt"`
+
+详见 [Cursor Plan 模式完整指南](cursor-plan-mode.md)。
 
 ### 5. OpenAI 兼容通用适配器 (`openai_compat.py`)
 

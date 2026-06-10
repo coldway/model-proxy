@@ -321,6 +321,7 @@ async def _stream_anthropic_response(
                 }
             }
             events += f"event: content_block_start\ndata: {_json.dumps(cb_start)}\n\n"
+            content_block_index += 1
 
         # arguments 增量
         args_delta = fn.get("arguments", "")
@@ -581,21 +582,23 @@ async def create_message(request: AnthropicMessagesRequest, req: Request):
     try:
         if request.stream or force_stream:
             if request.stream and not force_stream:
-                # 正常流式响应：直接 SSE 返回
                 message_id = f"msg_{uuid.uuid4().hex[:24]}"
                 created = int(time.time())
-                
+
+                # dispatch_stream 必须在 StreamingResponse 返回之前完成，
+                # 否则超时/失败发生时 HTTP 200 已发送，客户端收到空流
+                provider_name, model_name, stream = await _deps.dispatcher.dispatch_stream(
+                    request=openai_request,
+                    enabled_models=enabled_models,
+                    trace_id=trace_id,
+                )
+
                 async def generate_sse():
-                    provider_name, model_name, stream = await _deps.dispatcher.dispatch_stream(
-                        request=openai_request,
-                        enabled_models=enabled_models,
-                        trace_id=trace_id
-                    )
                     async for chunk in _stream_anthropic_response(
                         stream, request.model, message_id, created, trace_id=trace_id
                     ):
                         yield chunk
-                
+
                 return StreamingResponse(
                     generate_sse(),
                     media_type="text/event-stream",

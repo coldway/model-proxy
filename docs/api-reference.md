@@ -109,6 +109,126 @@ data: [DONE]
 
 > 指定具体模型时，若厂商返回 429 限流，将返回明确的 429 错误并建议切换到 auto 模式。auto 模式下 429 会被静默跳过并自动尝试下一个候选模型。
 
+### POST /v1/images/generations
+
+图像生成接口，透传到支持图像生成的厂商（如 Agnes AI）。
+
+**请求体**
+
+| 字段 | 类型 | 必填 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| model | string | 是 | - | 图像模型 ID，如 `agnes-image-2.1-flash` |
+| prompt | string | 是 | - | 图像描述 |
+| n | int | 否 | 1 | 生成数量（1-10） |
+| size | string | 否 | "1024x1024" | 图像尺寸，如 `1024x1024`、`1024x768` |
+| seed | int | 否 | null | 随机种子（用于复现） |
+| response_format | string | 否 | "url" | 返回格式：`url` 或 `b64_json` |
+
+**请求示例**
+
+```json
+{
+  "model": "agnes-image-2.1-flash",
+  "prompt": "a cute cat, digital art",
+  "size": "1024x1024",
+  "n": 1
+}
+```
+
+**响应体**
+
+```json
+{
+  "created": 1718000000,
+  "data": [{"url": "https://..."}],
+  "proxy_info": {"provider": "agnes", "trace_id": "abc123", "latency_ms": 3200}
+}
+```
+
+**错误码**
+
+| 状态码 | 含义 |
+|--------|------|
+| 404 | 模型未找到或厂商未注册 |
+| 501 | 厂商不支持图像生成 |
+| 502 | 上游图像生成失败 |
+
+### POST /v1/videos
+
+创建视频生成任务（异步），返回 task_id 供客户端轮询。
+
+**请求体**
+
+| 字段 | 类型 | 必填 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| model | string | 是 | - | 视频模型 ID，如 `agnes-video-v2.0` |
+| prompt | string | 是 | - | 视频描述 |
+| width | int | 否 | 1152 | 视频宽度（像素） |
+| height | int | 否 | 768 | 视频高度（像素） |
+| num_frames | int | 否 | 121 | 总帧数（需满足 8n+1 且 <= 441） |
+| frame_rate | int | 否 | 24 | 帧率 |
+| image_url | string | 否 | null | 参考图片 URL（图生视频模式） |
+
+**请求示例**
+
+```json
+{
+  "model": "agnes-video-v2.0",
+  "prompt": "A cat walking on the beach at sunset",
+  "width": 1152,
+  "height": 768,
+  "num_frames": 121,
+  "frame_rate": 24
+}
+```
+
+**响应体**
+
+```json
+{
+  "id": "task_abc123",
+  "status": "queued",
+  "provider_id": "agnes",
+  "proxy_info": {"provider": "agnes", "trace_id": "def456", "latency_ms": 500}
+}
+```
+
+### GET /v1/videos/{task_id}
+
+查询视频生成任务状态。
+
+**查询参数**
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| provider_id | string | 是 | 厂商 ID，从创建响应的 `provider_id` 字段获取 |
+
+**请求示例**
+
+```
+GET /v1/videos/task_abc123?provider_id=agnes
+```
+
+**响应体**（任务完成时）
+
+```json
+{
+  "id": "task_abc123",
+  "status": "completed",
+  "video_url": "https://...",
+  "proxy_info": {"provider": "agnes", "trace_id": "ghi789", "latency_ms": 200}
+}
+```
+
+**status 值**
+
+| 状态 | 说明 |
+|------|------|
+| queued | 排队中 |
+| processing | 生成中 |
+| completed | 已完成，`video_url` 字段包含下载地址 |
+| failed | 失败，`error` 字段包含原因 |
+
 ### GET /v1/models
 
 列出所有已配置并启用的模型。

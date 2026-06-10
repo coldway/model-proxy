@@ -46,7 +46,7 @@ class CloudflareProvider(BaseProvider):
             self._account_id = ""
             self._token = api_key
         from src.providers.utils import create_http_client
-        self._client = create_http_client(timeout=60.0)
+        self._client = create_http_client()
 
     async def close(self) -> None:
         await self._client.aclose()

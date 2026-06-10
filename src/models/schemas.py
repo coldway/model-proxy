@@ -30,7 +30,7 @@ class ModelConfig(BaseModel):
     priority: int = 1
     rate_limit: RateLimit | None = None
     tool_calling: bool = False
-    timeout: int = Field(default=60, description="请求超时时间（秒），延迟高的模型可设置更长")
+    timeout: int = Field(default=0, description="请求超时时间（秒），0 表示使用 settings.default_model_timeout")
 
 
 class ProviderConfig(BaseModel):
@@ -69,6 +69,10 @@ class AppSettings(BaseModel):
     per_consumer_rpm: int = Field(
         default=0,
         description="单个 API consumer（按 Bearer token 区分）的每分钟请求数上限，0=不限制",
+    )
+    default_model_timeout: int = Field(
+        default=300,
+        description="模型请求默认超时（秒），模型级 timeout 未配置时使用此值；httpx 客户端超时取此值+60s",
     )
 
 
@@ -166,13 +170,13 @@ class ChatCompletionRequest(BaseModel):
         default=None,
         description="沙箱模式（仅 Cursor provider）：enabled（启用沙箱）、disabled（禁用沙箱）",
     )
-    
+
     # 工作区相关
     workspace_path: str | None = Field(
         default=None,
         description="工作区目录路径（仅 Cursor provider）：覆盖默认 cwd，支持多项目场景",
     )
-    
+
     # 会话管理相关
     cursor_session_id: str | None = Field(
         default=None,
@@ -182,7 +186,7 @@ class ChatCompletionRequest(BaseModel):
         default=False,
         description="继续上次会话（仅 Cursor provider）：使用 --continue 快速恢复最近会话",
     )
-    
+
     # Git Worktree 相关
     worktree_name: str | None = Field(
         default=None,
@@ -196,7 +200,7 @@ class ChatCompletionRequest(BaseModel):
         default=False,
         description="跳过 worktree 设置脚本（仅 Cursor provider）：跳过 .cursor/worktrees.json 中的设置脚本（--skip-worktree-setup）",
     )
-    
+
     # MCP 相关
     approve_mcps: bool = Field(
         default=False,

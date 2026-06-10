@@ -7,9 +7,7 @@ import json
 import logging
 import time
 import uuid
-from typing import AsyncIterator
-
-import httpx
+from collections.abc import AsyncIterator
 
 from src.models.schemas import (
     ChatCompletionRequest,
@@ -141,7 +139,7 @@ class OpenAICompatibleProvider(BaseProvider):
     async def create_video(self, model: str, **kwargs) -> dict:
         url = f"{self._base_url}/videos"
         payload = {"model": model, **kwargs}
-        resp = await self._client.post(url, headers=self._build_headers(), json=payload, timeout=60.0)
+        resp = await self._client.post(url, headers=self._build_headers(), json=payload, timeout=300.0)
         resp.raise_for_status()
         return resp.json()
 

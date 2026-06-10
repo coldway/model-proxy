@@ -9,21 +9,21 @@
 
 from fastapi import APIRouter
 
-from src.api.routes_pkg.deps import _deps, init_routes, record_failure, map_dispatch_error  # noqa: F401
 from src.api.routes_pkg import (
-    health,
-    chat_completions,
-    models,
-    config,
-    history,
-    chat_sessions,
-    logs,
-    testing,
-    cursor,
     anthropic_messages,
+    chat_completions,
+    chat_sessions,
+    config,
+    cursor,
+    health,
+    history,
     images,
+    logs,
+    models,
+    testing,
     videos,
 )
+from src.api.routes_pkg.deps import _deps, init_routes, map_dispatch_error, record_failure  # noqa: F401
 
 router = APIRouter()
 

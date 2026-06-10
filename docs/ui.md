@@ -104,7 +104,23 @@ AI 回复气泡下方会显示两类标签：
 - 当实际路由到 Cursor 模型时，`mode`/`force`/`sandbox` 参数会生效
 - 当路由到其他厂商模型时，这些参数会被忽略，不影响正常使用
 
-### 4. API Key 配置 (`#config`)
+### 4. 图像/视频 API
+
+model-proxy 现已支持图像和视频生成能力，通过独立端点调用（不经过 Dispatcher 调度链路）：
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/v1/images/generations` | POST | 图像生成（同步返回） |
+| `/v1/videos` | POST | 创建视频任务（异步） |
+| `/v1/videos/{task_id}` | GET | 查询视频任务状态 |
+
+当前支持 Agnes AI 的图像模型（`agnes-image-2.1-flash`）和视频模型（`agnes-video-v2.0`）。其他 OpenAI 兼容厂商如果也提供相应端点，可直接使用。
+
+图像/视频接口的响应中包含 `proxy_info` 字段，与聊天接口一致，便于追踪路由和延迟信息。
+
+> 图像/视频功能目前为 API-only，暂无 UI 面板支持。可通过 `curl` 或任何 HTTP 客户端调用，详见 [API 接口参考](api-reference.md)。
+
+### 5. API Key 配置 (`#config`)
 
 - 展示所有厂商的 API Key 配置状态
 - 密码输入框，点击保存后调用 API

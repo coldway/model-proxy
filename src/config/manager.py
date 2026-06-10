@@ -117,8 +117,7 @@ class ConfigManager:
 
     # --- 兼容旧接口：通过 catalog 提供统一视图 ---
 
-    @staticmethod
-    def _build_model_config(model_data: dict[str, Any]) -> ModelConfig:
+    def _build_model_config(self, model_data: dict[str, Any]) -> ModelConfig:
         """从 catalog 模型数据构建 ModelConfig 实例（统一工厂方法）"""
         rl = None
         rpd = model_data.get("default_rpd", 0)
@@ -127,13 +126,14 @@ class ConfigManager:
         tpd = model_data.get("default_tpd", 0)
         if rpd or rpm or tpm or tpd:
             rl = RateLimit(rpd=rpd, rpm=rpm, tpm=tpm, tpd=tpd)
+        default_timeout = self._settings.default_model_timeout
         return ModelConfig(
             name=model_data["id"],
             enabled=True,
             priority=model_data.get("priority", 99),
             rate_limit=rl,
             tool_calling=model_data.get("tool_calling", False),
-            timeout=model_data.get("timeout", 60),
+            timeout=model_data.get("timeout", 0) or default_timeout,
         )
 
     @property

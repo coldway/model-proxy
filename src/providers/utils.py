@@ -16,7 +16,7 @@ _DEFAULT_LIMITS = httpx.Limits(
 )
 
 
-def create_http_client(timeout: float = 120.0, **kwargs) -> httpx.AsyncClient:
+def create_http_client(timeout: float = 360.0, **kwargs) -> httpx.AsyncClient:
     """创建标准化的 httpx 客户端（统一连接池配置）"""
     return httpx.AsyncClient(
         timeout=timeout,

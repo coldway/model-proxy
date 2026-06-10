@@ -12,8 +12,8 @@ import uuid
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 
-from src.models.schemas import ImageGenerationRequest, ProxyInfo
 from src.api.routes_pkg.deps import _deps, resolve_provider_for_model
+from src.models.schemas import ImageGenerationRequest, ProxyInfo
 
 logger = logging.getLogger(__name__)
 
@@ -34,14 +34,14 @@ async def image_generations(request: ImageGenerationRequest):
         payload = request.model_dump(exclude_none=True)
         model = payload.pop("model")
         result = await provider.image_generation(model, **payload)
-    except NotImplementedError:
-        raise HTTPException(status_code=501, detail=f"厂商 {prov_id} 不支持图像生成")
+    except NotImplementedError as exc:
+        raise HTTPException(status_code=501, detail=f"厂商 {prov_id} 不支持图像生成") from exc
     except HTTPException:
         raise
     except Exception as e:
         latency = (time.time() - start_time) * 1000
         logger.error("[IMAGE] trace=%s 图像生成失败: %s (%.0fms)", trace_id, e, latency, exc_info=True)
-        raise HTTPException(status_code=502, detail=f"上游图像生成失败: {e}")
+        raise HTTPException(status_code=502, detail=f"上游图像生成失败: {e}") from e
 
     latency = (time.time() - start_time) * 1000
     info = ProxyInfo(provider=prov_id, trace_id=trace_id, latency_ms=round(latency, 1))

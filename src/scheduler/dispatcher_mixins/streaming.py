@@ -140,7 +140,7 @@ class StreamingMixin:
         provider = self._providers.get(prov_name)
         if not provider:
             raise ProviderCallError(f"厂商 {prov_name} 未注册")
-        stream_timeout = max(1, int(getattr(model_cfg, "timeout", 60) or 60))
+        stream_timeout = max(1, int(getattr(model_cfg, "timeout", 0) or 300))
         sid_tag = f" session={request.session_id}" if request.session_id else ""
         msg_summary = self._summarize_messages(request.messages)
         if not payload_bytes:

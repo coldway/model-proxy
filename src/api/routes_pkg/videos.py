@@ -12,8 +12,8 @@ import uuid
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import JSONResponse
 
-from src.models.schemas import VideoGenerationRequest, ProxyInfo
-from src.api.routes_pkg.deps import _deps, resolve_provider_for_model, resolve_provider_by_id
+from src.api.routes_pkg.deps import _deps, resolve_provider_by_id, resolve_provider_for_model
+from src.models.schemas import ProxyInfo, VideoGenerationRequest
 
 logger = logging.getLogger(__name__)
 
@@ -34,14 +34,14 @@ async def create_video(request: VideoGenerationRequest):
         payload = request.model_dump(exclude_none=True)
         model = payload.pop("model")
         result = await provider.create_video(model, **payload)
-    except NotImplementedError:
-        raise HTTPException(status_code=501, detail=f"厂商 {prov_id} 不支持视频生成")
+    except NotImplementedError as exc:
+        raise HTTPException(status_code=501, detail=f"厂商 {prov_id} 不支持视频生成") from exc
     except HTTPException:
         raise
     except Exception as e:
         latency = (time.time() - start_time) * 1000
         logger.error("[VIDEO] trace=%s 视频创建失败: %s (%.0fms)", trace_id, e, latency, exc_info=True)
-        raise HTTPException(status_code=502, detail=f"上游视频创建失败: {e}")
+        raise HTTPException(status_code=502, detail=f"上游视频创建失败: {e}") from e
 
     latency = (time.time() - start_time) * 1000
     info = ProxyInfo(provider=prov_id, trace_id=trace_id, latency_ms=round(latency, 1))
@@ -70,14 +70,14 @@ async def poll_video(task_id: str, provider_id: str = Query(description="厂商 
 
     try:
         result = await provider.poll_video(task_id)
-    except NotImplementedError:
-        raise HTTPException(status_code=501, detail=f"厂商 {provider_id} 不支持视频状态查询")
+    except NotImplementedError as exc:
+        raise HTTPException(status_code=501, detail=f"厂商 {provider_id} 不支持视频状态查询") from exc
     except HTTPException:
         raise
     except Exception as e:
         latency = (time.time() - start_time) * 1000
         logger.error("[VIDEO] trace=%s poll 失败: task=%s %s (%.0fms)", trace_id, task_id, e, latency, exc_info=True)
-        raise HTTPException(status_code=502, detail=f"上游视频状态查询失败: {e}")
+        raise HTTPException(status_code=502, detail=f"上游视频状态查询失败: {e}") from e
 
     latency = (time.time() - start_time) * 1000
     status = result.get("status", "unknown")

@@ -38,16 +38,19 @@ class ProviderCallMixin:
         timeout: int = 60,
         is_routing: bool = False,
         trace_id: str = "",
+        session_id: str = "",
         *,
         rate_limits: tuple[int, int, int, int] | None = None,
         payload_bytes: int = 0,
     ) -> ChatCompletionResponse:
         if not trace_id:
             trace_id = self.generate_trace_id()
+        if not session_id:
+            session_id = request.session_id or ""
 
         # Cursor CLI 为子进程调用，探针 latency ~30s，长文档/大 max_tokens 常超过默认 60s
         if provider_name == "cursor":
-            timeout = max(timeout, 180)
+            timeout = max(timeout, 600)  # 增加到 10 分钟以支持复杂任务
 
         if self.is_provider_broken(provider_name, model_name):
             raise ProviderCallError(f"厂商 {provider_name} 模型 {model_name} 处于熔断状态，{self._breaker.cooldown}秒后自动恢复")
@@ -57,13 +60,13 @@ class ProviderCallMixin:
             raise ProviderCallError(f"厂商 {provider_name} 未注册")
 
         tag = "路由" if is_routing else "推理"
-        sid_tag = f" session={request.session_id}" if request.session_id else ""
+        sid_tag = f" session={session_id}" if session_id else ""
         msg_summary = self._summarize_messages(request.messages)
         if not payload_bytes:
             payload_bytes = estimate_payload_bytes(request)
         tools_tag = ""
         if request.tools:
-            tnames = [t.function.name for t in request.tools[:5]]
+            tnames = [t.function.name for t in request.tools]
             tools_tag = f" tools=[{','.join(tnames)}]({len(request.tools)}个)"
         params_tag = f" temp={request.temperature}"
         if request.max_tokens:
@@ -114,6 +117,10 @@ class ProviderCallMixin:
                 )
                 self._record_provider_success(provider_name, model_name)
 
+                self._feedback_capabilities(
+                    provider_name, model_name, request, result,
+                )
+
             msg_obj = result.choices[0].message if result.choices else None
             reply_content = msg_obj.content if msg_obj else ""
             reply_len = len(reply_content) if reply_content else 0
@@ -128,8 +135,7 @@ class ProviderCallMixin:
 
             content_preview = ""
             if reply_content:
-                preview = reply_content[:200].replace("\n", "\\n")
-                content_preview = f" 内容预览={preview!r}"
+                content_preview = f" 内容={reply_content!r}"
 
             logger.info(
                 "[%s] trace=%s%s %s响应 %s:%s | 耗时=%.0fms tokens(prompt=%d,completion=%d,total=%d) "
@@ -143,8 +149,6 @@ class ProviderCallMixin:
             )
 
             raw_msg_dict = msg_obj.model_dump() if msg_obj and hasattr(msg_obj, "model_dump") else {}
-            if raw_msg_dict.get("content") and len(raw_msg_dict["content"]) > 500:
-                raw_msg_dict["content"] = raw_msg_dict["content"][:500] + f"…(截断,共{len(reply_content)}字符)"
             logger.debug(
                 "[%s] trace=%s 完整响应 message 对象:\n%s",
                 tag, trace_id,
@@ -162,7 +166,7 @@ class ProviderCallMixin:
             status = e.response.status_code
             resp_body = ""
             try:
-                resp_body = e.response.text[:500]
+                resp_body = e.response.text
             except Exception:
                 pass
             if should_trigger_breaker(status) and not is_routing:
@@ -177,6 +181,10 @@ class ProviderCallMixin:
                     "[%s] trace=%s %s:%s HTTP %d (%.0fms) 客户端错误（不计入熔断）: %s",
                     tag, trace_id, provider_name, model_name,
                     status, elapsed_ms, resp_body,
+                )
+            if not is_routing:
+                self._feedback_capabilities_on_error(
+                    provider_name, model_name, request, status, resp_body,
                 )
             if status == 429:
                 if not is_routing:
@@ -223,16 +231,14 @@ class ProviderCallMixin:
             role = m.role if hasattr(m, "role") else m.get("role", "")
             content = m.content if hasattr(m, "content") else m.get("content", "")
             if role == "user" and isinstance(content, str):
-                last_user = content[:200]
+                last_user = content
                 break
         return f"[{role_str}] 最新用户消息: {last_user!r}"
 
     @staticmethod
     def _redact_content_for_log(content: Any, max_chars: int = 200) -> Any:
         if isinstance(content, str):
-            if len(content) <= max_chars:
-                return content
-            return content[:max_chars] + f"…(截断,共{len(content)}字符)"
+            return content
         if isinstance(content, list):
             parts: list[Any] = []
             for part in content:
@@ -245,10 +251,6 @@ class ProviderCallMixin:
                     if isinstance(iu, dict) and isinstance(iu.get("url"), str):
                         u = iu["url"]
                         p["image_url"] = {**iu, "url": f"<image_url len={len(u)}>"}
-                elif p.get("type") == "text" and isinstance(p.get("text"), str):
-                    t = p["text"]
-                    if len(t) > max_chars:
-                        p["text"] = t[:max_chars] + f"…(截断,共{len(t)}字符)"
                 parts.append(p)
             return parts
         return content
@@ -277,3 +279,140 @@ class ProviderCallMixin:
 
     def generate_trace_id(self) -> str:
         return uuid.uuid4().hex[:12]
+
+    # --- 能力动态反馈 ---
+
+    _CAP_SAVE_INTERVAL = 60
+    _cap_last_save_ts: float = 0.0
+    _cap_dirty: bool = False
+
+    def _feedback_capabilities(
+        self,
+        provider_name: str,
+        model_name: str,
+        request: ChatCompletionRequest,
+        result: ChatCompletionResponse,
+    ) -> None:
+        """根据真实调用结果动态更新能力缓存（成功路径）"""
+        cache = getattr(self, "_capability_cache", None)
+        if not cache:
+            return
+
+        msg = result.choices[0].message if result.choices else None
+        if not msg:
+            return
+
+        updates: dict[str, Any] = {}
+
+        existing = cache.get(provider_name, model_name) or {}
+        if existing.get("manual_override"):
+            return
+
+        if not existing.get("available"):
+            updates["available"] = True
+
+        if request.tools and getattr(msg, "tool_calls", None):
+            if not existing.get("tool_calling"):
+                updates["tool_calling"] = True
+                logger.info(
+                    "[能力反馈] %s/%s 真实调用中发现 tool_calling 能力",
+                    provider_name, model_name,
+                )
+
+        content = msg.content or ""
+        if content and not existing.get("chinese"):
+            has_chinese = sum(1 for c in content if "\u4e00" <= c <= "\u9fff") >= 5
+            if has_chinese:
+                updates["chinese"] = True
+                logger.info(
+                    "[能力反馈] %s/%s 真实调用中发现中文输出能力",
+                    provider_name, model_name,
+                )
+
+        if updates:
+            merged = {**existing, **updates}
+            cache.set(provider_name, model_name, merged)
+            self._cap_dirty = True
+            self._maybe_save_capabilities()
+
+    def _feedback_capabilities_on_error(
+        self,
+        provider_name: str,
+        model_name: str,
+        request: ChatCompletionRequest,
+        status: int,
+        resp_body: str,
+    ) -> None:
+        """根据真实调用错误动态更新能力缓存（失败路径）"""
+        cache = getattr(self, "_capability_cache", None)
+        if not cache:
+            return
+
+        existing = cache.get(provider_name, model_name) or {}
+        if existing.get("manual_override"):
+            return
+
+        updates: dict[str, Any] = {}
+
+        if status == 400 and request.tools:
+            body_lower = resp_body.lower()
+            tool_rejected = any(kw in body_lower for kw in [
+                "not support", "does not support tool",
+                "tools is not supported", "function calling",
+                "invalid_request", "unsupported",
+            ])
+            if tool_rejected and existing.get("tool_calling") is not False:
+                updates["tool_calling"] = False
+                updates["tc_note"] = f"真实调用 400: {resp_body[:80]}"
+                logger.info(
+                    "[能力反馈] %s/%s 真实调用中 tools 被 400 拒绝，标记 tool_calling=False",
+                    provider_name, model_name,
+                )
+
+        if status == 400 and not request.tools:
+            body_lower = resp_body.lower()
+            if any(kw in body_lower for kw in ["image", "vision", "multimodal"]):
+                has_image = False
+                for m in request.messages:
+                    c = m.content if hasattr(m, "content") else m.get("content", "")
+                    if isinstance(c, list) and any(
+                        isinstance(p, dict) and p.get("type") == "image_url" for p in c
+                    ):
+                        has_image = True
+                        break
+                if has_image and existing.get("vision") is not False:
+                    updates["vision"] = False
+                    logger.info(
+                        "[能力反馈] %s/%s 真实调用图片请求被 400 拒绝，标记 vision=False",
+                        provider_name, model_name,
+                    )
+
+        if status in (503, 502) and existing.get("available") is not False:
+            updates["available"] = False
+            updates["error"] = f"unavailable ({status})"
+            logger.info(
+                "[能力反馈] %s/%s 真实调用返回 %d，标记 available=False",
+                provider_name, model_name, status,
+            )
+
+        if updates:
+            merged = {**existing, **updates}
+            cache.set(provider_name, model_name, merged)
+            self._cap_dirty = True
+            self._maybe_save_capabilities()
+
+    def _maybe_save_capabilities(self) -> None:
+        """限流写盘：最多每 60 秒保存一次"""
+        cache = getattr(self, "_capability_cache", None)
+        if not cache or not self._cap_dirty:
+            return
+        now = time.time()
+        if now - ProviderCallMixin._cap_last_save_ts < self._CAP_SAVE_INTERVAL:
+            return
+        ProviderCallMixin._cap_last_save_ts = now
+        self._cap_dirty = False
+        try:
+            cache.save()
+            logger.debug("[能力反馈] 能力缓存已持久化")
+        except Exception as e:
+            logger.warning("[能力反馈] 保存能力缓存失败: %s", e)

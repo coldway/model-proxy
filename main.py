@@ -129,6 +129,8 @@ def create_app() -> FastAPI:
         "nvidia": lambda key: create_openai_provider("nvidia", key),
         "cohere": lambda key: create_openai_provider("cohere", key),
         "dashscope": lambda key: create_openai_provider("dashscope", key),
+        "spark": lambda key: create_openai_provider("spark", key),
+        "agnes": lambda key: create_openai_provider("agnes", key),
         "ollama": lambda key: OllamaProvider(key),
     }
 
@@ -221,7 +223,7 @@ def create_app() -> FastAPI:
         rate_limiter.flush()
         history.flush()
         catalog.flush()
-        dispatcher.payload_tracker.close()
+        dispatcher._payload_tracker.close()
         dispatcher.flush_session_bindings()
         try:
             from src.scheduler.memory_pkg._impl import _memory_manager

@@ -127,6 +127,13 @@ class CursorProvider(BaseProvider):
         mode: str | None = None,
         force: bool = False,
         sandbox: str | None = None,
+        workspace: str | None = None,
+        resume_chat_id: str | None = None,
+        continue_session: bool = False,
+        worktree_name: str | None = None,
+        worktree_base: str | None = None,
+        skip_worktree_setup: bool = False,
+        approve_mcps: bool = False,
     ) -> list[str]:
         """构建 Cursor CLI 命令参数
         
@@ -138,6 +145,13 @@ class CursorProvider(BaseProvider):
             mode: 执行模式 (plan/ask/agent)
             force: 是否强制执行命令(--force/--yolo)
             sandbox: 沙箱模式 (enabled/disabled)
+            workspace: 工作区目录路径
+            resume_chat_id: 恢复的会话 ID
+            continue_session: 继续上次会话
+            worktree_name: Git worktree 名称
+            worktree_base: Worktree 基准分支
+            skip_worktree_setup: 跳过 worktree 设置脚本
+            approve_mcps: 自动批准 MCP 服务器
         """
         cmd_args = [
             "cursor", "agent",
@@ -168,6 +182,28 @@ class CursorProvider(BaseProvider):
             cmd_args.extend(["--sandbox", sandbox])
         elif sandbox:
             logger.warning("未知的 sandbox 值 '%s'，忽略（支持: enabled, disabled）", sandbox)
+        
+        # 工作区路径
+        if workspace:
+            cmd_args.extend(["--workspace", workspace])
+        
+        # 会话管理
+        if resume_chat_id:
+            cmd_args.extend(["--resume", resume_chat_id])
+        elif continue_session:
+            cmd_args.append("--continue")
+        
+        # Git Worktree
+        if worktree_name:
+            cmd_args.extend(["-w", worktree_name])
+            if worktree_base:
+                cmd_args.extend(["--worktree-base", worktree_base])
+            if skip_worktree_setup:
+                cmd_args.append("--skip-worktree-setup")
+        
+        # MCP 自动批准
+        if approve_mcps:
+            cmd_args.append("--approve-mcps")
         
         cmd_args.append(prompt)
         return cmd_args
@@ -258,7 +294,16 @@ class CursorProvider(BaseProvider):
         mode: str | None = None,
         force: bool = False,
         sandbox: str | None = None,
+        workspace: str | None = None,
+        resume_chat_id: str | None = None,
+        continue_session: bool = False,
+        worktree_name: str | None = None,
+        worktree_base: str | None = None,
+        skip_worktree_setup: bool = False,
+        approve_mcps: bool = False,
+        session_id: str = "",  # 新增，用于日志
     ) -> str:
+        sid_tag = f" session={session_id}" if session_id else ""
         cmd_args = self._build_cmd_args(
             model, prompt,
             stream=stream,
@@ -266,17 +311,77 @@ class CursorProvider(BaseProvider):
             mode=mode,
             force=force,
             sandbox=sandbox,
+            workspace=workspace,
+            resume_chat_id=resume_chat_id,
+            continue_session=continue_session,
+            worktree_name=worktree_name,
+            worktree_base=worktree_base,
+            skip_worktree_setup=skip_worktree_setup,
+            approve_mcps=approve_mcps,
         )
+        
+        # 打印命令行（隐藏 prompt 内容）
+        cmd_display = " ".join(
+            arg if not arg.startswith("--") and len(arg) > 50 
+            else arg[:100] + "..." if len(arg) > 100 else arg
+            for arg in cmd_args
+        )
+        logger.debug("[Cursor] 执行命令: %s", cmd_display[:300])
+        
+        import time as time_module
+        start_time = time_module.time()
+        
         proc = await asyncio.create_subprocess_exec(
             *cmd_args,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        
+        elapsed = time_module.time() - start_time
+        
+        # 解码 stderr
+        stderr_text = stderr.decode("utf-8", errors="replace").strip() if stderr else ""
+        
         if proc.returncode != 0:
-            error_msg = stderr.decode("utf-8", errors="replace")
-            raise RuntimeError(f"Cursor CLI 退出码 {proc.returncode}: {error_msg}")
+            logger.error(
+                "[Cursor] CLI 失败: returncode=%d elapsed=%.1fs stderr=%s",
+                proc.returncode, elapsed, stderr_text[:1000]
+            )
+            raise RuntimeError(f"Cursor CLI 退出码 {proc.returncode}: {stderr_text}")
+        
         raw = stdout.decode("utf-8", errors="replace").strip()
+        
+        # 成功时也详细记录 stderr（可能包含警告、进度信息等）
+        if stderr_text:
+            # stderr 有内容时，按行分割并记录（可能是警告、进度条等非错误信息）
+            stderr_lines = stderr_text.split('\n')
+            # 去除空行和 ANSI 转义序列
+            import re
+            clean_lines = [
+                re.sub(r'\x1b\[[0-9;?]*[a-zA-Z]', '', line).strip()
+                for line in stderr_lines
+                if line.strip() and not re.match(r'^[\x00-\x1f]+$', line)
+            ]
+            if clean_lines:
+                stderr_summary = f"{len(clean_lines)}行: " + " | ".join(clean_lines[:5])
+                if len(clean_lines) > 5:
+                    stderr_summary += f" ... (共{len(clean_lines)}行)"
+                logger.info(
+                    "[Cursor] CLI 成功:%s elapsed=%.1fs output_size=%d stderr=%s",
+                    sid_tag, elapsed, len(raw), stderr_summary[:500]
+                )
+            else:
+                logger.info(
+                    "[Cursor] CLI 成功:%s elapsed=%.1fs output_size=%d stderr=无实质内容（仅控制字符）",
+                    sid_tag, elapsed, len(raw)
+                )
+        else:
+            logger.info(
+                "[Cursor] CLI 成功:%s elapsed=%.1fs output_size=%d stderr=无",
+                sid_tag, elapsed, len(raw)
+            )
+        
         if json_output:
             return self._unwrap_cli_result(raw)
         return raw
@@ -286,10 +391,44 @@ class CursorProvider(BaseProvider):
     ) -> ChatCompletionResponse:
         expect_tools = bool(request.tools)
         prompt = self._build_prompt(request)
-        timeout = 300 if expect_tools else 240
+        timeout = 600 if expect_tools else 600  # 增加到 10 分钟以支持复杂任务
         mode = getattr(request, "mode", None)
         force = getattr(request, "force", False)
         sandbox = getattr(request, "sandbox", None)
+        
+        # 提取新增参数
+        workspace = getattr(request, "workspace_path", None)
+        resume_chat_id = getattr(request, "cursor_session_id", None)
+        continue_session = getattr(request, "cursor_continue", False)
+        worktree_name = getattr(request, "worktree_name", None)
+        worktree_base = getattr(request, "worktree_base", None)
+        skip_worktree_setup = getattr(request, "skip_worktree_setup", False)
+        approve_mcps = getattr(request, "approve_mcps", False)
+        
+        # 打印 Cursor 特有参数
+        cursor_params = []
+        if mode:
+            cursor_params.append(f"mode={mode}")
+        if workspace:
+            cursor_params.append(f"workspace={workspace[:50]}...")
+        if resume_chat_id:
+            cursor_params.append(f"session_id={resume_chat_id[:16]}")
+        if continue_session:
+            cursor_params.append("continue=True")
+        if worktree_name:
+            cursor_params.append(f"worktree={worktree_name}")
+        if approve_mcps:
+            cursor_params.append("approve_mcps=True")
+        
+        # 添加 session_id（来自request，可能和cursor_session_id不同）
+        req_session_id = getattr(request, "session_id", None)
+        sid_tag = f" session={req_session_id}" if req_session_id else ""
+        
+        params_str = " ".join(cursor_params) if cursor_params else "默认参数"
+        logger.info(
+            "[Cursor] 调用参数: model=%s timeout=%ds%s %s tools=%d",
+            model, timeout, sid_tag, params_str, len(request.tools) if request.tools else 0
+        )
         
         # plan/ask 模式下忽略 force 参数
         if mode in ("plan", "ask"):
@@ -304,6 +443,14 @@ class CursorProvider(BaseProvider):
                 mode=mode,
                 force=force,
                 sandbox=sandbox,
+                workspace=workspace,
+                resume_chat_id=resume_chat_id,
+                continue_session=continue_session,
+                worktree_name=worktree_name,
+                worktree_base=worktree_base,
+                skip_worktree_setup=skip_worktree_setup,
+                approve_mcps=approve_mcps,
+                session_id=req_session_id or "",
             )
         except FileNotFoundError:
             raise RuntimeError("未找到 cursor 命令，请确认 Cursor CLI 已安装并在 PATH 中")
@@ -311,6 +458,16 @@ class CursorProvider(BaseProvider):
             raise RuntimeError(f"Cursor CLI 调用超时 ({int(timeout)}s)")
 
         content, tool_calls, finish_reason = self._parse_assistant_output(output, expect_tools=expect_tools)
+        
+        # 打印响应摘要
+        response_len = len(content) if content else 0
+        tool_summary = f" tool_calls={len(tool_calls)}个" if tool_calls else ""
+        logger.info(
+            "[Cursor] 响应:%s 长度=%d finish=%s%s 内容预览=%s",
+            sid_tag, response_len, finish_reason, tool_summary, 
+            (content[:100] if content else "")[:100].replace("\n", "\\n")
+        )
+        
         message = ChatMessage(
             role="assistant",
             content=content,
@@ -352,11 +509,58 @@ class CursorProvider(BaseProvider):
         force = getattr(request, "force", False)
         sandbox = getattr(request, "sandbox", None)
         
+        # 提取新增参数
+        workspace = getattr(request, "workspace_path", None)
+        resume_chat_id = getattr(request, "cursor_session_id", None)
+        continue_session = getattr(request, "cursor_continue", False)
+        worktree_name = getattr(request, "worktree_name", None)
+        worktree_base = getattr(request, "worktree_base", None)
+        skip_worktree_setup = getattr(request, "skip_worktree_setup", False)
+        approve_mcps = getattr(request, "approve_mcps", False)
+        
+        # 打印 Cursor 特有参数（流式）
+        cursor_params = []
+        if mode:
+            cursor_params.append(f"mode={mode}")
+        if workspace:
+            cursor_params.append(f"workspace={workspace[:50]}...")
+        if resume_chat_id:
+            cursor_params.append(f"session_id={resume_chat_id[:16]}")
+        if continue_session:
+            cursor_params.append("continue=True")
+        if worktree_name:
+            cursor_params.append(f"worktree={worktree_name}")
+        if approve_mcps:
+            cursor_params.append("approve_mcps=True")
+        
+        # 添加 session_id（来自request）
+        req_session_id = getattr(request, "session_id", None)
+        sid_tag = f" session={req_session_id}" if req_session_id else ""
+        
+        params_str = " ".join(cursor_params) if cursor_params else "默认参数"
+        logger.info(
+            "[Cursor] 调用参数(流式): model=%s%s %s",
+            model, sid_tag, params_str
+        )
+        
         # plan/ask 模式下忽略 force 参数
         if mode in ("plan", "ask"):
             force = False
         
-        cmd_args = self._build_cmd_args(model, prompt, stream=True, mode=mode, force=force, sandbox=sandbox)
+        cmd_args = self._build_cmd_args(
+            model, prompt,
+            stream=True,
+            mode=mode,
+            force=force,
+            sandbox=sandbox,
+            workspace=workspace,
+            resume_chat_id=resume_chat_id,
+            continue_session=continue_session,
+            worktree_name=worktree_name,
+            worktree_base=worktree_base,
+            skip_worktree_setup=skip_worktree_setup,
+            approve_mcps=approve_mcps,
+        )
 
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -453,6 +657,109 @@ class CursorProvider(BaseProvider):
             raise RuntimeError("未找到 cursor 命令，请确认 Cursor CLI 已安装并在 PATH 中")
         except asyncio.TimeoutError:
             raise RuntimeError("Cursor CLI 拉取模型列表超时 (30s)")
+
+    async def create_session(self) -> str:
+        """创建新的 Cursor 会话并返回 session_id"""
+        cmd = ["cursor", "agent", "create-chat"]
+        if self._api_key:
+            cmd.extend(["--api-key", self._api_key])
+
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
+            if proc.returncode != 0:
+                error_msg = stderr.decode("utf-8", errors="replace").strip()
+                raise RuntimeError(f"创建 Cursor 会话失败: {error_msg}")
+
+            # 解析输出获取 session_id
+            output = stdout.decode("utf-8", errors="replace").strip()
+            # 预期格式：Created chat: <session_id> 或直接输出 session_id
+            match = re.search(r"Created chat:\s*(\S+)", output)
+            if match:
+                return match.group(1)
+
+            # 如果没有匹配，假设整个输出就是 session_id
+            if output:
+                return output
+            
+            raise RuntimeError("Cursor CLI 未返回会话 ID")
+        except FileNotFoundError:
+            raise RuntimeError("未找到 cursor 命令，请确认 Cursor CLI 已安装并在 PATH 中")
+        except asyncio.TimeoutError:
+            raise RuntimeError("创建 Cursor 会话超时 (30s)")
+
+    async def list_sessions(self) -> list[dict]:
+        """列出所有 Cursor 会话"""
+        cmd = ["cursor", "agent", "ls"]
+        if self._api_key:
+            cmd.extend(["--api-key", self._api_key])
+
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
+            if proc.returncode != 0:
+                error_msg = stderr.decode("utf-8", errors="replace").strip()
+                logger.warning("列出 Cursor 会话失败: %s", error_msg)
+                return []
+
+            # 解析输出
+            # 预期格式：每行一个会话，可能包含 ID、标题、时间等
+            output = stdout.decode("utf-8", errors="replace").strip()
+            
+            # 过滤控制字符和错误信息（非交互环境常见问题）
+            # 移除 ANSI 转义序列
+            output = re.sub(r'\x1b\[[0-9;?]*[a-zA-Z]', '', output)
+            output = re.sub(r'\x1b\[[0-9;]*m', '', output)
+            # 移除其他控制字符（保留换行/tab/空格）
+            output = ''.join(c for c in output if c.isprintable() or c in '\n\r\t ')
+            
+            sessions = []
+            for line in output.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                
+                # 过滤明显的错误信息
+                error_keywords = [
+                    'ERROR', 'Error', 'error', 'warning', 'Warning',
+                    'Raw mode', 'stdin', 'github.com', 'handleSetRaw',
+                    'index.js', 'not supported', 'ink/#israwmodesupported'
+                ]
+                if any(kw in line for kw in error_keywords):
+                    continue
+                
+                # 尝试解析 JSON 格式（如果 Cursor CLI 返回 JSON）
+                try:
+                    session = json.loads(line)
+                    if isinstance(session, dict):
+                        sessions.append(session)
+                    continue
+                except json.JSONDecodeError:
+                    pass
+                
+                # 如果不是 JSON，尝试简单解析（ID - Title）
+                match = re.match(r"^(\S+)\s+-\s+(.+)$", line)
+                if match:
+                    sessions.append({"id": match.group(1), "title": match.group(2)})
+                else:
+                    # 验证是否是有效的 session ID 格式（chat-xxx）
+                    if re.match(r"^chat-[a-f0-9-]+$", line):
+                        sessions.append({"id": line, "title": line[:16] + "..."})
+            
+            return sessions
+        except FileNotFoundError:
+            raise RuntimeError("未找到 cursor 命令，请确认 Cursor CLI 已安装并在 PATH 中")
+        except asyncio.TimeoutError:
+            logger.warning("列出 Cursor 会话超时")
+            return []
 
     async def health_check(self) -> bool:
         try:

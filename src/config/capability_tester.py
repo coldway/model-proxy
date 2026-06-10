@@ -799,6 +799,10 @@ class CapabilityTester:
                 logger.warning("厂商 %s 未注册，跳过测试", prov_name)
                 continue
 
+            if getattr(provider, "skip_bulk_capability_test", False):
+                logger.info("厂商 %s 设置了 skip_bulk_capability_test，跳过能力测试", prov_name)
+                continue
+
             results = await self.test_provider_models(
                 provider, prov_name, model_ids, force=force,
             )

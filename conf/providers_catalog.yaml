@@ -1,8 +1,8 @@
 providers:
   google:
     name: Google AI Studio
-    enabled: false
-    priority: 2
+    enabled: true
+    priority: 1
     url: https://aistudio.google.com/
     description: Google 提供的免费 Gemini 系列模型
     api_key_guide: https://aistudio.google.com/apikey
@@ -13,26 +13,22 @@ providers:
       default_rpd: 25
       default_rpm: 5
       category: 推理
-      enabled: false
-      priority: 5
       tool_calling: false
     - id: gemini-2.5-flash
       name: Gemini 2.5 Flash
-      description: 平衡之选（当前免费层额度为0，暂时禁用）
-      default_rpd: 500
+      description: 平衡之选，支持 thinking + tool calling（免费层 10 RPM, 1500 RPD, 250K TPM）
+      default_rpd: 1500
       default_rpm: 10
+      default_tpm: 250000
       category: 通用
-      enabled: false
-      priority: 6
-      tool_calling: false
+      tool_calling: true
     - id: gemini-2.0-flash
       name: Gemini 2.0 Flash
-      description: 速度最快（当前免费层额度为0，暂时禁用）
+      description: 速度最快（免费层 15 RPM, 1500 RPD, 1M TPM），支持 tool calling
       default_rpd: 1500
       default_rpm: 15
+      default_tpm: 1000000
       category: 快速
-      enabled: false
-      priority: 7
       tool_calling: false
     - id: gemma-4-26b-a4b-it
       name: Gemma 4 26B
@@ -40,18 +36,18 @@ providers:
       default_rpd: 1500
       default_rpm: 15
       category: 开源
-      enabled: true
-      priority: 2
       tool_calling: true
+      enabled: true
+      priority: 6
     - id: gemma-4-31b-it
       name: Gemma 4 31B
       description: Gemma 4 系列 31B 模型（支持 function calling）
       default_rpd: 1500
       default_rpm: 15
       category: 开源
-      enabled: true
-      priority: 4
       tool_calling: true
+      enabled: true
+      priority: 8
     - id: gemini-2.0-flash-lite
       name: Gemini 2.0 Flash Lite
       description: 轻量版 Flash，适合高频调用（当前免费层额度为0）
@@ -59,7 +55,6 @@ providers:
       default_rpm: 30
       category: 快速
       tool_calling: false
-      priority: 8
     - id: gemini-2.5-flash-lite
       name: Gemini 2.5 Flash Lite
       description: 2.5 系列轻量版，免费可用，支持 tool calling
@@ -74,7 +69,7 @@ providers:
       default_rpd: 500
       default_rpm: 10
       category: 通用
-      tool_calling: false
+      tool_calling: true
       priority: 10
     - id: gemini-3.1-flash-lite-preview
       name: Gemini 3.1 Flash Lite Preview
@@ -82,9 +77,9 @@ providers:
       default_rpd: 1500
       default_rpm: 30
       category: 快速
-      enabled: true
-      priority: 3
       tool_calling: true
+      enabled: true
+      priority: 4
     - id: gemini-flash-latest
       name: Gemini Flash Latest
       description: 自动指向最新 Flash 版本，免费可用
@@ -107,13 +102,13 @@ providers:
       default_rpd: 1500
       default_rpm: 30
       category: 快速
-      enabled: true
-      priority: 1
       tool_calling: true
+      enabled: true
+      priority: 7
   groq:
     name: Groq
-    enabled: false
-    priority: 3
+    enabled: true
+    priority: 2
     url: https://console.groq.com/
     description: Groq 提供的高速推理服务
     api_key_guide: https://console.groq.com/keys
@@ -123,20 +118,20 @@ providers:
       description: Meta 最新 Llama 3.3 70B 通用模型
       default_rpd: 14400
       default_rpm: 30
-      default_tpm: 6000
+      default_tpm: 300000
       category: 通用
       enabled: true
-      priority: 2
+      priority: 3
       tool_calling: true
     - id: meta-llama/llama-4-scout-17b-16e-instruct
       name: Llama 4 Scout 17B
       description: Meta Llama 4 Scout，最新一代，完美支持 tool calling
       default_rpd: 14400
       default_rpm: 30
-      default_tpm: 20000
+      default_tpm: 300000
       category: 通用
       enabled: true
-      priority: 1
+      priority: 2
       tool_calling: true
     - id: openai/gpt-oss-120b
       name: GPT-OSS 120B
@@ -146,7 +141,7 @@ providers:
       default_tpm: 6000
       category: 推理
       enabled: true
-      priority: 4
+      priority: 1
       tool_calling: true
     - id: openai/gpt-oss-20b
       name: GPT-OSS 20B
@@ -156,7 +151,7 @@ providers:
       default_tpm: 20000
       category: 快速
       enabled: true
-      priority: 5
+      priority: 4
       tool_calling: true
     - id: qwen/qwen3-32b
       name: Qwen 3 32B
@@ -166,6 +161,7 @@ providers:
       default_tpm: 6000
       category: 通用
       tool_calling: true
+      priority: 10
     - id: openai/gpt-oss-safeguard-20b
       name: GPT-OSS Safeguard 20B
       description: OpenAI 开源安全增强 20B 模型，支持 tool calling
@@ -174,7 +170,7 @@ providers:
       default_tpm: 20000
       category: 通用
       enabled: true
-      priority: 6
+      priority: 5
       tool_calling: true
     - id: llama-3.1-8b-instant
       name: Llama 3.1 8B Instant
@@ -183,7 +179,7 @@ providers:
       default_rpm: 30
       category: 快速
       enabled: false
-      priority: 7
+      priority: 6
       tool_calling: true
     - id: llama-3.1-70b-versatile
       name: Llama 3.1 70B Versatile
@@ -192,7 +188,7 @@ providers:
       default_rpm: 30
       category: 通用
       tool_calling: true
-      priority: 8
+      priority: 7
     - id: mixtral-8x7b-32768
       name: Mixtral 8x7B
       description: Mistral MoE 模型，32K 上下文
@@ -200,7 +196,7 @@ providers:
       default_rpm: 30
       category: 通用
       tool_calling: false
-      priority: 9
+      priority: 8
     - id: gemma2-9b-it
       name: Gemma 2 9B IT
       description: Google Gemma 2 指令调优版
@@ -208,7 +204,7 @@ providers:
       default_rpm: 30
       category: 通用
       tool_calling: false
-      priority: 10
+      priority: 9
   cerebras:
     name: Cerebras
     enabled: false
@@ -276,8 +272,8 @@ providers:
       category: 通用
   github:
     name: GitHub Models
-    enabled: false
-    priority: 4
+    enabled: true
+    priority: 3
     url: https://github.com/marketplace/models
     description: GitHub 模型市场，使用 GitHub Token 调用
     api_key_guide: Settings > Developer settings > Personal access tokens
@@ -543,6 +539,7 @@ providers:
     name: 阿里百炼 (DashScope)
     enabled: false
     priority: 9
+    billing_type: paid
     url: https://bailian.console.aliyun.com/
     description: 阿里云百炼平台，提供通义千问系列模型（OpenAI 兼容接口）
     api_key_guide: https://bailian.console.aliyun.com/ 开通后在 API-KEY 管理页面创建
@@ -553,56 +550,56 @@ providers:
       default_rpd: 0
       default_rpm: 60
       category: 通用
-      tool_calling: true
+      tool_calling: false
     - id: qwen-turbo
       name: 通义千问 Turbo
       description: 速度最快的通义千问模型
       default_rpd: 0
       default_rpm: 100
       category: 快速
-      tool_calling: true
+      tool_calling: false
     - id: qwen-max
       name: 通义千问 Max
       description: 通义千问旗舰模型，推理能力最强
       default_rpd: 0
       default_rpm: 30
       category: 推理
-      tool_calling: true
+      tool_calling: false
     - id: qwen-long
       name: 通义千问 Long
       description: 支持超长上下文（最大 1000 万 token）
       default_rpd: 0
       default_rpm: 60
       category: 长文本
-      tool_calling: true
+      tool_calling: false
     - id: qwen3-235b-a22b
       name: Qwen3-235B-A22B
       description: Qwen3 旗舰 MoE 模型（235B 参数，22B 激活）
       default_rpd: 0
       default_rpm: 30
       category: 推理
-      tool_calling: true
+      tool_calling: false
     - id: qwen3-32b
       name: Qwen3-32B
       description: Qwen3 32B 全参数模型
       default_rpd: 0
       default_rpm: 60
       category: 通用
-      tool_calling: true
+      tool_calling: false
     - id: qwen3-14b
       name: Qwen3-14B
       description: Qwen3 14B 模型
       default_rpd: 0
       default_rpm: 100
       category: 通用
-      tool_calling: true
+      tool_calling: false
     - id: qwen3-8b
       name: Qwen3-8B
       description: Qwen3 8B 轻量模型
       default_rpd: 0
       default_rpm: 100
       category: 快速
-      tool_calling: true
+      tool_calling: false
     - id: qwen-vl-max
       name: 通义千问 VL Max
       description: 多模态视觉模型（支持图片理解）
@@ -619,33 +616,240 @@ providers:
       category: 多模态
       tool_calling: false
       vision: true
+    - id: qwen3.7-plus
+      name: qwen3.7-plus
+      default_rpd: 0
+      default_rpm: 0
+      category: 通用
+      enabled: true
+      priority: 5
+      tool_calling: true
+    - id: qwq-plus
+      name: qwq-plus
+      default_rpd: 0
+      default_rpm: 0
+      category: 通用
+      enabled: true
+      priority: 5
+  spark:
+    name: 讯飞星火 (SparkAI)
+    enabled: true
+    priority: 10
+    billing_type: paid
+    url: https://maas.xfyun.cn/
+    description: 讯飞星辰 MaaS 平台，提供星火 X2、DeepSeek、GLM、Qwen 等多系列模型（付费，OpenAI 兼容接口）
+    api_key_guide: https://maas.xfyun.cn/ 注册后在 API Key 管理页面创建。推理服务 base_url 为 https://maas-api.cn-huabei-1.xf-yun.com/v2
+    models:
+    - id: xsparkx2
+      name: Spark X2
+      description: 星火自研旗舰模型，192K 上下文
+      category: 通用
+      tool_calling: false
+      chinese: true
+      streaming: true
+    - id: xsparkx2flash
+      name: Spark X2 Flash
+      description: 星火自研轻量模型，256K 上下文，性价比高
+      category: 通用
+      tool_calling: false
+      chinese: true
+      streaming: true
+    - id: xopdeepseekv4pro
+      name: DeepSeek V4 Pro
+      description: DeepSeek V4 Pro，1M 上下文
+      category: 通用
+      tool_calling: false
+      chinese: true
+      streaming: true
+    - id: xopdeepseekv4flash
+      name: DeepSeek V4 Flash
+      description: DeepSeek V4 Flash，1M 上下文，轻量高效
+      category: 通用
+      tool_calling: false
+      chinese: true
+      streaming: true
+    - id: xopdeepseekv32
+      name: DeepSeek V3.2
+      description: DeepSeek V3.2，128K 上下文，支持 Function Calling
+      category: 通用
+      tool_calling: true
+      chinese: true
+      streaming: true
+      json_mode: true
+    - id: xopglm51
+      name: GLM 5.1
+      description: GLM 5.1，200K 上下文
+      category: 通用
+      tool_calling: false
+      chinese: true
+      streaming: true
+      enabled: false
+      priority: 10
+    - id: xopglm5
+      name: GLM 5
+      description: GLM 5，200K 上下文
+      category: 通用
+      tool_calling: false
+      chinese: true
+      streaming: true
+      enabled: false
+      priority: 11
+    - id: xopglmv47flash
+      name: GLM 4.7 Flash
+      description: GLM 4.7 Flash，128K 上下文，轻量快速，支持 Function Calling
+      category: 通用
+      tool_calling: true
+      chinese: true
+      streaming: true
+      enabled: false
+      priority: 12
+    - id: xopkimik26
+      name: Kimi K2.6
+      description: Kimi K2.6，256K 上下文，多模态输入
+      category: 通用
+      tool_calling: false
+      chinese: true
+      streaming: true
+      vision: true
+      enabled: false
+      priority: 13
+    - id: xopkimik25
+      name: Kimi K2.5
+      description: Kimi K2.5，128K 上下文
+      category: 通用
+      tool_calling: false
+      chinese: true
+      streaming: true
+      enabled: false
+      priority: 14
+    - id: xminimaxm25
+      name: MiniMax M2.5
+      description: MiniMax M2.5，128K 上下文
+      category: 通用
+      tool_calling: false
+      chinese: true
+      streaming: true
+      enabled: false
+      priority: 15
+    - id: xopqwen35397b
+      name: Qwen 3.5 397B A17B
+      description: Qwen 3.5 MoE，256K 上下文
+      category: 通用
+      tool_calling: false
+      chinese: true
+      streaming: true
+      enabled: false
+      priority: 16
+    - id: xopqwen36v35b
+      name: Qwen 3.6 35B A3B
+      description: Qwen 3.6 轻量 MoE，128K 上下文
+      category: 通用
+      tool_calling: false
+      chinese: true
+      streaming: true
+      enabled: true
+      priority: 1
+    - id: xopqwen35v35b
+      name: Qwen 3.5 35B A3B
+      description: Qwen 3.5 轻量 MoE，128K 上下文，性价比极高
+      category: 通用
+      tool_calling: false
+      chinese: true
+      streaming: true
+      enabled: true
+      priority: 2
+    - id: xop3qwencodernext
+      name: Qwen3 Coder Next
+      description: Qwen3 代码专精模型，256K 上下文
+      category: 代码
+      tool_calling: false
+      chinese: true
+      streaming: true
+      enabled: false
+      priority: 19
+  agnes:
+    name: Agnes AI
+    enabled: false
+    priority: 15
+    url: https://agnes-ai.com/
+    description: Agnes AI 免费全模态 API（Sapiens AI 推出），文本模型走 /v1/chat/completions，图像/视频模型需单独端点
+    api_key_guide: https://platform.agnes-ai.com/ 注册后获取 API Key，国内可直接访问，免费无限期
+    models:
+    - id: agnes-2.0-flash
+      name: Agnes 2.0 Flash
+      description: 旗舰文本模型，PinchBench 排名靠前，支持 thinking 模式和 tool calling
+      default_rpd: 0
+      default_rpm: 60
+      category: 通用
+      tool_calling: true
+      chinese: true
+      streaming: true
+      enabled: true
+      priority: 1
+    - id: agnes-image-2.1-flash
+      name: Agnes Image 2.1 Flash
+      description: 图像生成模型，支持文生图/图生图/编辑（通过 /v1/images/generations 端点调用）
+      default_rpd: 0
+      default_rpm: 30
+      category: 图像
+      tool_calling: false
+      chinese: true
+      streaming: false
+      enabled: true
+      priority: 10
+    - id: agnes-video-v2.0
+      name: Agnes Video V2.0
+      description: 视频生成模型，支持文生视频/图生视频/关键帧（异步任务，通过 /v1/videos 端点调用）
+      default_rpd: 0
+      default_rpm: 10
+      category: 视频
+      tool_calling: false
+      chinese: true
+      streaming: false
+      enabled: true
+      priority: 11
   cursor:
     name: Cursor Agent CLI
-    enabled: true
-    priority: 1
+    enabled: false
+    priority: 4
     url: https://www.cursor.com/
     description: 通过 Cursor CLI 调用模型。全量测试（111 个）后仅 auto / composer-2.5 确认可用
-    api_key_guide: |
-      安装 Cursor CLI 并登录即可使用（无需 API Key）
+    api_key_guide: '安装 Cursor CLI 并登录即可使用（无需 API Key）
+
 
       安装: curl https://cursor.com/install -fsS | bash
+
       验证: agent --version
+
       登录: agent login
+
 
       推荐模型: auto / composer-2.5
 
+
       通过 model-proxy 扩展字段控制 Cursor CLI 执行模式:
+
       - mode=plan  只读规划（CLI --plan）
+
       - mode=ask   只读问答（CLI --mode ask）
+
       - mode=agent 默认，可改代码/执行命令
 
+
       可选参数:
+
       - force=true    强制执行（plan/ask 下无效）
+
       - sandbox=enabled|disabled
 
+
       请求示例:
+
       POST /v1/chat/completions
+
       {"model":"auto","messages":[{"role":"user","content":"分析架构"}],"mode":"plan"}
+
+      '
     models:
     - id: auto
       name: Auto

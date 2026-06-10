@@ -166,6 +166,42 @@ class ChatCompletionRequest(BaseModel):
         default=None,
         description="沙箱模式（仅 Cursor provider）：enabled（启用沙箱）、disabled（禁用沙箱）",
     )
+    
+    # 工作区相关
+    workspace_path: str | None = Field(
+        default=None,
+        description="工作区目录路径（仅 Cursor provider）：覆盖默认 cwd，支持多项目场景",
+    )
+    
+    # 会话管理相关
+    cursor_session_id: str | None = Field(
+        default=None,
+        description="Cursor 原生会话 ID（仅 Cursor provider）：用于 --resume 恢复指定会话",
+    )
+    cursor_continue: bool = Field(
+        default=False,
+        description="继续上次会话（仅 Cursor provider）：使用 --continue 快速恢复最近会话",
+    )
+    
+    # Git Worktree 相关
+    worktree_name: str | None = Field(
+        default=None,
+        description="Git worktree 名称（仅 Cursor provider）：在隔离的 git worktree 中运行（-w/--worktree）",
+    )
+    worktree_base: str | None = Field(
+        default=None,
+        description="Worktree 基准分支（仅 Cursor provider）：指定 worktree 的基准分支（--worktree-base）",
+    )
+    skip_worktree_setup: bool = Field(
+        default=False,
+        description="跳过 worktree 设置脚本（仅 Cursor provider）：跳过 .cursor/worktrees.json 中的设置脚本（--skip-worktree-setup）",
+    )
+    
+    # MCP 相关
+    approve_mcps: bool = Field(
+        default=False,
+        description="自动批准 MCP 服务器（仅 Cursor provider）：跳过 MCP 确认，适合自动化场景（--approve-mcps）",
+    )
 
 
 class Choice(BaseModel):
@@ -281,3 +317,46 @@ class ModelDetail(BaseModel):
 class ProviderModelsResponse(BaseModel):
     provider: str
     models: list[ModelDetail]
+
+
+# --- 图像生成 ---
+
+class ImageGenerationRequest(BaseModel):
+    model: str = Field(description="图像模型 ID，如 agnes-image-2.1-flash")
+    prompt: str = Field(description="图像描述")
+    n: int = Field(default=1, ge=1, le=10, description="生成数量")
+    size: str = Field(default="1024x1024", description="图像尺寸，如 1024x1024, 1024x768")
+    seed: int | None = Field(default=None, description="随机种子，用于复现")
+    response_format: str = Field(default="url", description="返回格式: url 或 b64_json")
+
+
+class ImageGenerationResponse(BaseModel):
+    created: int
+    data: list[dict[str, Any]] = Field(description="图像列表，每项含 url 或 b64_json")
+    proxy_info: ProxyInfo | None = None
+
+
+# --- 视频生成 ---
+
+class VideoGenerationRequest(BaseModel):
+    model: str = Field(description="视频模型 ID，如 agnes-video-v2.0")
+    prompt: str = Field(description="视频描述")
+    width: int = Field(default=1152, description="视频宽度（像素）")
+    height: int = Field(default=768, description="视频高度（像素）")
+    num_frames: int = Field(default=121, description="总帧数（需满足 8n+1 且 <= 441）")
+    frame_rate: int = Field(default=24, description="帧率")
+    image_url: str | None = Field(default=None, description="参考图片 URL（图生视频模式）")
+
+
+class VideoCreateResponse(BaseModel):
+    id: str = Field(description="异步任务 ID")
+    status: str = Field(description="任务状态: queued, processing, completed, failed")
+    proxy_info: ProxyInfo | None = None
+
+
+class VideoStatusResponse(BaseModel):
+    id: str = Field(description="任务 ID")
+    status: str = Field(description="任务状态")
+    video_url: str | None = Field(default=None, description="完成后的视频下载 URL")
+    error: str | None = Field(default=None, description="失败原因")
+    proxy_info: ProxyInfo | None = None

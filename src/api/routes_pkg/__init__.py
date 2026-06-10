@@ -19,6 +19,10 @@ from src.api.routes_pkg import (
     chat_sessions,
     logs,
     testing,
+    cursor,
+    anthropic_messages,
+    images,
+    videos,
 )
 
 router = APIRouter()
@@ -31,6 +35,10 @@ router.include_router(history.router)
 router.include_router(chat_sessions.router)
 router.include_router(logs.router)
 router.include_router(testing.router)
+router.include_router(cursor.router)
+router.include_router(anthropic_messages.router)
+router.include_router(images.router)
+router.include_router(videos.router)
 
 # 向后兼容导出（internal_tools.py 等直接 import 这些）
 StructuredTestRequest = testing.StructuredTestRequest

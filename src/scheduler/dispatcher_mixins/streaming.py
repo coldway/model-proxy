@@ -147,7 +147,7 @@ class StreamingMixin:
             payload_bytes = estimate_payload_bytes(request)
         tools_tag = ""
         if request.tools:
-            tnames = [t.function.name for t in request.tools[:5]]
+            tnames = [t.function.name for t in request.tools]
             tools_tag = f" tools=[{','.join(tnames)}]({len(request.tools)}个)"
         params_tag = f" temp={request.temperature}"
         if request.max_tokens:
@@ -236,11 +236,16 @@ class StreamingMixin:
             tc_names: dict[int, str] = {}
             tc_args: dict[int, list[str]] = {}
             chunk_count = 0
+            stream_usage: dict[str, Any] | None = None
 
             def _accumulate(c: dict | str) -> None:
+                nonlocal stream_usage
                 if isinstance(c, dict):
-                    text_parts.append(c.get("content", ""))
-                    r = c.get("reasoning", "") or c.get("reasoning_content", "")
+                    if "__usage__" in c:
+                        stream_usage = c["__usage__"]
+                        return
+                    text_parts.append(c.get("content") or "")
+                    r = c.get("reasoning") or c.get("reasoning_content") or ""
                     if r:
                         reasoning_parts.append(r)
                     for tc in c.get("tool_calls", []):
@@ -257,15 +262,34 @@ class StreamingMixin:
                 if first_chunk is not None:
                     chunk_count += 1
                     _accumulate(first_chunk)
-                    yield first_chunk
+                    if "__usage__" not in (first_chunk if isinstance(first_chunk, dict) else {}):
+                        yield first_chunk
                 async for chunk in raw_iter:
                     chunk_count += 1
                     _accumulate(chunk)
+                    if isinstance(chunk, dict) and "__usage__" in chunk:
+                        continue
                     yield chunk
                 record_success(prov_name)
                 rate_limiter.clear_429_backoff(prov_name, model_cfg.name)
+
+                prompt_tokens = 0
+                completion_tokens = 0
+                total_tokens = 0
+                is_estimated = True
+                if stream_usage:
+                    prompt_tokens = stream_usage.get("prompt_tokens", 0)
+                    completion_tokens = stream_usage.get("completion_tokens", 0)
+                    total_tokens = stream_usage.get("total_tokens", 0) or (prompt_tokens + completion_tokens)
+                    is_estimated = False
+                else:
+                    full_text_for_est = "".join(text_parts)
+                    total_tokens = len(full_text_for_est) // 2
+                    prompt_tokens = total_tokens // 3
+                    completion_tokens = total_tokens - prompt_tokens
+
                 if not rate_limiter.try_record_request(
-                    prov_name, model_cfg.name, rpd, rpm, tpm, tpd, tokens=0,
+                    prov_name, model_cfg.name, rpd, rpm, tpm, tpd, tokens=total_tokens,
                 ):
                     logger.warning(
                         f"{LogTag.STREAM} trace=%s 配额原子登记失败（流已成功完成）%s:%s",
@@ -273,14 +297,20 @@ class StreamingMixin:
                     )
                 elapsed_ms = (time.monotonic_ns() - stream_start) / 1_000_000
                 full_text = "".join(text_parts)
-                estimated_tokens = len(full_text) // 2
-                rate_limiter.record_tokens(prov_name, model_cfg.name, estimated_tokens)
+                rate_limiter.record_tokens(prov_name, model_cfg.name, total_tokens)
                 try:
                     from src.api.routes_pkg.deps import _deps as _route_deps
                     if _route_deps.cost_tracker:
-                        _route_deps.cost_tracker.record(model_cfg.name, estimated_tokens // 3, estimated_tokens * 2 // 3)
+                        _route_deps.cost_tracker.record(model_cfg.name, prompt_tokens, completion_tokens)
                 except Exception:
                     pass
+
+                usage_dict = {
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "total_tokens": total_tokens,
+                }
+                yield {"__usage__": usage_dict, "__estimated__": is_estimated}
 
                 reasoning_text = "".join(reasoning_parts)
 
@@ -288,24 +318,25 @@ class StreamingMixin:
                 if tc_names:
                     parts = []
                     for idx in sorted(tc_names):
-                        args_preview = "".join(tc_args.get(idx, []))[:100]
-                        parts.append(f"{tc_names[idx]}({args_preview})")
+                        args_full = "".join(tc_args.get(idx, []))
+                        parts.append(f"{tc_names[idx]}({args_full})")
                     tc_summary = f" tool_calls=[{', '.join(parts)}]"
 
                 reasoning_summary = ""
                 if reasoning_text:
-                    preview = reasoning_text[:200] + ("…" if len(reasoning_text) > 200 else "")
-                    reasoning_summary = f" reasoning({len(reasoning_text)}字符)={preview!r}"
+                    reasoning_summary = f" reasoning({len(reasoning_text)}字符)={reasoning_text!r}"
 
                 content_preview = ""
                 if full_text:
-                    preview = full_text[:200].replace("\n", "\\n")
-                    content_preview = f" 内容预览={preview!r}"
+                    content_preview = f" 内容={full_text!r}"
 
+                tokens_tag = "estimated" if is_estimated else "actual"
                 logger.info(
-                    f"{LogTag.STREAM} trace=%s 响应完成 %s:%s | 耗时=%.0fms chunks=%d 响应长度=%d%s%s%s",
+                    f"{LogTag.STREAM} trace=%s 响应完成 %s:%s | 耗时=%.0fms chunks=%d 响应长度=%d"
+                    f" tokens(%s)=input:%d+output:%d=%d%s%s%s",
                     trace_id, prov_name, model_cfg.name,
                     elapsed_ms, chunk_count, len(full_text),
+                    tokens_tag, prompt_tokens, completion_tokens, total_tokens,
                     tc_summary, reasoning_summary, content_preview,
                 )
 
@@ -313,13 +344,18 @@ class StreamingMixin:
                 if tc_names:
                     debug_response["tool_calls_count"] = len(tc_names)
                 if reasoning_text:
-                    debug_response["reasoning"] = reasoning_text[:500]
+                    debug_response["reasoning"] = reasoning_text
                 if full_text:
-                    debug_response["content_preview"] = full_text[:500]
+                    debug_response["content"] = full_text
                 logger.debug(
                     f"{LogTag.STREAM} trace=%s 完整响应详情:\n%s",
                     trace_id,
                     json.dumps(debug_response, ensure_ascii=False, default=str),
+                )
+
+                self._feedback_streaming_capabilities(
+                    prov_name, model_cfg.name, request,
+                    full_text, bool(tc_names),
                 )
             except httpx.HTTPStatusError as e:
                 elapsed_ms = (time.monotonic_ns() - stream_start) / 1_000_000
@@ -355,3 +391,50 @@ class StreamingMixin:
                 raise
 
         return prov_name, model_cfg.name, _guarded_stream()
+
+    def _feedback_streaming_capabilities(
+        self,
+        provider_name: str,
+        model_name: str,
+        request: ChatCompletionRequest,
+        full_text: str,
+        has_tool_calls: bool,
+    ) -> None:
+        """根据流式调用结果动态更新能力缓存"""
+        cache = getattr(self, "_capability_cache", None)
+        if not cache:
+            return
+
+        existing = cache.get(provider_name, model_name) or {}
+        if existing.get("manual_override"):
+            return
+
+        updates: dict = {}
+
+        if not existing.get("streaming"):
+            updates["streaming"] = True
+            logger.info(
+                "[能力反馈] %s/%s 流式调用成功，确认 streaming 能力",
+                provider_name, model_name,
+            )
+
+        if not existing.get("available"):
+            updates["available"] = True
+
+        if has_tool_calls and request.tools and not existing.get("tool_calling"):
+            updates["tool_calling"] = True
+            logger.info(
+                "[能力反馈] %s/%s 流式调用中发现 tool_calling 能力",
+                provider_name, model_name,
+            )
+
+        if full_text and not existing.get("chinese"):
+            has_chinese = sum(1 for c in full_text if "\u4e00" <= c <= "\u9fff") >= 5
+            if has_chinese:
+                updates["chinese"] = True
+
+        if updates:
+            merged = {**existing, **updates}
+            cache.set(provider_name, model_name, merged)
+            self._cap_dirty = True
+            self._maybe_save_capabilities()

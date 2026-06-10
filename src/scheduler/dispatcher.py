@@ -219,7 +219,8 @@ class Dispatcher(
                         )
                         result = await self._call_provider(
                             prov, model, request,
-                            timeout=model_timeout, trace_id=trace_id, rate_limits=rlim,
+                            timeout=model_timeout, trace_id=trace_id, session_id=request.session_id or "",
+                            rate_limits=rlim,
                         )
                         return prov, model, result
                     except Exception as e:
@@ -247,7 +248,8 @@ class Dispatcher(
 
                 result = await self._call_provider(
                     provider_name, model_cfg.name, request,
-                    timeout=model_cfg.timeout, trace_id=trace_id, rate_limits=rlim,
+                    timeout=model_cfg.timeout, trace_id=trace_id, session_id=request.session_id or "",
+                    rate_limits=rlim,
                 )
                 return provider_name, model_cfg.name, result
 
@@ -306,7 +308,7 @@ class Dispatcher(
                 rlim = self._unpack_rate_limit(model_cfg)
                 result = await self._call_provider(
                     prov_name, model_cfg.name, request,
-                    timeout=model_cfg.timeout, trace_id=trace_id,
+                    timeout=model_cfg.timeout, trace_id=trace_id, session_id=request.session_id or "",
                     rate_limits=rlim, payload_bytes=_payload_bytes,
                 )
                 _route_strategy_var.set("规则快速路径")
@@ -335,7 +337,7 @@ class Dispatcher(
                             rlim = self._unpack_rate_limit(model_cfg)
                             result = await self._call_provider(
                                 prov_name, model_cfg.name, request,
-                                timeout=model_cfg.timeout, trace_id=trace_id,
+                                timeout=model_cfg.timeout, trace_id=trace_id, session_id=request.session_id or "",
                                 rate_limits=rlim, payload_bytes=_payload_bytes,
                             )
                             strategy_name = "LLM 智能路由" + ("（缓存）" if was_cached else "")
@@ -359,7 +361,7 @@ class Dispatcher(
                 rlim = self._unpack_rate_limit(model_cfg)
                 result = await self._call_provider(
                     provider_name, model_cfg.name, request,
-                    timeout=model_cfg.timeout, trace_id=trace_id,
+                    timeout=model_cfg.timeout, trace_id=trace_id, session_id=request.session_id or "",
                     rate_limits=rlim, payload_bytes=_payload_bytes,
                 )
                 _route_strategy_var.set("规则遍历回退")

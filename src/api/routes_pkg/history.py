@@ -90,7 +90,7 @@ async def clear_session_bindings(session_id: str = ""):
 @router.get("/api/payload-limits")
 async def get_payload_limits():
     """获取所有模型的 payload 上限记录"""
-    limits = _deps.dispatcher.payload_tracker.get_all_limits()
+    limits = _deps.dispatcher._payload_tracker.get_all_limits()
     return {"limits": limits, "count": len(limits)}
 
 

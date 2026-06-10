@@ -20,6 +20,7 @@ from src.scheduler.memory_pkg import (  # noqa: F401
     SessionMemoryExtractor,
     SessionMemoryStore,
 )
+from src.scheduler.memory_pkg._impl import get_memory_manager  # noqa: F401
 
 __all__ = [
     "EntityGraph",
@@ -33,4 +34,5 @@ __all__ = [
     "ProceduralMemoryStore",
     "SessionMemoryExtractor",
     "SessionMemoryStore",
+    "get_memory_manager",
 ]

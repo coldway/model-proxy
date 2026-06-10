@@ -26,7 +26,7 @@
 | **Mistral AI** | 官方平台免费层 | Codestral 代码模型免费 |
 | **Cloudflare** | Workers AI 每日万次 neurons | ~10,000 neurons/天 |
 | **HuggingFace** | 数千个开源模型免费推理 | 有速率限制但免费 |
-| **Cursor CLI** | 通过 Cursor IDE 登录调用，支持 plan/ask/agent 三种模式 | 取决于 Cursor 订阅 |
+| **Cursor CLI** | **完整代码 Agent**：plan（只读规划）/ ask（只读问答）/ agent（完整编码）三种模式，支持工作区管理、会话恢复、Git Worktree 隔离 | 取决于 Cursor 订阅，[查看完整功能](CURSOR_PLAN_MODE_INTEGRATION.md) |
 | **NVIDIA NIM** | 123+ 模型免费推理（Llama/Qwen/DeepSeek） | 有速率限制但免费 |
 | **Cohere** | Command 系列模型 | 20 RPM / 1000 请求/月 |
 | **阿里百炼 (DashScope)** | 通义千问全系列（Qwen3/VL/Long） | 按量计费，新用户有免费额度 |
@@ -299,6 +299,69 @@ for chunk in stream:
 | **厂商模型弹窗** | 查看/启用/停用模型，调整优先级，搜索目录模型，拉取厂商远程模型，手动添加自定义模型 |
 | **接入指南** | 每个厂商卡片 `?` 图标，点击查看接入说明 |
 | **问答聊天** | 内置聊天界面，支持选择模型或使用 auto 模式直接对话 |
+
+## Cursor CLI 高级功能
+
+**Cursor CLI** 作为专业代码 Agent，提供最完整的代码编辑能力，支持：
+
+### 三种执行模式
+
+| 模式 | 权限 | 适用场景 |
+|------|------|---------|
+| **agent** | 完整编码权限，可修改代码 | 实际开发、功能实现、代码重构 |
+| **plan** | 只读模式，只分析不修改 | 技术方案设计、架构评审 |
+| **ask** | 只读模式，快速问答 | 代码解释、快速咨询 |
+
+### 高级能力
+
+- **工作区管理**：指定项目路径（`workspace_path`），支持多项目切换
+- **会话恢复**：通过会话 ID 恢复上下文（`cursor_session_id`），或快速继续最近会话（`cursor_continue`）
+- **Git Worktree**：在隔离的 Git worktree 中运行（`worktree_name`），避免主分支污染
+- **MCP 自动批准**：自动化场景跳过 MCP 服务器确认（`approve_mcps`）
+
+### 使用示例
+
+**基础用法（Plan 模式）**：
+```bash
+curl -X POST http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "auto",
+    "messages": [{"role": "user", "content": "分析 README.md 的结构"}],
+    "mode": "plan"
+  }'
+```
+
+**高级用法（会话管理 + Worktree）**：
+```bash
+# 1. 创建会话
+SESSION_ID=$(curl -X POST http://localhost:8000/api/cursor/sessions/create | jq -r '.session_id')
+
+# 2. 在隔离环境中使用会话
+curl -X POST http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"model\": \"auto\",
+    \"messages\": [{\"role\": \"user\", \"content\": \"实现新功能\"}],
+    \"mode\": \"agent\",
+    \"cursor_session_id\": \"$SESSION_ID\",
+    \"worktree_name\": \"feature-branch\",
+    \"worktree_base\": \"main\",
+    \"approve_mcps\": true
+  }"
+```
+
+### Web UI 支持
+
+Chat 页面自动显示 Cursor 模式选择器（选择 Cursor 模型或 `auto` 时）：
+- **基础控件**：模式按钮、Force、Sandbox
+- **高级选项**（点击"高级 ▼"展开）：工作区、会话管理、Git Worktree、MCP 选项
+
+### 完整文档
+
+- [Cursor Agent CLI 完整集成指南](CURSOR_PLAN_MODE_INTEGRATION.md) - API 参考、使用场景、最佳实践
+- [Web UI 使用文档](docs/ui.md) - Cursor 模式选择器详解
+- [前端集成示例](docs/cursor-advanced-examples.md) - JavaScript/React/Vue 示例代码
 
 ## 运行测试
 

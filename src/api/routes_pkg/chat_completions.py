@@ -73,9 +73,12 @@ async def chat_completions(request: ChatCompletionRequest):
     """聊天补全接口（支持流式和非流式）"""
     trace_id = uuid.uuid4().hex[:12]
     sid_tag = f" session={request.session_id}" if request.session_id else ""
+    
+    # 原封不动打印完整请求体
+    raw_body = request.model_dump(exclude_none=True)
     logger.info(
-        "[API] trace=%s%s /v1/chat/completions | model=%s stream=%s 消息数=%d",
-        trace_id, sid_tag, request.model, request.stream, len(request.messages),
+        "[API] trace=%s%s /v1/chat/completions\n%s",
+        trace_id, sid_tag, json.dumps(raw_body, ensure_ascii=False),
     )
 
     enabled_models = _deps.config_manager.get_enabled_models()
@@ -121,6 +124,10 @@ async def chat_completions(request: ChatCompletionRequest):
                 msg.content = _extract_json_from_response(msg.content)
 
         logger.info("[API] trace=%s%s 完成 | provider=%s model=%s 耗时=%.0fms", trace_id, sid_tag, provider_name, model_name, latency)
+        # 响应内容日志
+        resp_content = result.choices[0].message.content if result.choices and result.choices[0].message else ""
+        tokens_info = f"input={result.usage.prompt_tokens} output={result.usage.completion_tokens}" if result.usage else "usage=N/A"
+        logger.info("[API RESP] trace=%s %s\ncontent: %s", trace_id, tokens_info, resp_content)
         out = result.model_dump()
         out["proxy_info"] = info.model_dump(exclude_none=True)
         return JSONResponse(content=out)
@@ -172,4 +179,27 @@ async def _handle_stream(request: ChatCompletionRequest, enabled_models, trace_i
         session_id=request.session_id,
         bound_model=f"{bound[0]}:{bound[1]}" if bound else None,
     )
-    return create_stream_response(model_name, content_iter, proxy_info=info)
+
+    def _on_stream_complete(usage: dict | None) -> None:
+        total_latency = (time.time() - start_time) * 1000
+        prompt_tokens = usage.get("prompt_tokens", 0) if usage else 0
+        completion_tokens = usage.get("completion_tokens", 0) if usage else 0
+        if _deps.history:
+            _deps.history.record(
+                provider=provider_name,
+                model=model_name,
+                success=True,
+                latency_ms=total_latency,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                route_strategy=route_strategy,
+            )
+        if _deps.cost_tracker and usage:
+            _deps.cost_tracker.record(model_name, prompt_tokens, completion_tokens)
+        logger.info(
+            "[API] trace=%s%s 流式完成 | provider=%s model=%s 总耗时=%.0fms tokens=input:%d+output:%d",
+            trace_id, sid_tag, provider_name, model_name,
+            total_latency, prompt_tokens, completion_tokens,
+        )
+
+    return create_stream_response(model_name, content_iter, proxy_info=info, on_complete=_on_stream_complete)

@@ -113,6 +113,13 @@ class ChatPipeline:
             mode=self.request.mode,
             force=self.request.force,
             sandbox=self.request.sandbox,
+            workspace_path=self.request.workspace_path,
+            cursor_session_id=self.request.cursor_session_id,
+            cursor_continue=self.request.cursor_continue,
+            worktree_name=self.request.worktree_name,
+            worktree_base=self.request.worktree_base,
+            skip_worktree_setup=self.request.skip_worktree_setup,
+            approve_mcps=self.request.approve_mcps,
         )
 
     async def run_tool_loop(self, tools) -> PipelineResult:

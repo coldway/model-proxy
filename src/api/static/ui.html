@@ -582,6 +582,54 @@
                                 <option value="enabled">启用</option>
                                 <option value="disabled">禁用</option>
                             </select>
+                            <button type="button" onclick="toggleCursorAdvanced()" id="cursor-adv-toggle" class="btn btn-sm btn-ghost" style="font-size:0.7rem;padding:2px 6px" title="工作区/会话/Worktree 等高级选项">
+                                高级 ▼
+                            </button>
+                        </div>
+                        
+                        <!-- 高级选项区域 -->
+                        <div id="cursor-advanced-panel" style="display:none;width:100%;border-top:1px solid var(--border);padding-top:12px;margin-top:4px">
+                            <!-- 工作区路径 -->
+                            <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+                                <label style="font-size:0.75rem;min-width:80px;color:var(--text-secondary)">工作区路径:</label>
+                                <input type="text" id="cursor-workspace" placeholder="/path/to/project (留空=默认 cwd)" style="flex:1;font-size:0.75rem;padding:4px 8px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-xs);color:var(--text-primary)">
+                            </div>
+                            
+                            <!-- 会话管理 -->
+                            <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
+                                <label style="font-size:0.75rem;min-width:80px;color:var(--text-secondary)">会话管理:</label>
+                                <select id="cursor-session" style="flex:1;min-width:150px;font-size:0.75rem;padding:4px 8px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-xs);color:var(--text-primary)">
+                                    <option value="">新会话</option>
+                                </select>
+                                <button type="button" onclick="createCursorSession()" class="btn btn-sm btn-ghost" style="font-size:0.7rem;padding:2px 8px">
+                                    ➕ 新建会话
+                                </button>
+                                <button type="button" onclick="loadCursorSessions()" class="btn btn-sm btn-ghost" style="font-size:0.7rem;padding:2px 8px">
+                                    🔄 刷新列表
+                                </button>
+                                <label style="font-size:0.75rem;display:flex;align-items:center;gap:4px;cursor:pointer" title="继续上次会话(--continue)">
+                                    <input type="checkbox" id="cursor-continue"> 继续上次
+                                </label>
+                            </div>
+                            
+                            <!-- Git Worktree -->
+                            <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+                                <label style="font-size:0.75rem;min-width:80px;color:var(--text-secondary)">Git Worktree:</label>
+                                <input type="text" id="cursor-worktree" placeholder="worktree-name" style="flex:1;max-width:180px;font-size:0.75rem;padding:4px 8px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-xs);color:var(--text-primary)">
+                                <label style="font-size:0.75rem;color:var(--text-muted)">基准分支:</label>
+                                <input type="text" id="cursor-worktree-base" placeholder="main" style="flex:1;max-width:120px;font-size:0.75rem;padding:4px 8px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-xs);color:var(--text-primary)">
+                                <label style="font-size:0.75rem;display:flex;align-items:center;gap:4px;cursor:pointer" title="跳过 worktree 设置脚本">
+                                    <input type="checkbox" id="cursor-skip-worktree-setup"> 跳过设置
+                                </label>
+                            </div>
+                            
+                            <!-- MCP 自动批准 -->
+                            <div style="display:flex;gap:8px;align-items:center">
+                                <label style="font-size:0.75rem;min-width:80px;color:var(--text-secondary)">MCP 选项:</label>
+                                <label style="font-size:0.75rem;display:flex;align-items:center;gap:4px;cursor:pointer" title="自动批准所有 MCP 服务器">
+                                    <input type="checkbox" id="cursor-approve-mcps"> 自动批准 MCP
+                                </label>
+                            </div>
                         </div>
                     </div>
                     <div style="flex-shrink:0;border-top:1px solid var(--border);padding-top:16px;display:flex;gap:8px">
@@ -955,7 +1003,7 @@
                 <div class="input-group" style="margin-bottom:12px">
                     <input id="provider-search-input" placeholder="搜索目录中的模型..." oninput="debouncedProviderSearch()">
                     <button class="btn btn-primary btn-sm" onclick="searchProviderModels()">搜索目录</button>
-                    <button class="btn btn-ghost btn-sm" onclick="fetchRemoteModels()" title="需要 API Key，调用厂商远程 API 获取最新最全模型列表">拉取远程模型</button>
+                    <button class="btn btn-ghost btn-sm" onclick="fetchRemoteModels()" title="需要 API Key，调用厂商远程 API 获取最新模型列表（不自动测试能力）">拉取远程模型</button>
                 </div>
                 <div style="font-size:0.7rem;color:var(--text-muted);margin-bottom:8px">搜索目录：在本地模型目录中搜索（无需 API Key）｜拉取远程模型：调用厂商 API 获取最新模型列表（需 API Key）</div>
                 <div id="provider-search-results"></div>
@@ -1231,6 +1279,19 @@
 
         // --- 厂商卡片 ---
         let currentProvider = null;
+        let lastSearchView = 'catalog';
+        let providerCatalogData = {};
+
+        function isPaidProvider(providerId) {
+            const cat = providerCatalogData[providerId];
+            return cat && cat.billing_type === 'paid';
+        }
+
+        function confirmPaidTest(providerId, modelId) {
+            const name = (providerMeta[providerId] || providerCatalogData[providerId] || {}).name || providerId;
+            return confirm(`⚠️ ${name} 是付费厂商，能力测试将消耗约 800~2000 tokens。\n\n模型: ${modelId || '全部'}\n\n确认要继续测试吗？`);
+        }
+
         const providerMeta = {
             google: { name: 'Google AI Studio', icon: 'G', color: 'icon-google', desc: 'Gemini 系列免费模型', url: 'https://aistudio.google.com/', guide: '获取 API Key: https://aistudio.google.com/apikey\n\n免费额度:\n- Gemini 2.5 Pro: 25次/天, 5次/分\n- Gemini 2.5 Flash: 500次/天, 10次/分\n- Gemini 2.0 Flash: 1500次/天, 15次/分' },
             groq: { name: 'Groq', icon: 'Q', color: 'icon-groq', desc: '高速推理开源模型', url: 'https://console.groq.com/', guide: '注册后在 https://console.groq.com/keys 获取 API Key\n\n兼容 OpenAI SDK 格式\n免费额度: 约 14400次/天, 30次/分' },
@@ -1243,6 +1304,9 @@
             huggingface: { name: 'HuggingFace', icon: 'H', color: 'icon-github', desc: '免费推理数千开源模型', url: 'https://huggingface.co/inference-api', guide: 'https://huggingface.co/settings/tokens 创建 Token\n\n支持数千个开源模型免费推理\n有速率限制但无需付费\n支持 OpenAI 兼容 /v1/chat/completions' },
             mistral: { name: 'Mistral AI', icon: 'M', color: 'icon-groq', desc: '官方平台免费层', url: 'https://console.mistral.ai/', guide: 'https://console.mistral.ai/api-keys/ 获取 Key\n\n兼容 OpenAI SDK:\nbase_url = https://api.mistral.ai/v1\n\nCodestral 代码模型免费（非商业用途）' },
             ollama: { name: 'Ollama 本地', icon: 'O', color: 'icon-cursor', desc: '本地模型，无需 API Key', url: 'https://ollama.com/', guide: '无需 API Key，运行 Ollama 后自动发现本地已安装模型\n\n安装: https://ollama.com/download\n拉取模型: ollama pull qwen3:8b\n\n可在 API Key 字段填写自定义 base_url\n默认: http://localhost:11434' },
+            dashscope: { name: '阿里百炼', icon: 'D', color: 'icon-google', desc: '通义千问系列（付费）', url: 'https://bailian.console.aliyun.com/', guide: '⚠️ 付费厂商：每次能力测试约消耗 800~2000 tokens\n\nhttps://bailian.console.aliyun.com/\n开通后在 API-KEY 管理页面创建\n\n兼容 OpenAI SDK:\nbase_url = https://dashscope.aliyuncs.com/compatible-mode/v1' },
+            spark: { name: '讯飞星火', icon: 'X', color: 'icon-google', desc: '星火/DeepSeek/GLM/Qwen 多系列（付费）', url: 'https://maas.xfyun.cn/', guide: '⚠️ 付费厂商：每次能力测试约消耗 800~2000 tokens\n\nhttps://maas.xfyun.cn/ 注册后获取 API Key\n\n兼容 OpenAI SDK:\nbase_url = https://maas-api.cn-huabei-1.xf-yun.com/v2\n\n推荐模型:\n- Spark X2 (xsparkx2) — 星火旗舰 192K\n- DeepSeek V4 Flash (xopdeepseekv4flash) — 1M 上下文\n- DeepSeek V3.2 (xopdeepseekv32) — 支持 Function Calling\n\nFunction Calling 仅 DeepSeek V3.2 和 GLM-4.7 系列支持' },
+            agnes: { name: 'Agnes AI', icon: 'A', color: 'icon-groq', desc: '免费全模态 API（文本/图像/视频）', url: 'https://agnes-ai.com/', guide: '🆓 免费厂商（Sapiens AI 推出），国内可直接访问\n\nhttps://platform.agnes-ai.com/ 注册获取 API Key\n\n兼容 OpenAI SDK:\nbase_url = https://apihub.agnes-ai.com/v1\n\n━━━ 文本模型 ━━━\nAgnes 2.0 Flash — 旗舰，支持 thinking + tool calling\n端点: POST /v1/chat/completions\n\n━━━ 图像模型（已支持）━━━\nAgnes Image 2.1 Flash — 文生图/图生图/编辑\n端点: POST /v1/images/generations\n示例: {"model":"agnes-image-2.1-flash","prompt":"a cat","size":"1024x1024"}\n\n━━━ 视频模型（已支持）━━━\nAgnes Video V2.0 — 文生视频/图生视频/关键帧\n创建: POST /v1/videos\n轮询: GET /v1/videos/{task_id}?provider_id=agnes\n参数: num_frames 需满足 8n+1 且 ≤441\n示例: {"model":"agnes-video-v2.0","prompt":"cat on beach","num_frames":121}' },
         };
 
         async function loadProviderCards() {
@@ -1256,8 +1320,9 @@
                 const grid = document.getElementById('providers-grid');
 
                 // 合并 catalog 和 config 信息，按优先级排序
+                providerCatalogData = catalogData.providers || {};
                 const allProviders = {};
-                for (const [id, cat] of Object.entries(catalogData.providers || {})) {
+                for (const [id, cat] of Object.entries(providerCatalogData)) {
                     const conf = configData.providers?.[id] || {};
                     allProviders[id] = {
                         ...cat,
@@ -1274,13 +1339,14 @@
                     const meta = providerMeta[id] || { name: prov.name || id, icon: id[0].toUpperCase(), color: '', desc: prov.description || '', guide: '' };
                     const modelCount = prov.models?.length || 0;
                     const enabledCount = (prov.models || []).filter(m => m.enabled).length;
+                    const paidBadge = prov.billing_type === 'paid' ? '<span style="font-size:0.6rem;padding:1px 5px;background:rgba(245,158,11,0.2);color:#f59e0b;border-radius:8px;margin-left:6px;white-space:nowrap">💰 付费</span>' : '';
                     return `<div class="stat-card draggable" draggable="false" data-provider-id="${id}" onclick="openProviderModal('${id}')">
                         <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
                             <div style="display:flex;align-items:center;gap:10px;min-width:0">
                                 <span class="priority-badge drag-handle" title="拖拽排序">${prov.priority}</span>
                                 <div class="model-icon ${meta.color}">${meta.icon}</div>
                                 <div style="min-width:0">
-                                    <div class="model-name" style="font-size:0.95rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${meta.name}</div>
+                                    <div class="model-name" style="font-size:0.95rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${meta.name}${paidBadge}</div>
                                     <div style="font-size:0.7rem;color:var(--text-muted);margin-top:1px">${meta.desc}</div>
                                 </div>
                             </div>
@@ -1493,8 +1559,10 @@
                             <div style="font-size:0.7rem;color:var(--text-muted);margin-top:2px">RPD: ${m.default_rpd || '∞'} | RPM: ${m.default_rpm || '∞'}${(() => { const plKey = providerId + '/' + m.id; const pl = payloadLimits[plKey]; if (!pl) return ''; const kb = (pl.max_bytes / 1024).toFixed(1); return ' | <span style="color:var(--accent-yellow)" title="收到 413 后自动检测的上限（触发 ' + pl.hit_count + ' 次，' + pl.updated_at + '）">⚠ Payload 上限: ' + kb + ' KB</span>'; })()}</div>
                         </div>
                     </div>
-                    <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
-                        <button class="btn btn-ghost btn-sm" style="font-size:0.6rem;padding:2px 6px" onclick="event.stopPropagation();testSingleModel('${providerId}','${m.id}')" title="检测此模型的 tool calling、中文、视觉等能力">🔍 测试能力</button>
+                    <div style="display:flex;align-items:center;gap:4px;flex-shrink:0">
+                        <button class="btn btn-ghost btn-sm" style="font-size:0.6rem;padding:2px 6px" onclick="event.stopPropagation();testSingleModel('${providerId}','${m.id}')" title="检测此模型的 tool calling、中文、视觉等能力">🔍 测试</button>
+                        ${cap ? `<button class="btn btn-ghost btn-sm" style="font-size:0.6rem;padding:2px 6px" onclick="event.stopPropagation();editCapabilities('${providerId}','${m.id}')" title="手动编辑能力标记">✏️ 编辑</button>` : `<button class="btn btn-ghost btn-sm" style="font-size:0.6rem;padding:2px 6px" onclick="event.stopPropagation();editCapabilities('${providerId}','${m.id}')" title="手动标记能力（无需测试）">➕ 标记</button>`}
+                        ${cap ? `<button class="btn btn-ghost btn-sm" style="font-size:0.6rem;padding:2px 6px;color:var(--accent-red)" onclick="event.stopPropagation();deleteCapability('${providerId}','${m.id}')" title="清除此模型的能力缓存">🗑</button>` : ''}
                         <label class="toggle" onclick="event.stopPropagation()">
                             <input type="checkbox" ${isEnabled ? 'checked' : ''} onchange="toggleModelAndReload('${providerId}','${m.id}',this.checked)">
                             <span class="slider"></span>
@@ -1507,6 +1575,7 @@
         }
 
         async function testSingleModel(providerId, modelId) {
+            if (isPaidProvider(providerId) && !confirmPaidTest(providerId, modelId)) return;
             const loadingToast = toast(`正在测试 ${modelId} 的能力（约 15-30 秒）...`, 'info', true);
             try {
                 const resp = await apiFetch(API + `/api/capabilities/test?provider=${providerId}&model=${encodeURIComponent(modelId)}&force=true`, {method: 'POST'});
@@ -1544,6 +1613,95 @@
                 toast(`测试失败: ${e.message}`, 'error');
             } finally {
                 loadingToast.remove();
+            }
+        }
+
+        async function editCapabilities(providerId, modelId) {
+            const capResp = await apiFetch(API + `/api/capabilities`).catch(() => null);
+            let existing = {};
+            if (capResp && capResp.ok) {
+                const capData = await capResp.json();
+                const caps = capData.capabilities || capData;
+                existing = caps[`${providerId}/${modelId}`] || {};
+            }
+
+            const fields = [
+                {key: 'tool_calling', label: '🔧 工具调用', desc: '支持 OpenAI function calling 协议'},
+                {key: 'multi_turn_tc', label: '🔄 多轮对话', desc: '支持多轮 tool calling'},
+                {key: 'chinese', label: '🇨🇳 中文', desc: '支持中文输出'},
+                {key: 'vision', label: '👁 视觉', desc: '支持图像输入'},
+                {key: 'json_mode', label: '📋 JSON', desc: '支持结构化 JSON 输出'},
+                {key: 'streaming', label: '⚡ 流式', desc: '支持流式输出'},
+                {key: 'reasoning', label: '🧠 推理', desc: '具备逻辑推理能力'},
+                {key: 'available', label: '✅ 可用', desc: '模型可正常调用'},
+            ];
+
+            const overlay = document.createElement('div');
+            overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:10000;display:flex;align-items:center;justify-content:center';
+            overlay.innerHTML = `<div style="background:var(--bg-secondary);border-radius:12px;padding:24px;width:420px;max-height:80vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.3)">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+                    <div>
+                        <div style="font-weight:700;font-size:1rem">编辑模型能力</div>
+                        <div style="font-size:0.75rem;color:var(--text-muted);margin-top:2px">${providerId} / ${modelId}</div>
+                    </div>
+                    <button onclick="this.closest('div[style*=fixed]').remove()" style="background:none;border:none;font-size:1.2rem;cursor:pointer;color:var(--text-muted)">✕</button>
+                </div>
+                ${existing.manual_override ? '<div style="font-size:0.7rem;padding:4px 8px;background:rgba(245,158,11,0.1);color:var(--accent-yellow);border-radius:6px;margin-bottom:12px">⚠ 已手动覆盖（优先于自动测试结果）</div>' : ''}
+                <div style="display:flex;flex-direction:column;gap:8px">
+                    ${fields.map(f => `<label style="display:flex;align-items:center;gap:10px;padding:8px;border-radius:8px;background:var(--bg-primary);cursor:pointer" title="${f.desc}">
+                        <input type="checkbox" id="cap-edit-${f.key}" ${existing[f.key] ? 'checked' : ''} style="width:16px;height:16px;accent-color:var(--accent-blue)">
+                        <span style="font-size:0.85rem">${f.label}</span>
+                        <span style="font-size:0.65rem;color:var(--text-muted);margin-left:auto">${f.desc}</span>
+                    </label>`).join('')}
+                </div>
+                <div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end">
+                    <button class="btn btn-ghost btn-sm" onclick="this.closest('div[style*=fixed]').remove()">取消</button>
+                    <button class="btn btn-primary btn-sm" onclick="saveCapabilities('${providerId}','${modelId}',this.closest('div[style*=fixed]'))">保存</button>
+                </div>
+            </div>`;
+            document.body.appendChild(overlay);
+            overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+        }
+
+        async function saveCapabilities(providerId, modelId, overlay) {
+            const fields = ['tool_calling', 'multi_turn_tc', 'chinese', 'vision', 'json_mode', 'streaming', 'reasoning', 'available'];
+            const body = {};
+            for (const key of fields) {
+                const el = document.getElementById(`cap-edit-${key}`);
+                if (el) body[key] = el.checked;
+            }
+            try {
+                const resp = await apiFetch(API + `/api/capabilities/${providerId}/${encodeURIComponent(modelId)}`, {
+                    method: 'PUT',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(body),
+                });
+                if (resp.ok) {
+                    toast(`${modelId} 能力已更新`, 'success');
+                    overlay.remove();
+                    loadProviderModels(providerId);
+                } else {
+                    const err = await resp.json().catch(() => ({}));
+                    toast(err.detail || '保存失败', 'error');
+                }
+            } catch (e) {
+                toast('保存失败: ' + e.message, 'error');
+            }
+        }
+
+        async function deleteCapability(providerId, modelId) {
+            if (!confirm(`确定清除 ${modelId} 的能力缓存？\n清除后需要重新测试才能显示能力标签。`)) return;
+            try {
+                const resp = await apiFetch(API + `/api/capabilities/${providerId}/${encodeURIComponent(modelId)}`, {method: 'DELETE'});
+                if (resp.ok) {
+                    toast(`${modelId} 能力缓存已清除`, 'success');
+                    loadProviderModels(providerId);
+                } else {
+                    const err = await resp.json().catch(() => ({}));
+                    toast(err.detail || '清除失败', 'error');
+                }
+            } catch (e) {
+                toast('清除失败: ' + e.message, 'error');
             }
         }
 
@@ -1737,6 +1895,7 @@
         }
 
         async function searchProviderModels() {
+            lastSearchView = 'catalog';
             const q = document.getElementById('provider-search-input').value.trim();
             const container = document.getElementById('provider-search-results');
 
@@ -1768,9 +1927,29 @@
             }
         }
 
-        async function fetchRemoteModels() {
+        async function testAllRemoteModels() {
+            if (isPaidProvider(currentProvider) && !confirmPaidTest(currentProvider, null)) return;
             const container = document.getElementById('provider-search-results');
-            container.innerHTML = '<div style="padding:16px;text-align:center;color:var(--accent-cyan)"><div style="font-size:1.2rem;margin-bottom:8px">⏳</div>正在拉取模型列表并测试能力...<br><span style="font-size:0.75rem;color:var(--text-muted)">首次测试每个模型需要几秒，已测试的模型会从缓存读取</span></div>';
+            container.innerHTML = '<div style="padding:16px;text-align:center;color:var(--accent-cyan)"><div style="font-size:1.2rem;margin-bottom:8px">⏳</div>正在测试所有模型的能力...<br><span style="font-size:0.75rem;color:var(--text-muted)">首次测试每个模型需要几秒，已测试的模型会从缓存读取</span></div>';
+            try {
+                const resp = await apiFetch(API + `/api/provider/${currentProvider}/models?auto_test=true`);
+                if (!resp.ok) {
+                    const err = await resp.json().catch(() => ({}));
+                    container.innerHTML = '';
+                    toast(err.detail || '测试失败', 'error');
+                    return;
+                }
+                toast('批量能力测试完成', 'success');
+                await fetchRemoteModels();
+            } catch (e) {
+                toast('测试失败: ' + e.message, 'error');
+            }
+        }
+
+        async function fetchRemoteModels() {
+            lastSearchView = 'remote';
+            const container = document.getElementById('provider-search-results');
+            container.innerHTML = '<div style="padding:16px;text-align:center;color:var(--accent-cyan)"><div style="font-size:1.2rem;margin-bottom:8px">⏳</div>正在拉取模型列表...</div>';
             try {
                 const resp = await apiFetch(API + `/api/provider/${currentProvider}/models`);
                 if (!resp.ok) {
@@ -1798,15 +1977,20 @@
                     return;
                 }
 
+                const untested = capSummary.total - capSummary.from_cache;
                 const summaryHtml = capSummary.total ? `<div style="margin-bottom:12px;padding:10px 14px;background:var(--bg-primary);border-radius:8px;border:1px solid var(--border);display:flex;gap:16px;flex-wrap:wrap;align-items:center">
                     <span style="font-size:0.85rem;font-weight:600;color:var(--accent-cyan)">能力检测</span>
                     <span style="font-size:0.8rem;color:var(--text-secondary)">共 ${capSummary.total} 个模型</span>
-                    <span style="font-size:0.8rem;color:${capSummary.tested_now > 0 ? 'var(--accent-yellow)' : 'var(--accent-green)'}">🔬 本次测试: ${capSummary.tested_now}</span>
-                    <span style="font-size:0.8rem;color:var(--text-muted)">📦 缓存命中: ${capSummary.from_cache}</span>
-                    ${capSummary.all_cached ? '<span style="font-size:0.75rem;padding:2px 8px;background:rgba(16,185,129,0.15);color:var(--accent-green);border-radius:10px">✓ 全部已缓存</span>' : ''}
+                    <span style="font-size:0.8rem;color:var(--text-muted)">📦 已有缓存: ${capSummary.from_cache}</span>
+                    ${untested > 0 ? `<span style="font-size:0.8rem;color:var(--accent-yellow)">🔍 未测试: ${untested}</span>` : '<span style="font-size:0.75rem;padding:2px 8px;background:rgba(16,185,129,0.15);color:var(--accent-green);border-radius:10px">✓ 全部已测试</span>'}
+                    <button class="btn btn-primary btn-sm" onclick="testAllRemoteModels()" style="margin-left:auto" title="对未测试的模型批量运行能力检测">🔬 批量测试能力</button>
                 </div>` : '';
 
-                container.innerHTML = summaryHtml +
+                const paidWarning = isPaidProvider(currentProvider)
+                    ? `<div style="padding:8px 12px;margin-bottom:8px;background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.3);border-radius:6px;font-size:0.75rem;color:#f59e0b">⚠️ 付费厂商：每次能力测试约消耗 800~2000 tokens，点击测试按钮前会要求确认</div>`
+                    : '';
+
+                container.innerHTML = summaryHtml + paidWarning +
                     `<div style="margin-bottom:8px;font-size:0.8rem;color:var(--text-secondary)">厂商共 ${remoteModels.length} 个模型：</div>` +
                     remoteModels.map(modelId => {
                         const inCatalog = catalogMap[modelId];
@@ -1853,22 +2037,68 @@
                             actionHtml = `<button class="btn btn-sm btn-secondary" onclick="pullModelToCatalog('${currentProvider}','${modelId}')">拉取到目录</button>`;
                         }
 
+                        const testBtnHtml = `<button class="btn btn-ghost btn-sm" style="font-size:0.65rem;padding:2px 6px" onclick="testSingleRemoteModel('${currentProvider}','${modelId}')" title="检测此模型的 tool calling、中文、视觉等能力">🔍 测试</button>`;
+
                         return `<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:var(--bg-primary);border-radius:6px;margin-bottom:4px;border:1px solid var(--border);gap:8px;flex-wrap:wrap">
                             <span style="font-size:0.85rem;min-width:0;overflow:hidden;text-overflow:ellipsis">${modelId}</span>
                             <div style="display:flex;gap:8px;align-items:center;flex-shrink:0">
                                 ${capBadges}
+                                ${testBtnHtml}
                                 ${actionHtml}
                             </div>
                         </div>`;
                     }).join('');
 
-                if (capSummary.tested_now > 0) {
-                    toast(`已测试 ${capSummary.tested_now} 个新模型的能力`, 'success');
-                } else if (capSummary.all_cached) {
-                    toast('所有模型已从缓存加载', 'info');
+                const untestedCount = capSummary.total - capSummary.from_cache;
+                if (untestedCount > 0) {
+                    toast(`已拉取 ${capSummary.total} 个模型（${untestedCount} 个未测试能力，可点击"批量测试"按钮检测）`, 'info');
+                } else if (capSummary.from_cache > 0) {
+                    toast(`已拉取 ${capSummary.total} 个模型（全部已有缓存）`, 'info');
                 }
             } catch (e) {
                 toast('拉取失败: ' + e.message, 'error');
+            }
+        }
+
+        async function testSingleRemoteModel(providerId, modelId) {
+            if (isPaidProvider(providerId) && !confirmPaidTest(providerId, modelId)) return;
+            const loadingToast = toast(`正在测试 ${modelId} 的能力（约 15-30 秒）...`, 'info', true);
+            try {
+                const resp = await apiFetch(API + `/api/capabilities/test?provider=${providerId}&model=${encodeURIComponent(modelId)}&force=true`, {method: 'POST'});
+                const data = await resp.json();
+                const results = data.results || [];
+                if (results.length > 0) {
+                    const r = results[0];
+                    if (r.not_installed) {
+                        loadingToast.remove();
+                        if (confirm(`模型 ${modelId} 未在本地安装。\n\n是否立即下载安装？`)) {
+                            pullOllamaModel(modelId);
+                        }
+                        return;
+                    }
+                    const caps = [];
+                    if (r.tool_calling) caps.push('工具调用');
+                    if (r.multi_turn_tc) caps.push('多轮对话');
+                    if (r.chinese) caps.push('中文');
+                    if (r.vision) caps.push('视觉');
+                    if (r.json_mode) caps.push('JSON');
+                    if (r.streaming) caps.push('流式');
+                    if (r.reasoning) caps.push('推理');
+                    const capStr = caps.length > 0 ? caps.join('、') : '无特殊能力';
+                    const latStr = r.latency_ms ? `${r.latency_ms}ms` : '-';
+                    if (r.error) {
+                        toast(`${modelId} 测试失败: ${formatCapErrorLabel(r.error)} — ${r.error.slice(0, 80)}`, 'error');
+                    } else {
+                        toast(`${modelId} 测试完成: ${capStr} | 延迟 ${latStr}`, 'success');
+                    }
+                } else {
+                    toast(`${modelId} 测试完成（无结果）`, 'info');
+                }
+                fetchRemoteModels();
+            } catch(e) {
+                toast(`测试失败: ${e.message}`, 'error');
+            } finally {
+                loadingToast.remove();
             }
         }
 
@@ -1896,7 +2126,11 @@
                 toast(`${modelId} 已启用`, 'success');
                 loadProviderModels(currentProvider);
                 loadProviderCards();
-                searchProviderModels();
+                if (lastSearchView === 'remote') {
+                    fetchRemoteModels();
+                } else {
+                    searchProviderModels();
+                }
             } else {
                 const err = await resp.json();
                 toast(err.detail || '激活失败', 'error');
@@ -1913,7 +2147,7 @@
             document.getElementById('manual-model-id').value = '';
             loadProviderModels(currentProvider);
             loadProviderCards();
-            toast(`${modelId} 已添加`, 'success');
+            toast(`${modelId} 已添加（可在模型列表中点击"🔍 测试能力"按钮检测能力）`, 'success');
         }
 
         // --- 接入说明 ---
@@ -2322,6 +2556,70 @@
             }
         }
 
+        // 折叠/展开高级选项
+        function toggleCursorAdvanced() {
+            const panel = document.getElementById('cursor-advanced-panel');
+            const toggle = document.getElementById('cursor-adv-toggle');
+            if (!panel || !toggle) return;
+            const isHidden = panel.style.display === 'none';
+            panel.style.display = isHidden ? 'block' : 'none';
+            toggle.textContent = isHidden ? '高级 ▲' : '高级 ▼';
+        }
+
+        // 新建 Cursor 会话
+        async function createCursorSession() {
+            const toggle = document.getElementById('cursor-adv-toggle');
+            const origText = toggle?.textContent || '';
+            if (toggle) toggle.textContent = '创建中...';
+            try {
+                const apiKey = localStorage.getItem('apiKey') || '';
+                const res = await fetch('/api/cursor/sessions/create', {
+                    method: 'POST',
+                    headers: { 'Authorization': apiKey ? `Bearer ${apiKey}` : '' },
+                });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+                alert(`会话创建成功！\nSession ID: ${data.session_id}`);
+                await loadCursorSessions();
+                // 自动选中新会话
+                const sel = document.getElementById('cursor-session');
+                if (sel) sel.value = data.session_id;
+            } catch (err) {
+                console.error('createCursorSession error:', err);
+                alert(`创建会话失败: ${err.message}`);
+            } finally {
+                if (toggle) toggle.textContent = origText;
+            }
+        }
+
+        // 加载会话列表
+        async function loadCursorSessions() {
+            const sel = document.getElementById('cursor-session');
+            if (!sel) return;
+            const currentVal = sel.value;
+            try {
+                const apiKey = localStorage.getItem('apiKey') || '';
+                const res = await fetch('/api/cursor/sessions', {
+                    method: 'GET',
+                    headers: { 'Authorization': apiKey ? `Bearer ${apiKey}` : '' },
+                });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+                // 清空并重新填充
+                sel.innerHTML = '<option value="">新会话</option>';
+                (data.sessions || []).forEach(s => {
+                    const opt = document.createElement('option');
+                    opt.value = s.id;
+                    opt.textContent = s.title || s.id.slice(0, 8);
+                    sel.appendChild(opt);
+                });
+                // 恢复选中
+                if (currentVal) sel.value = currentVal;
+            } catch (err) {
+                console.error('loadCursorSessions error:', err);
+            }
+        }
+
         function isCursorChatModel(model) {
             // auto 模式也可能路由到 Cursor，所以允许选择 mode
             if (!model) return false;
@@ -2345,10 +2643,25 @@
         function buildCursorChatExtras() {
             if (!isCursorChatModel(document.getElementById('chat-model')?.value)) return {};
             const sandbox = document.getElementById('cursor-sandbox')?.value || '';
+            const workspacePath = document.getElementById('cursor-workspace')?.value.trim() || undefined;
+            const cursorSessionId = document.getElementById('cursor-session')?.value || undefined;
+            const cursorContinue = document.getElementById('cursor-continue')?.checked || false;
+            const worktreeName = document.getElementById('cursor-worktree')?.value.trim() || undefined;
+            const worktreeBase = document.getElementById('cursor-worktree-base')?.value.trim() || undefined;
+            const skipWorktreeSetup = document.getElementById('cursor-skip-worktree-setup')?.checked || false;
+            const approveMcps = document.getElementById('cursor-approve-mcps')?.checked || false;
+
             return {
                 mode: currentCursorMode,
                 force: document.getElementById('cursor-force')?.checked || false,
                 sandbox: sandbox || undefined,
+                workspace_path: workspacePath,
+                cursor_session_id: cursorSessionId,
+                cursor_continue: cursorContinue,
+                worktree_name: worktreeName,
+                worktree_base: worktreeBase,
+                skip_worktree_setup: skipWorktreeSetup,
+                approve_mcps: approveMcps,
             };
         }
 

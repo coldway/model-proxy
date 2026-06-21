@@ -17,6 +17,40 @@
 | temperature | float | 否 | 0.7 | 温度参数 |
 | max_tokens | int | 否 | null | 最大输出 token 数 |
 | stream | bool | 否 | false | 是否启用流式输出 |
+| mode | string | 否 | null | **Cursor 专用**: 执行模式 (`plan`/`ask`/`agent`) |
+| force | bool | 否 | false | **Cursor 专用**: 强制执行命令(plan/ask模式下无效) |
+| sandbox | string | 否 | null | **Cursor 专用**: 沙箱模式 (`enabled`/`disabled`) |
+
+#### Cursor Agent CLI 特性
+
+当使用 Cursor provider 时，支持以下扩展参数：
+
+| 参数 | 说明 | 可选值 | CLI参数 |
+|------|------|--------|---------|
+| `mode` | 执行模式 | `plan`(只读规划)、`ask`(只读问答)、`agent`(默认,全权限) | `--plan` / `--mode ask` |
+| `force` | 强制执行命令 | `true`/`false`，在plan/ask模式下自动忽略 | `--force` |
+| `sandbox` | 沙箱模式 | `"enabled"`/`"disabled"` | `--sandbox enabled` |
+
+**Cursor 模式说明：**
+
+- **plan 模式**: 只读分析，适合架构设计、方案规划
+- **ask 模式**: 只读问答，适合代码解释、快速问答
+- **agent 模式**: 默认模式，具有文件修改和命令执行权限
+
+详见 [Cursor Plan 模式使用指南](cursor-plan-mode.md)。
+
+**Cursor 请求示例**
+
+```json
+{
+  "model": "auto",
+  "messages": [
+    {"role": "user", "content": "分析这个项目的架构"}
+  ],
+  "mode": "plan",
+  "sandbox": "enabled"
+}
+```
 
 **请求示例**
 
@@ -74,6 +108,126 @@ data: [DONE]
 | 500 | 内部错误 | 厂商 API 非 429 的其他异常（如 503 临时不可用） |
 
 > 指定具体模型时，若厂商返回 429 限流，将返回明确的 429 错误并建议切换到 auto 模式。auto 模式下 429 会被静默跳过并自动尝试下一个候选模型。
+
+### POST /v1/images/generations
+
+图像生成接口，透传到支持图像生成的厂商（如 Agnes AI）。
+
+**请求体**
+
+| 字段 | 类型 | 必填 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| model | string | 是 | - | 图像模型 ID，如 `agnes-image-2.1-flash` |
+| prompt | string | 是 | - | 图像描述 |
+| n | int | 否 | 1 | 生成数量（1-10） |
+| size | string | 否 | "1024x1024" | 图像尺寸，如 `1024x1024`、`1024x768` |
+| seed | int | 否 | null | 随机种子（用于复现） |
+| response_format | string | 否 | "url" | 返回格式：`url` 或 `b64_json` |
+
+**请求示例**
+
+```json
+{
+  "model": "agnes-image-2.1-flash",
+  "prompt": "a cute cat, digital art",
+  "size": "1024x1024",
+  "n": 1
+}
+```
+
+**响应体**
+
+```json
+{
+  "created": 1718000000,
+  "data": [{"url": "https://..."}],
+  "proxy_info": {"provider": "agnes", "trace_id": "abc123", "latency_ms": 3200}
+}
+```
+
+**错误码**
+
+| 状态码 | 含义 |
+|--------|------|
+| 404 | 模型未找到或厂商未注册 |
+| 501 | 厂商不支持图像生成 |
+| 502 | 上游图像生成失败 |
+
+### POST /v1/videos
+
+创建视频生成任务（异步），返回 task_id 供客户端轮询。
+
+**请求体**
+
+| 字段 | 类型 | 必填 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| model | string | 是 | - | 视频模型 ID，如 `agnes-video-v2.0` |
+| prompt | string | 是 | - | 视频描述 |
+| width | int | 否 | 1152 | 视频宽度（像素） |
+| height | int | 否 | 768 | 视频高度（像素） |
+| num_frames | int | 否 | 121 | 总帧数（需满足 8n+1 且 <= 441） |
+| frame_rate | int | 否 | 24 | 帧率 |
+| image_url | string | 否 | null | 参考图片 URL（图生视频模式） |
+
+**请求示例**
+
+```json
+{
+  "model": "agnes-video-v2.0",
+  "prompt": "A cat walking on the beach at sunset",
+  "width": 1152,
+  "height": 768,
+  "num_frames": 121,
+  "frame_rate": 24
+}
+```
+
+**响应体**
+
+```json
+{
+  "id": "task_abc123",
+  "status": "queued",
+  "provider_id": "agnes",
+  "proxy_info": {"provider": "agnes", "trace_id": "def456", "latency_ms": 500}
+}
+```
+
+### GET /v1/videos/{task_id}
+
+查询视频生成任务状态。
+
+**查询参数**
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| provider_id | string | 是 | 厂商 ID，从创建响应的 `provider_id` 字段获取 |
+
+**请求示例**
+
+```
+GET /v1/videos/task_abc123?provider_id=agnes
+```
+
+**响应体**（任务完成时）
+
+```json
+{
+  "id": "task_abc123",
+  "status": "completed",
+  "video_url": "https://...",
+  "proxy_info": {"provider": "agnes", "trace_id": "ghi789", "latency_ms": 200}
+}
+```
+
+**status 值**
+
+| 状态 | 说明 |
+|------|------|
+| queued | 排队中 |
+| processing | 生成中 |
+| completed | 已完成，`video_url` 字段包含下载地址 |
+| failed | 失败，`error` 字段包含原因 |
 
 ### GET /v1/models
 

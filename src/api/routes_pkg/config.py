@@ -323,8 +323,8 @@ async def discover_providers():
 
 
 @router.get("/api/provider/{provider_name}/models")
-async def fetch_provider_models(provider_name: str, force: bool = False):
-    """拉取厂商最新模型列表并自动测试能力"""
+async def fetch_provider_models(provider_name: str, force: bool = False, auto_test: bool = False):
+    """拉取厂商最新模型列表（默认不自动测试能力，需手动点击测试按钮）"""
     if not _deps.dispatcher.has_provider(provider_name):
         has_key = _deps.config_manager.has_api_key(provider_name) if _deps.config_manager else False
         if not has_key:
@@ -340,7 +340,8 @@ async def fetch_provider_models(provider_name: str, force: bool = False):
 
     result = {"provider": provider_name, "available_models": models}
 
-    if _deps.capability_tester:
+    skip_bulk_test = getattr(provider, "skip_bulk_capability_test", False)
+    if _deps.capability_tester and not skip_bulk_test and auto_test:
         to_test = []
         skipped = []
         for mid in models:
@@ -366,6 +367,15 @@ async def fetch_provider_models(provider_name: str, force: bool = False):
         result["capabilities"] = {
             "tested": test_results, "cached": cached_results,
             "summary": {"total": len(models), "tested_now": len(to_test), "from_cache": len(skipped), "all_cached": len(to_test) == 0},
+        }
+    elif _deps.capability_tester and not auto_test:
+        cached_results = []
+        for mid in models:
+            if _deps.capability_tester.cache.has(provider_name, mid):
+                cached_results.append({**_deps.capability_tester.cache.get(provider_name, mid), "cached": True})
+        result["capabilities"] = {
+            "tested": [], "cached": cached_results,
+            "summary": {"total": len(models), "tested_now": 0, "from_cache": len(cached_results), "all_cached": True, "auto_test_skipped": True},
         }
 
     return result
@@ -454,3 +464,49 @@ async def clear_capabilities():
     _deps.capability_tester.cache.clear()
     _deps.capability_tester.cache.save()
     return {"status": "ok", "message": "能力缓存已清除"}
+
+
+@router.put("/api/capabilities/{provider_name}/{model_id:path}")
+async def update_capability(provider_name: str, model_id: str, body: dict):
+    """手动设置/覆盖某个模型的能力值（部分更新）
+
+    body 示例: {"tool_calling": true, "chinese": false, "vision": true}
+    只更新传入的字段，不影响其他已有字段。
+    """
+    if not _deps.capability_tester:
+        raise HTTPException(status_code=500, detail="能力测试器未初始化")
+
+    allowed_keys = {
+        "tool_calling", "tc_method", "multi_turn_tc", "chinese",
+        "vision", "json_mode", "streaming", "reasoning",
+        "available", "latency_ms", "error",
+    }
+    invalid_keys = set(body.keys()) - allowed_keys
+    if invalid_keys:
+        raise HTTPException(
+            status_code=400,
+            detail=f"不支持的字段: {', '.join(sorted(invalid_keys))}。支持: {', '.join(sorted(allowed_keys))}",
+        )
+
+    cache = _deps.capability_tester.cache
+    existing = cache.get(provider_name, model_id) or {}
+    merged = {**existing, **body, "manual_override": True}
+    cache.set(provider_name, model_id, merged)
+    cache.save()
+
+    _apply_capabilities_to_catalog(provider_name, [merged])
+    return {"status": "ok", "provider": provider_name, "model": model_id, "capabilities": merged}
+
+
+@router.delete("/api/capabilities/{provider_name}/{model_id:path}")
+async def delete_capability(provider_name: str, model_id: str):
+    """删除某个模型的能力缓存"""
+    if not _deps.capability_tester:
+        raise HTTPException(status_code=500, detail="能力测试器未初始化")
+
+    cache = _deps.capability_tester.cache
+    removed = cache.remove(provider_name, model_id)
+    if not removed:
+        raise HTTPException(status_code=404, detail=f"未找到 {provider_name}/{model_id} 的能力缓存")
+    cache.save()
+    return {"status": "ok", "provider": provider_name, "model": model_id, "message": "能力缓存已删除"}

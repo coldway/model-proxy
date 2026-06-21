@@ -30,7 +30,7 @@ class ModelConfig(BaseModel):
     priority: int = 1
     rate_limit: RateLimit | None = None
     tool_calling: bool = False
-    timeout: int = Field(default=60, description="请求超时时间（秒），延迟高的模型可设置更长")
+    timeout: int = Field(default=0, description="请求超时时间（秒），0 表示使用 settings.default_model_timeout")
 
 
 class ProviderConfig(BaseModel):
@@ -65,6 +65,14 @@ class AppSettings(BaseModel):
     session_bind_ttl: int = Field(
         default=3600,
         description="会话模型绑定的 TTL（秒），过期后绑定自动失效",
+    )
+    per_consumer_rpm: int = Field(
+        default=0,
+        description="单个 API consumer（按 Bearer token 区分）的每分钟请求数上限，0=不限制",
+    )
+    default_model_timeout: int = Field(
+        default=300,
+        description="模型请求默认超时（秒），模型级 timeout 未配置时使用此值；httpx 客户端超时取此值+60s",
     )
 
 
@@ -148,7 +156,55 @@ class ChatCompletionRequest(BaseModel):
     )
     session_id: str | None = Field(
         default=None,
-        description="会话标识：首次请求成功后自动绑定模型，后续携带相同 session_id 的请求将路由到同一模型",
+        description="会话标识：首次请求成功后自动绑定模型,后续携带相同 session_id 的请求将路由到同一模型",
+    )
+    mode: str | None = Field(
+        default=None,
+        description="执行模式（仅 Cursor provider）：plan（规划模式，只读）、ask（问答模式，只读）、agent（默认，全权限）",
+    )
+    force: bool = Field(
+        default=False,
+        description="强制执行命令（仅 Cursor provider，plan/ask 模式下无效）：允许修改文件无需确认",
+    )
+    sandbox: str | None = Field(
+        default=None,
+        description="沙箱模式（仅 Cursor provider）：enabled（启用沙箱）、disabled（禁用沙箱）",
+    )
+
+    # 工作区相关
+    workspace_path: str | None = Field(
+        default=None,
+        description="工作区目录路径（仅 Cursor provider）：覆盖默认 cwd，支持多项目场景",
+    )
+
+    # 会话管理相关
+    cursor_session_id: str | None = Field(
+        default=None,
+        description="Cursor 原生会话 ID（仅 Cursor provider）：用于 --resume 恢复指定会话",
+    )
+    cursor_continue: bool = Field(
+        default=False,
+        description="继续上次会话（仅 Cursor provider）：使用 --continue 快速恢复最近会话",
+    )
+
+    # Git Worktree 相关
+    worktree_name: str | None = Field(
+        default=None,
+        description="Git worktree 名称（仅 Cursor provider）：在隔离的 git worktree 中运行（-w/--worktree）",
+    )
+    worktree_base: str | None = Field(
+        default=None,
+        description="Worktree 基准分支（仅 Cursor provider）：指定 worktree 的基准分支（--worktree-base）",
+    )
+    skip_worktree_setup: bool = Field(
+        default=False,
+        description="跳过 worktree 设置脚本（仅 Cursor provider）：跳过 .cursor/worktrees.json 中的设置脚本（--skip-worktree-setup）",
+    )
+
+    # MCP 相关
+    approve_mcps: bool = Field(
+        default=False,
+        description="自动批准 MCP 服务器（仅 Cursor provider）：跳过 MCP 确认，适合自动化场景（--approve-mcps）",
     )
 
 
@@ -265,3 +321,46 @@ class ModelDetail(BaseModel):
 class ProviderModelsResponse(BaseModel):
     provider: str
     models: list[ModelDetail]
+
+
+# --- 图像生成 ---
+
+class ImageGenerationRequest(BaseModel):
+    model: str = Field(description="图像模型 ID，如 agnes-image-2.1-flash")
+    prompt: str = Field(description="图像描述")
+    n: int = Field(default=1, ge=1, le=10, description="生成数量")
+    size: str = Field(default="1024x1024", description="图像尺寸，如 1024x1024, 1024x768")
+    seed: int | None = Field(default=None, description="随机种子，用于复现")
+    response_format: str = Field(default="url", description="返回格式: url 或 b64_json")
+
+
+class ImageGenerationResponse(BaseModel):
+    created: int
+    data: list[dict[str, Any]] = Field(description="图像列表，每项含 url 或 b64_json")
+    proxy_info: ProxyInfo | None = None
+
+
+# --- 视频生成 ---
+
+class VideoGenerationRequest(BaseModel):
+    model: str = Field(description="视频模型 ID，如 agnes-video-v2.0")
+    prompt: str = Field(description="视频描述")
+    width: int = Field(default=1152, description="视频宽度（像素）")
+    height: int = Field(default=768, description="视频高度（像素）")
+    num_frames: int = Field(default=121, description="总帧数（需满足 8n+1 且 <= 441）")
+    frame_rate: int = Field(default=24, description="帧率")
+    image_url: str | None = Field(default=None, description="参考图片 URL（图生视频模式）")
+
+
+class VideoCreateResponse(BaseModel):
+    id: str = Field(description="异步任务 ID")
+    status: str = Field(description="任务状态: queued, processing, completed, failed")
+    proxy_info: ProxyInfo | None = None
+
+
+class VideoStatusResponse(BaseModel):
+    id: str = Field(description="任务 ID")
+    status: str = Field(description="任务状态")
+    video_url: str | None = Field(default=None, description="完成后的视频下载 URL")
+    error: str | None = Field(default=None, description="失败原因")
+    proxy_info: ProxyInfo | None = None

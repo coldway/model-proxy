@@ -6,11 +6,33 @@ from __future__ import annotations
 import asyncio
 import hmac
 import logging
+import os
 import sys
 import uuid
 from contextlib import asynccontextmanager
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
+
+
+def _load_env(path: str = ".env") -> None:
+    """加载 .env 文件中的环境变量（不覆盖已有值）"""
+    env_path = Path(path)
+    if not env_path.exists():
+        return
+    for line in env_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+_load_env()
 
 import uvicorn
 from fastapi import FastAPI, Request
@@ -107,6 +129,8 @@ def create_app() -> FastAPI:
         "nvidia": lambda key: create_openai_provider("nvidia", key),
         "cohere": lambda key: create_openai_provider("cohere", key),
         "dashscope": lambda key: create_openai_provider("dashscope", key),
+        "spark": lambda key: create_openai_provider("spark", key),
+        "agnes": lambda key: create_openai_provider("agnes", key),
         "ollama": lambda key: OllamaProvider(key),
     }
 
@@ -201,6 +225,12 @@ def create_app() -> FastAPI:
         catalog.flush()
         dispatcher._payload_tracker.close()
         dispatcher.flush_session_bindings()
+        try:
+            from src.scheduler.memory_pkg._impl import _memory_manager
+            if _memory_manager is not None:
+                _memory_manager.close()
+        except Exception as exc:
+            logger.warning("关闭 MemoryManager 异常: %s", exc)
         await dispatcher.close_providers()
         logger.info("所有资源已释放")
 
@@ -245,6 +275,14 @@ def create_app() -> FastAPI:
         return response
 
     if admin_token or api_token:
+        from collections import deque
+        import time as _time
+
+        _consumer_requests: dict[str, deque] = {}
+        _consumer_rpm = settings.per_consumer_rpm
+        _consumer_gc_last = _time.time()
+        _CONSUMER_GC_INTERVAL = 300
+
         def _extract_bearer(auth_header: str) -> str:
             if auth_header.lower().startswith("bearer "):
                 return auth_header[7:].strip()
@@ -254,6 +292,29 @@ def create_app() -> FastAPI:
             if not given or not expected:
                 return False
             return hmac.compare_digest(given.encode(), expected.encode())
+
+        def _check_consumer_rate(token: str) -> bool:
+            """Per-consumer RPM 限流检查（滑动窗口）"""
+            nonlocal _consumer_gc_last
+            if _consumer_rpm <= 0 or not token:
+                return True
+            if _token_match(token, admin_token):
+                return True
+            now = _time.time()
+            if now - _consumer_gc_last > _CONSUMER_GC_INTERVAL:
+                _consumer_gc_last = now
+                stale = [k for k, dq in _consumer_requests.items() if not dq or dq[-1] < now - 120]
+                for k in stale:
+                    del _consumer_requests[k]
+            if token not in _consumer_requests:
+                _consumer_requests[token] = deque()
+            dq = _consumer_requests[token]
+            while dq and dq[0] < now - 60:
+                dq.popleft()
+            if len(dq) >= _consumer_rpm:
+                return False
+            dq.append(now)
+            return True
 
         @app.middleware("http")
         async def auth_middleware(request: Request, call_next):
@@ -265,6 +326,8 @@ def create_app() -> FastAPI:
                 expected = api_token or admin_token
                 if expected and not _token_match(bearer, expected):
                     return JSONResponse(status_code=401, content={"detail": "未授权：需要有效的 API 令牌"})
+                if not _check_consumer_rate(bearer):
+                    return JSONResponse(status_code=429, content={"detail": f"请求过于频繁，每分钟限 {_consumer_rpm} 次"})
                 return await call_next(request)
             expected = admin_token or api_token
             if expected and not _token_match(bearer, expected):
@@ -275,6 +338,8 @@ def create_app() -> FastAPI:
             _auth_parts.append("管理面板 /api/*")
         if api_token:
             _auth_parts.append("OpenAI API /v1/*")
+        if _consumer_rpm > 0:
+            _auth_parts.append(f"Per-consumer RPM={_consumer_rpm}")
         logger.info("认证已启用: %s", " + ".join(_auth_parts))
 
     app.include_router(router)

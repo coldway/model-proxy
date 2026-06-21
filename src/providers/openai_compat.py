@@ -7,9 +7,7 @@ import json
 import logging
 import time
 import uuid
-from typing import AsyncIterator
-
-import httpx
+from collections.abc import AsyncIterator
 
 from src.models.schemas import (
     ChatCompletionRequest,
@@ -53,6 +51,8 @@ class OpenAICompatibleProvider(BaseProvider):
             "temperature": request.temperature,
             "stream": stream,
         }
+        if stream:
+            payload["stream_options"] = {"include_usage": True}
         if request.max_tokens:
             payload["max_tokens"] = request.max_tokens
         if request.tools:
@@ -117,6 +117,9 @@ class OpenAICompatibleProvider(BaseProvider):
                     break
                 try:
                     chunk = json.loads(payload)
+                    usage = chunk.get("usage")
+                    if usage:
+                        yield {"__usage__": usage}
                     choices = chunk.get("choices", [])
                     if not choices:
                         continue
@@ -125,6 +128,26 @@ class OpenAICompatibleProvider(BaseProvider):
                         yield delta
                 except (json.JSONDecodeError, IndexError, KeyError):
                     continue
+
+    async def image_generation(self, model: str, **kwargs) -> dict:
+        url = f"{self._base_url}/images/generations"
+        payload = {"model": model, **kwargs}
+        resp = await self._client.post(url, headers=self._build_headers(), json=payload, timeout=120.0)
+        resp.raise_for_status()
+        return resp.json()
+
+    async def create_video(self, model: str, **kwargs) -> dict:
+        url = f"{self._base_url}/videos"
+        payload = {"model": model, **kwargs}
+        resp = await self._client.post(url, headers=self._build_headers(), json=payload, timeout=300.0)
+        resp.raise_for_status()
+        return resp.json()
+
+    async def poll_video(self, task_id: str) -> dict:
+        url = f"{self._base_url}/videos/{task_id}"
+        resp = await self._client.get(url, headers=self._build_headers(), timeout=30.0)
+        resp.raise_for_status()
+        return resp.json()
 
     async def list_models(self) -> list[str]:
         """拉取厂商模型列表。网络或认证错误时抛出异常（不再静默返回空列表）。"""
@@ -152,7 +175,13 @@ PROVIDER_BASE_URLS = {
     "nvidia": "https://integrate.api.nvidia.com/v1",
     "cohere": "https://api.cohere.ai/compatibility/v1",
     "dashscope": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "spark": "https://maas-api.cn-huabei-1.xf-yun.com/v2",
+    "agnes": "https://apihub.agnes-ai.com/v1",
 }
+
+
+# 跳过能力测试的厂商（付费厂商，避免无端消耗 tokens）
+SKIP_CAPABILITY_TEST_PROVIDERS = {"dashscope", "spark"}
 
 
 def create_openai_provider(provider_name: str, api_key: str) -> OpenAICompatibleProvider:
@@ -160,4 +189,7 @@ def create_openai_provider(provider_name: str, api_key: str) -> OpenAICompatible
     base_url = PROVIDER_BASE_URLS.get(provider_name)
     if not base_url:
         raise ValueError(f"未知的 OpenAI 兼容厂商: {provider_name}")
-    return OpenAICompatibleProvider(api_key=api_key, base_url=base_url, provider_name=provider_name)
+    provider = OpenAICompatibleProvider(api_key=api_key, base_url=base_url, provider_name=provider_name)
+    if provider_name in SKIP_CAPABILITY_TEST_PROVIDERS:
+        provider.skip_bulk_capability_test = True
+    return provider

@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
 
 from src.models.schemas import ChatCompletionRequest, ChatCompletionResponse
 
@@ -41,6 +41,18 @@ class BaseProvider(ABC):
             if getattr(msg, "tool_calls", None):
                 delta["tool_calls"] = [tc.model_dump() for tc in msg.tool_calls]
         yield delta or {"content": ""}
+
+    async def image_generation(self, model: str, **kwargs) -> dict:
+        """图像生成（子类按需覆盖）"""
+        raise NotImplementedError(f"{self.__class__.__name__} 不支持图像生成")
+
+    async def create_video(self, model: str, **kwargs) -> dict:
+        """创建视频任务（子类按需覆盖）"""
+        raise NotImplementedError(f"{self.__class__.__name__} 不支持视频生成")
+
+    async def poll_video(self, task_id: str) -> dict:
+        """查询视频任务状态（子类按需覆盖）"""
+        raise NotImplementedError(f"{self.__class__.__name__} 不支持视频状态查询")
 
     @abstractmethod
     async def list_models(self) -> list[str]:

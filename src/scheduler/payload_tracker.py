@@ -26,7 +26,8 @@ from src.models.schemas import ChatCompletionRequest
 logger = logging.getLogger(__name__)
 
 _DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
-_LIMITS_FILE = _DATA_DIR / "payload_limits.yaml"
+_LIMITS_FILE = _DATA_DIR / "payload_limits.json"
+_LEGACY_LIMITS_FILE = _DATA_DIR / "payload_limits.yaml"
 
 # 客户端估算与网关实际限制可能有偏差，比较与 413 记录统一使用加缓冲后的估算值
 _PAYLOAD_ESTIMATE_BUFFER = 1.1
@@ -85,15 +86,66 @@ class PayloadTracker:
         self._schedule_flush()
 
     def _load(self) -> None:
-        if not self._path.exists():
+        load_path: Path | None = None
+        if self._path.exists():
+            load_path = self._path
+        elif _LEGACY_LIMITS_FILE.exists():
+            load_path = _LEGACY_LIMITS_FILE
+        if load_path is None:
             return
         try:
-            raw = yaml.safe_load(self._path.read_text(encoding="utf-8"))
+            text = load_path.read_text(encoding="utf-8").strip()
+            if not text:
+                logger.info("payload 上限文件为空，使用默认空记录: %s", load_path.name)
+                self._limits = {}
+                if load_path == self._path:
+                    self._dirty = True
+                    self._persist()
+                return
+
+            raw: Any = None
+            used_yaml_fallback = False
+            if load_path.suffix == ".json":
+                try:
+                    raw = json.loads(text)
+                except json.JSONDecodeError:
+                    raw = yaml.safe_load(text)
+                    used_yaml_fallback = raw is not None
+            else:
+                raw = yaml.safe_load(text)
+
             if isinstance(raw, dict):
                 self._limits = raw
-                logger.info("已加载 %d 个模型的 payload 上限记录", len(self._limits))
+                logger.info(
+                    "已加载 %d 个模型的 payload 上限记录 (from %s)",
+                    len(self._limits), load_path.name,
+                )
+                if load_path != self._path or used_yaml_fallback:
+                    self._dirty = True
+                    self._persist()
+                    if load_path != self._path:
+                        logger.info("已迁移 payload 上限数据从 YAML → JSON")
+                    elif used_yaml_fallback:
+                        logger.info("已修复 payload_limits.json 格式（YAML → JSON）")
+                return
+
+            logger.warning(
+                "payload 上限文件格式无效（期望 dict）: %s，将重置为空记录",
+                load_path.name,
+            )
+            self._limits = {}
+            if load_path == self._path:
+                self._dirty = True
+                self._persist()
         except Exception as e:
-            logger.warning("加载 payload 上限文件失败: %s", e)
+            logger.warning("加载 payload 上限文件失败: %s，将重置为空记录", e)
+            self._limits = {}
+            if load_path == self._path:
+                try:
+                    self._dirty = True
+                    self._persist()
+                except Exception:
+                    pass
 
     def _save(self) -> None:
         """标记为脏，由内部定时器自动持久化"""
@@ -105,7 +157,7 @@ class PayloadTracker:
         import tempfile
         try:
             self._path.parent.mkdir(parents=True, exist_ok=True)
-            content = yaml.dump(self._limits, allow_unicode=True, default_flow_style=False)
+            content = json.dumps(self._limits, ensure_ascii=False)
             fd, tmp_path = tempfile.mkstemp(dir=str(self._path.parent), suffix=".tmp")
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 f.write(content)

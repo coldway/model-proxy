@@ -75,8 +75,19 @@ class CatalogManager:
             if not self._dirty:
                 return
             try:
-                with open(self._path, "w", encoding="utf-8") as f:
-                    yaml.dump(self._data, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+                import tempfile, os
+                dir_name = os.path.dirname(self._path) or "."
+                fd, tmp_path = tempfile.mkstemp(suffix=".tmp", dir=dir_name)
+                try:
+                    with os.fdopen(fd, "w", encoding="utf-8") as f:
+                        yaml.dump(self._data, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+                    os.replace(tmp_path, self._path)
+                except BaseException:
+                    try:
+                        os.unlink(tmp_path)
+                    except OSError:
+                        pass
+                    raise
                 self._dirty = False
                 logger.info("模型目录已保存至 %s", self._path)
             except Exception as e:

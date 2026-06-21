@@ -9,17 +9,21 @@
 
 from fastapi import APIRouter
 
-from src.api.routes_pkg.deps import _deps, init_routes, record_failure, map_dispatch_error  # noqa: F401
 from src.api.routes_pkg import (
-    health,
+    anthropic_messages,
     chat_completions,
-    models,
-    config,
-    history,
     chat_sessions,
+    config,
+    cursor,
+    health,
+    history,
+    images,
     logs,
+    models,
     testing,
+    videos,
 )
+from src.api.routes_pkg.deps import _deps, init_routes, map_dispatch_error, record_failure  # noqa: F401
 
 router = APIRouter()
 
@@ -31,6 +35,10 @@ router.include_router(history.router)
 router.include_router(chat_sessions.router)
 router.include_router(logs.router)
 router.include_router(testing.router)
+router.include_router(cursor.router)
+router.include_router(anthropic_messages.router)
+router.include_router(images.router)
+router.include_router(videos.router)
 
 # 向后兼容导出（internal_tools.py 等直接 import 这些）
 StructuredTestRequest = testing.StructuredTestRequest

@@ -6,6 +6,7 @@ from __future__ import annotations
 import logging
 import re
 import time
+from collections import OrderedDict
 from typing import TYPE_CHECKING, Any
 
 from src.models.schemas import ChatCompletionRequest, ChatMessage, ModelConfig
@@ -14,8 +15,6 @@ if TYPE_CHECKING:
     pass
 
 logger = logging.getLogger(__name__)
-
-ROUTE_CACHE_MAX = 128
 
 
 class RoutingMixin:
@@ -30,16 +29,19 @@ class RoutingMixin:
                 return None
             model_name, ts = entry
             if time.time() - ts < self._route_cache_ttl:
+                self._route_cache.move_to_end(feature_hash)
                 logger.info("路由缓存命中: %s → %s", feature_hash, model_name)
                 return model_name
-            self._route_cache.pop(feature_hash, None)
+            del self._route_cache[feature_hash]
             return None
 
     def _set_cached_route(self, feature_hash: str, model_name: str) -> None:
         with self._route_cache_lock:
-            if len(self._route_cache) >= ROUTE_CACHE_MAX:
-                oldest_key = min(self._route_cache, key=lambda k: self._route_cache[k][1])
-                del self._route_cache[oldest_key]
+            from src.scheduler.dispatcher import ROUTE_CACHE_MAX
+            if feature_hash in self._route_cache:
+                self._route_cache.move_to_end(feature_hash)
+            elif len(self._route_cache) >= ROUTE_CACHE_MAX:
+                self._route_cache.popitem(last=False)
             self._route_cache[feature_hash] = (model_name, time.time())
             self._route_hit_counter[model_name] = self._route_hit_counter.get(model_name, 0) + 1
 
@@ -126,6 +128,12 @@ class RoutingMixin:
 
         except Exception as e:
             logger.warning("LLM 路由调用失败: %s，回退到规则排序", e)
+            if hasattr(self, '_history') and self._history:
+                self._history.record(
+                    provider=router_prov, model=router_model,
+                    success=False, latency_ms=0, error=f"route_llm_fail: {e}",
+                    route_strategy="LLM路由失败",
+                )
             return None
 
     def _pick_router_model(

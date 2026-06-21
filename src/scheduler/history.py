@@ -38,7 +38,7 @@ class RequestRecord:
 
 
 class RequestHistory:
-    """请求历史记录器，支持内存队列 + 文件持久化"""
+    """请求历史记录器，支持内存队列 + 文件持久化 + 增量统计"""
 
     def __init__(self, persist: bool = True, *, max_memory_records: int | None = None):
         cap = max_memory_records if max_memory_records is not None else DEFAULT_MAX_MEMORY_RECORDS
@@ -48,9 +48,47 @@ class RequestHistory:
         self._pending: list[RequestRecord] = []
         self._pending_lock = threading.Lock()
         self._flush_timer: threading.Timer | None = None
+        self._stats_lock = threading.Lock()
+        self._total = 0
+        self._success = 0
+        self._total_latency = 0.0
+        self._total_prompt_tokens = 0
+        self._total_completion_tokens = 0
+        self._by_provider: dict[str, dict[str, Any]] = {}
+        self._by_model_tokens: dict[str, dict[str, int]] = {}
+        self._route_strategies: dict[str, int] = {}
         if persist:
             HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
             self._load_and_cleanup()
+
+    def _update_incremental_stats(self, rec: RequestRecord) -> None:
+        """增量更新统计计数器（O(1)）"""
+        with self._stats_lock:
+            self._total += 1
+            if rec.success:
+                self._success += 1
+            self._total_latency += rec.latency_ms
+            self._total_prompt_tokens += rec.prompt_tokens
+            self._total_completion_tokens += rec.completion_tokens
+            prov = rec.provider
+            if prov not in self._by_provider:
+                self._by_provider[prov] = {"total": 0, "success": 0, "total_latency": 0.0, "prompt_tokens": 0, "completion_tokens": 0}
+            pd = self._by_provider[prov]
+            pd["total"] += 1
+            if rec.success:
+                pd["success"] += 1
+            pd["total_latency"] += rec.latency_ms
+            pd["prompt_tokens"] += rec.prompt_tokens
+            pd["completion_tokens"] += rec.completion_tokens
+            model_key = f"{rec.provider}:{rec.model}"
+            if model_key not in self._by_model_tokens:
+                self._by_model_tokens[model_key] = {"prompt": 0, "completion": 0, "total": 0}
+            mt = self._by_model_tokens[model_key]
+            mt["prompt"] += rec.prompt_tokens
+            mt["completion"] += rec.completion_tokens
+            mt["total"] += rec.prompt_tokens + rec.completion_tokens
+            if rec.route_strategy:
+                self._route_strategies[rec.route_strategy] = self._route_strategies.get(rec.route_strategy, 0) + 1
 
     def record(
         self,
@@ -76,6 +114,7 @@ class RequestHistory:
             route_strategy=route_strategy,
         )
         self._records.append(rec)
+        self._update_incremental_stats(rec)
 
         if self._persist:
             with self._pending_lock:
@@ -88,56 +127,35 @@ class RequestHistory:
         return [r.to_dict() for r in reversed(records)]
 
     def get_stats(self) -> dict[str, Any]:
-        """获取汇总统计（含 token 用量和路由策略分布）"""
-        if not self._records:
-            return {"total": 0, "success_rate": 0, "avg_latency_ms": 0, "by_provider": {}, "tokens": {}, "route_strategies": {}}
+        """获取汇总统计（O(1) 增量计数器 + 按需扫描 model token 分布）"""
+        with self._stats_lock:
+            total = self._total
+            if total == 0:
+                return {"total": 0, "success_rate": 0, "avg_latency_ms": 0, "by_provider": {}, "tokens": {}, "route_strategies": {}}
 
-        total = len(self._records)
-        success = sum(1 for r in self._records if r.success)
-        avg_latency = sum(r.latency_ms for r in self._records) / total
-
-        total_prompt = sum(r.prompt_tokens for r in self._records)
-        total_completion = sum(r.completion_tokens for r in self._records)
-
-        by_provider: dict[str, dict[str, Any]] = {}
-        by_model_tokens: dict[str, dict[str, int]] = {}
-        route_strategies: dict[str, int] = {}
-
-        for r in self._records:
-            key = r.provider
-            if key not in by_provider:
-                by_provider[key] = {"total": 0, "success": 0, "total_latency": 0, "prompt_tokens": 0, "completion_tokens": 0}
-            by_provider[key]["total"] += 1
-            if r.success:
-                by_provider[key]["success"] += 1
-            by_provider[key]["total_latency"] += r.latency_ms
-            by_provider[key]["prompt_tokens"] += r.prompt_tokens
-            by_provider[key]["completion_tokens"] += r.completion_tokens
-
-            model_key = f"{r.provider}:{r.model}"
-            if model_key not in by_model_tokens:
-                by_model_tokens[model_key] = {"prompt": 0, "completion": 0, "total": 0}
-            by_model_tokens[model_key]["prompt"] += r.prompt_tokens
-            by_model_tokens[model_key]["completion"] += r.completion_tokens
-            by_model_tokens[model_key]["total"] += r.prompt_tokens + r.completion_tokens
-
-            if r.route_strategy:
-                route_strategies[r.route_strategy] = route_strategies.get(r.route_strategy, 0) + 1
-
-        for prov in by_provider.values():
-            prov["avg_latency_ms"] = round(prov["total_latency"] / prov["total"], 1)
-            prov["success_rate"] = round(prov["success"] / prov["total"] * 100, 1)
-            del prov["total_latency"]
+            avg_latency = self._total_latency / total
+            by_provider = {}
+            for prov, pd in self._by_provider.items():
+                by_provider[prov] = {
+                    "total": pd["total"],
+                    "success": pd["success"],
+                    "avg_latency_ms": round(pd["total_latency"] / pd["total"], 1) if pd["total"] else 0,
+                    "success_rate": round(pd["success"] / pd["total"] * 100, 1) if pd["total"] else 0,
+                    "prompt_tokens": pd["prompt_tokens"],
+                    "completion_tokens": pd["completion_tokens"],
+                }
+            route_strategies = dict(self._route_strategies)
+            by_model_tokens = {k: dict(v) for k, v in self._by_model_tokens.items()}
 
         return {
             "total": total,
-            "success_rate": round(success / total * 100, 1),
+            "success_rate": round(self._success / total * 100, 1),
             "avg_latency_ms": round(avg_latency, 1),
             "by_provider": by_provider,
             "tokens": {
-                "total_prompt": total_prompt,
-                "total_completion": total_completion,
-                "total": total_prompt + total_completion,
+                "total_prompt": self._total_prompt_tokens,
+                "total_completion": self._total_completion_tokens,
+                "total": self._total_prompt_tokens + self._total_completion_tokens,
                 "by_model": by_model_tokens,
             },
             "route_strategies": route_strategies,
@@ -217,6 +235,7 @@ class RequestHistory:
                             route_strategy=data.get("route_strategy", ""),
                         )
                         self._records.append(rec)
+                        self._update_incremental_stats(rec)
                         loaded += 1
                     except KeyError:
                         continue

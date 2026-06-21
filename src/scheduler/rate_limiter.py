@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import threading
 import time
@@ -11,12 +12,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-import yaml
-
 logger = logging.getLogger(__name__)
 
-USAGE_FILE = Path("data/usage_daily.yaml")
-BLACKLIST_FILE = Path("data/model_blacklist.yaml")
+USAGE_FILE = Path("data/usage_daily.json")
+BLACKLIST_FILE = Path("data/model_blacklist.json")
 SAVE_DEBOUNCE_SECONDS = 30
 
 
@@ -86,7 +85,7 @@ class RateLimiter:
         if not USAGE_FILE.exists():
             return
         try:
-            raw: dict[str, Any] = yaml.safe_load(USAGE_FILE.read_text(encoding="utf-8")) or {}
+            raw: dict[str, Any] = json.loads(USAGE_FILE.read_text(encoding="utf-8")) or {}
             today = self._today()
             for key, data in raw.items():
                 if not isinstance(data, dict):
@@ -152,7 +151,7 @@ class RateLimiter:
                     "daily_tokens": usage.daily_tokens,
                     "last_reset_day": usage.last_reset_day,
                 }
-            content = yaml.dump(snapshot, allow_unicode=True, default_flow_style=False)
+            content = json.dumps(snapshot, ensure_ascii=False)
             fd, tmp_path = tempfile.mkstemp(dir=str(USAGE_FILE.parent), suffix=".tmp")
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 f.write(content)
@@ -400,13 +399,11 @@ class RateLimiter:
         if not BLACKLIST_FILE.exists():
             return
         try:
-            raw = yaml.safe_load(BLACKLIST_FILE.read_text(encoding="utf-8")) or {}
+            raw = json.loads(BLACKLIST_FILE.read_text(encoding="utf-8")) or {}
             now = time.time()
             for k, v in raw.items():
                 if isinstance(v, (int, float)) and v > now:
                     self._blacklist[k] = float(v)
-                elif isinstance(v, str):
-                    pass  # 旧格式日期字符串，跳过（视为过期）
             if self._blacklist:
                 logger.info("从磁盘恢复了 %d 个模型的 429 封禁", len(self._blacklist))
         except Exception as e:
@@ -433,7 +430,7 @@ class RateLimiter:
             BLACKLIST_FILE.parent.mkdir(parents=True, exist_ok=True)
             with self._lock:
                 snapshot = dict(self._blacklist)
-            content = yaml.dump(snapshot, allow_unicode=True, default_flow_style=False)
+            content = json.dumps(snapshot, ensure_ascii=False)
             fd, tmp_path = tempfile.mkstemp(dir=str(BLACKLIST_FILE.parent), suffix=".tmp")
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 f.write(content)

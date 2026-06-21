@@ -357,6 +357,16 @@ async def _do_stream_chat(session, request, trace_id: str, memory_mgr, user_msg:
             messages=[ChatMessage(role=m["role"], content=m["content"], tool_calls=m.get("tool_calls"), tool_call_id=m.get("tool_call_id"), name=m.get("name")) for m in context_messages],
             temperature=request.temperature, max_tokens=request.max_tokens, stream=stream,
             tools=tools if include_tools else None,
+            mode=request.mode,
+            force=request.force,
+            sandbox=request.sandbox,
+            workspace_path=request.workspace_path,
+            cursor_session_id=request.cursor_session_id,
+            cursor_continue=request.cursor_continue,
+            worktree_name=request.worktree_name,
+            worktree_base=request.worktree_base,
+            skip_worktree_setup=request.skip_worktree_setup,
+            approve_mcps=request.approve_mcps,
         )
 
     try:

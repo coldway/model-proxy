@@ -9,7 +9,7 @@ import logging
 import re
 from typing import TYPE_CHECKING, Any
 
-from src.config.capability_tester import merge_catalog_capabilities
+from src.config.capability_tester import merge_catalog_capabilities, SKIP_TEST_PROVIDERS
 from src.models.schemas import ChatCompletionRequest, ModelConfig
 from src.scheduler.payload_tracker import estimate_payload_bytes
 
@@ -95,11 +95,15 @@ class FilteringMixin:
     def _filter_available(
         self, models: list[tuple[str, ModelConfig]],
         payload_bytes: int = 0,
+        exclude_manual_only: bool = True,
     ) -> list[tuple[str, ModelConfig]]:
         non_broken = []
         for prov_name, model_cfg in models:
             if self._breaker.is_open(prov_name, model_cfg.name):
                 logger.info("跳过 %s:%s — 处于熔断状态", prov_name, model_cfg.name)
+                continue
+            # 排除仅限指定调用的厂商（dashscope等），不参与 auto 路由
+            if exclude_manual_only and prov_name in SKIP_TEST_PROVIDERS:
                 continue
             non_broken.append((prov_name, model_cfg))
 

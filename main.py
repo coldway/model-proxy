@@ -141,7 +141,7 @@ def create_app() -> FastAPI:
             rate_limiter.flush()
             history.flush()
             catalog.flush()
-            dispatcher.payload_tracker.flush()
+            dispatcher._payload_tracker.flush()
             from src.api.routes import _deps
             if _deps.cost_tracker:
                 _deps.cost_tracker.flush()
@@ -199,7 +199,7 @@ def create_app() -> FastAPI:
         rate_limiter.flush()
         history.flush()
         catalog.flush()
-        dispatcher.payload_tracker.close()
+        dispatcher._payload_tracker.close()
         dispatcher.flush_session_bindings()
         await dispatcher.close_providers()
         logger.info("所有资源已释放")

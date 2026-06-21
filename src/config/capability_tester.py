@@ -27,6 +27,9 @@ logger = logging.getLogger(__name__)
 
 CAPABILITIES_FILE = Path("conf/model_capabilities.yaml")
 
+# 跳过能力测试的厂商列表（直接标记为 available=True，减少 API 用量消耗）
+SKIP_TEST_PROVIDERS: set[str] = {"dashscope"}
+
 # catalog（providers_catalog）中可手动标注的能力字段；与探测缓存合并时以此为准
 _CATALOG_CAP_OVERRIDE_KEYS = frozenset({
     "tool_calling", "streaming", "multi_turn_tc", "chinese", "vision",
@@ -613,6 +616,32 @@ class CapabilityTester:
         """
         all_results = {}
         for prov_name, model_ids in model_map.items():
+            # 跳过指定厂商的能力测试（节省 API 用量）
+            if prov_name in SKIP_TEST_PROVIDERS:
+                logger.info("厂商 %s 在跳过列表中，不执行能力测试，直接标记为可用", prov_name)
+                results = []
+                for mid in model_ids:
+                    default_result = {
+                        "provider": prov_name,
+                        "model": mid,
+                        "available": True,
+                        "tool_calling": False,
+                        "multi_turn_tc": False,
+                        "chinese": True,
+                        "vision": False,
+                        "json_mode": True,
+                        "streaming": True,
+                        "reasoning": False,
+                        "latency_ms": 0,
+                        "error": None,
+                        "skipped": True,
+                    }
+                    self._cache.set(prov_name, mid, default_result)
+                    results.append(default_result)
+                self._cache.save()
+                all_results[prov_name] = results
+                continue
+
             provider = providers.get(prov_name)
             if not provider:
                 logger.warning("厂商 %s 未注册，跳过测试", prov_name)

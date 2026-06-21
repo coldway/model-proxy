@@ -90,12 +90,12 @@ async def clear_session_bindings(session_id: str = ""):
 @router.get("/api/payload-limits")
 async def get_payload_limits():
     """获取所有模型的 payload 上限记录"""
-    limits = _deps.dispatcher.payload_tracker.get_all_limits()
+    limits = _deps.dispatcher._payload_tracker.get_all_limits()
     return {"limits": limits, "count": len(limits)}
 
 
 @router.delete("/api/payload-limits/clear")
 async def clear_payload_limits(provider: str = "", model: str = ""):
     """清除 payload 上限记录"""
-    count = _deps.dispatcher.payload_tracker.clear(provider, model)
+    count = _deps.dispatcher._payload_tracker.clear(provider, model)
     return {"status": "ok", "cleared": count}

@@ -35,7 +35,7 @@ class ProviderCallMixin:
         provider_name: str,
         model_name: str,
         request: ChatCompletionRequest,
-        timeout: int = 60,
+        timeout: int = 600,
         is_routing: bool = False,
         trace_id: str = "",
         *,
@@ -115,7 +115,7 @@ class ProviderCallMixin:
 
             content_preview = ""
             if reply_content:
-                preview = reply_content[:200].replace("\n", "\\n")
+                preview = reply_content.replace("\n", "\\n")
                 content_preview = f" 内容预览={preview!r}"
 
             logger.info(
@@ -130,8 +130,6 @@ class ProviderCallMixin:
             )
 
             raw_msg_dict = msg_obj.model_dump() if msg_obj and hasattr(msg_obj, "model_dump") else {}
-            if raw_msg_dict.get("content") and len(raw_msg_dict["content"]) > 500:
-                raw_msg_dict["content"] = raw_msg_dict["content"][:500] + f"…(截断,共{len(reply_content)}字符)"
             logger.debug(
                 "[%s] trace=%s 完整响应 message 对象:\n%s",
                 tag, trace_id,
@@ -210,7 +208,7 @@ class ProviderCallMixin:
             role = m.role if hasattr(m, "role") else m.get("role", "")
             content = m.content if hasattr(m, "content") else m.get("content", "")
             if role == "user" and isinstance(content, str):
-                last_user = content[:200]
+                last_user = content
                 break
         return f"[{role_str}] 最新用户消息: {last_user!r}"
 

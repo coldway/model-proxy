@@ -8,6 +8,8 @@
 
 ### 新功能（Feature）
 
+- **百炼（dashscope）跳过能力测试**：`SKIP_TEST_PROVIDERS` 配置集合，dashscope 刷新模型时不执行能力探测（节省 API 用量），直接标记为 available + chinese + streaming + json_mode
+- **百炼模型排除 auto 路由**：`_filter_available` 自动排除 `SKIP_TEST_PROVIDERS` 中的厂商模型，仅允许通过 `model=xxx` 指定调用（防止 auto 模式误消耗百炼配额）
 - **Ollama 本地模型 Provider**：新增 `src/providers/ollama.py`，接入本地 Ollama 实例
   - 无需 API Key，通过 OpenAI 兼容 API（`/v1/chat/completions`）接入
   - 实时查询本地已安装模型（`/api/tags`），自动注册到 Catalog

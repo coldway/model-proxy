@@ -204,7 +204,7 @@ class RoutingMixin:
         last_user = ""
         for msg in reversed(request.messages):
             if msg.role == "user" and isinstance(msg.content, str):
-                last_user = msg.content[:200]
+                last_user = msg.content
                 break
         if last_user:
             features.append(f"最新用户消息: \"{last_user}\"")

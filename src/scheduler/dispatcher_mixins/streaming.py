@@ -290,13 +290,11 @@ class StreamingMixin:
 
                 reasoning_summary = ""
                 if reasoning_text:
-                    preview = reasoning_text[:200] + ("…" if len(reasoning_text) > 200 else "")
-                    reasoning_summary = f" reasoning({len(reasoning_text)}字符)={preview!r}"
+                    reasoning_summary = f" reasoning({len(reasoning_text)}字符)={reasoning_text!r}"
 
                 content_preview = ""
                 if full_text:
-                    preview = full_text[:200].replace("\n", "\\n")
-                    content_preview = f" 内容预览={preview!r}"
+                    content_preview = f" 内容预览={full_text!r}"
 
                 logger.info(
                     "[流式] trace=%s 响应完成 %s:%s | 耗时=%.0fms chunks=%d 响应长度=%d%s%s%s",
@@ -309,9 +307,9 @@ class StreamingMixin:
                 if tc_names:
                     debug_response["tool_calls_count"] = len(tc_names)
                 if reasoning_text:
-                    debug_response["reasoning"] = reasoning_text[:500]
+                    debug_response["reasoning"] = reasoning_text
                 if full_text:
-                    debug_response["content_preview"] = full_text[:500]
+                    debug_response["content_preview"] = full_text
                 logger.debug(
                     "[流式] trace=%s 完整响应详情:\n%s",
                     trace_id,

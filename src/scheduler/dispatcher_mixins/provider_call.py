@@ -34,6 +34,7 @@ class ProviderCallMixin:
         self,
         provider_name: str,
         model_name: str,
+        request: ChatCompletionRequest,
         timeout: int = 600,
         is_routing: bool = False,
         trace_id: str = "",

@@ -36,7 +36,7 @@ class GoogleProvider(BaseProvider):
     def __init__(self, api_key: str):
         super().__init__(api_key)
         from src.providers.utils import create_http_client
-        self._client = create_http_client(timeout=120.0)
+        self._client = create_http_client()
 
     def _auth_headers(self) -> dict:
         """使用 Header 传递 API Key（避免 Key 泄露到 URL 日志）"""

@@ -55,6 +55,7 @@ from src.providers.openai_compat import create_openai_provider
 from src.scheduler.dispatcher import Dispatcher
 from src.scheduler.history import RequestHistory
 from src.scheduler.rate_limiter import RateLimiter
+from src.providers.utils import configure_timeouts
 
 from src.api.log_buffer import install as install_log_buffer, preload_from_file as preload_logs
 
@@ -100,6 +101,16 @@ def create_app() -> FastAPI:
     log_level = getattr(logging, settings.log_level.upper(), logging.INFO)
     logging.getLogger().setLevel(log_level)
 
+    configure_timeouts(
+        read_timeout=float(settings.http_read_timeout),
+        connect_timeout=float(settings.http_connect_timeout),
+    )
+    logger.info(
+        "HTTP 超时配置: connect=%ds, read=%ds",
+        settings.http_connect_timeout,
+        settings.http_read_timeout,
+    )
+
     rate_limiter = RateLimiter()
     history = RequestHistory(
         persist=True,
@@ -116,23 +127,25 @@ def create_app() -> FastAPI:
     )
 
     # 注册各厂商 Provider（根据 API Key 是否存在决定是否注册）
-    provider_factories = {
+    # 独立适配器（有专门 Python 实现的厂商）
+    provider_factories: dict[str, Any] = {
         "google": lambda key: GoogleProvider(key),
         "groq": lambda key: GroqProvider(key),
         "github": lambda key: GitHubProvider(key),
         "cloudflare": lambda key: CloudflareProvider(key),
         "huggingface": lambda key: HuggingFaceProvider(key),
-        "cerebras": lambda key: create_openai_provider("cerebras", key),
-        "sambanova": lambda key: create_openai_provider("sambanova", key),
-        "openrouter": lambda key: create_openai_provider("openrouter", key),
-        "mistral": lambda key: create_openai_provider("mistral", key),
-        "nvidia": lambda key: create_openai_provider("nvidia", key),
-        "cohere": lambda key: create_openai_provider("cohere", key),
-        "dashscope": lambda key: create_openai_provider("dashscope", key),
-        "spark": lambda key: create_openai_provider("spark", key),
-        "agnes": lambda key: create_openai_provider("agnes", key),
         "ollama": lambda key: OllamaProvider(key),
     }
+
+    # 自动发现 catalog 中 type=openai_compat 的厂商，无需手动逐个注册
+    for prov_id, prov_cfg in catalog.get_providers_sorted():
+        if prov_cfg.get("type") == "openai_compat" and prov_id not in provider_factories:
+            base_url = prov_cfg.get("base_url")
+            if base_url:
+                _pid = prov_id  # 闭包变量捕获
+                provider_factories[_pid] = lambda key, pid=_pid: create_openai_provider(pid, key)
+            else:
+                logger.warning("厂商 %s 声明 type=openai_compat 但缺少 base_url，跳过", prov_id)
 
     _NO_KEY_PROVIDERS = {"ollama"}
 

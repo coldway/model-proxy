@@ -41,7 +41,7 @@ class HuggingFaceProvider(BaseProvider):
     def __init__(self, api_key: str):
         super().__init__(api_key)
         from src.providers.utils import create_http_client
-        self._client = create_http_client(timeout=120.0)
+        self._client = create_http_client()
 
     async def close(self) -> None:
         await self._client.aclose()

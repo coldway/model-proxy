@@ -74,6 +74,14 @@ class AppSettings(BaseModel):
         default=300,
         description="模型请求默认超时（秒），模型级 timeout 未配置时使用此值；httpx 客户端超时取此值+60s",
     )
+    http_connect_timeout: int = Field(
+        default=15,
+        description="httpx 连接超时（秒），连接不上时快速 failover 到下一个 provider",
+    )
+    http_read_timeout: int = Field(
+        default=600,
+        description="httpx 读写超时（秒），LLM 生成可能耗时较长",
+    )
 
 
 class AppConfig(BaseModel):

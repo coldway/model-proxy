@@ -5125,8 +5125,49 @@ google/antigravity-preview-05-2026:
   error: rate_limited (429)
   tested_at: '2026-06-10 11:19:26'
 spark/xopqwen36v35b:
+  provider: spark
+  model: xopqwen36v35b
   available: true
-  tested_at: '2026-06-10 14:37:57'
-  streaming: true
   tool_calling: true
+  tc_method: native
+  multi_turn_tc: true
   chinese: true
+  vision: true
+  json_mode: true
+  streaming: true
+  reasoning: false
+  latency_ms: 2898
+  error: null
+  probe_response: 'get_current_time({"city": "北京"})'
+  mt_response: 北京现在是2026年5月13日16:00:00（CST）。
+  chinese_response: 三个或三个以上音按三度关系叠置。
+  vision_response: ' Red'
+  json_sample: "{\n  \"instruments\": [\n    {\n      \"name\": \"钢琴\",\n      \"\
+    type\": \"键盘乐器\"\n    },\n    {"
+  stream_chunks: 5
+  stream_ttfb_ms: 9149
+  tested_at: '2026-06-12 15:47:58'
+spark/xopqwen35v35b:
+  provider: spark
+  model: xopqwen35v35b
+  available: true
+  tool_calling: true
+  tc_method: native
+  multi_turn_tc: true
+  chinese: true
+  vision: true
+  json_mode: true
+  streaming: true
+  reasoning: true
+  latency_ms: 1089
+  error: null
+  probe_response: 'get_current_time({"city": "北京"})'
+  mt_response: 北京现在是 2026年5月13日 16:00:00。
+  chinese_response: 三个或更多音符同时发声的组合。
+  vision_response: ' Red'
+  json_sample: '{"instruments": [{"name": "钢琴", "type": "键盘乐器"}, {"name": "小提琴", "type":
+    "弦乐器"},'
+  stream_chunks: 5
+  stream_ttfb_ms: 377
+  reasoning_response: 先开一开关久后关，开另一开关，进屋：亮灯、热灯、灭灯对应三开关。
+  tested_at: '2026-06-12 15:33:09'

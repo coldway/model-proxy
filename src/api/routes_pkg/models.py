@@ -26,10 +26,14 @@ router = APIRouter()
 
 @router.get("/v1/models", response_model=ModelListResponse)
 async def list_models():
-    """列出所有已配置模型（含已探测的能力信息）"""
+    """列出所有已启用厂商的已启用模型（含已探测的能力信息）"""
     models = []
     for prov_name, prov in _deps.config_manager.config.providers.items():
+        if not prov.enabled:
+            continue
         for m in prov.models:
+            if not m.enabled:
+                continue
             caps = ModelCapabilities()
             cached_raw: dict | None = None
             if _deps.capability_tester:

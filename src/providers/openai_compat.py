@@ -28,12 +28,15 @@ class OpenAICompatibleProvider(BaseProvider):
     适用于所有兼容 OpenAI API 格式的厂商。
     """
 
-    def __init__(self, api_key: str, base_url: str, provider_name: str = "openai_compat"):
+    def __init__(
+        self, api_key: str, base_url: str, provider_name: str = "openai_compat",
+        read_timeout: float | None = None, connect_timeout: float | None = None,
+    ):
         super().__init__(api_key)
         self._base_url = base_url.rstrip("/")
         self._provider_name = provider_name
         from src.providers.utils import create_http_client
-        self._client = create_http_client(timeout=120.0)
+        self._client = create_http_client(timeout=read_timeout, connect_timeout=connect_timeout)
 
     async def close(self) -> None:
         await self._client.aclose()
@@ -166,30 +169,49 @@ class OpenAICompatibleProvider(BaseProvider):
             return False
 
 
-# 预定义各厂商的 base_url
-PROVIDER_BASE_URLS = {
-    "cerebras": "https://api.cerebras.ai/v1",
-    "sambanova": "https://api.sambanova.ai/v1",
-    "openrouter": "https://openrouter.ai/api/v1",
-    "mistral": "https://api.mistral.ai/v1",
-    "nvidia": "https://integrate.api.nvidia.com/v1",
-    "cohere": "https://api.cohere.ai/compatibility/v1",
-    "dashscope": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-    "spark": "https://maas-api.cn-huabei-1.xf-yun.com/v2",
-    "agnes": "https://apihub.agnes-ai.com/v1",
-}
-
-
 # 跳过能力测试的厂商（付费厂商，避免无端消耗 tokens）
 SKIP_CAPABILITY_TEST_PROVIDERS = {"dashscope", "spark"}
 
+# CatalogManager 单例缓存，避免每次 create 都重新加载 YAML
+_catalog_instance = None
 
-def create_openai_provider(provider_name: str, api_key: str) -> OpenAICompatibleProvider:
-    """工厂方法：根据厂商名创建对应的 OpenAI 兼容 Provider"""
-    base_url = PROVIDER_BASE_URLS.get(provider_name)
+
+def _get_catalog():
+    global _catalog_instance
+    if _catalog_instance is None:
+        from src.config.catalog import CatalogManager
+        _catalog_instance = CatalogManager()
+    return _catalog_instance
+
+
+def create_openai_provider(
+    provider_name: str, api_key: str,
+    read_timeout: float | None = None, connect_timeout: float | None = None,
+    base_url_override: str | None = None,
+) -> OpenAICompatibleProvider:
+    """工厂方法：根据厂商名创建对应的 OpenAI 兼容 Provider
+
+    base_url 来源：
+    1. base_url_override 参数（显式传入）
+    2. providers_catalog.yaml 中的 base_url 字段
+    """
+    base_url = base_url_override
     if not base_url:
-        raise ValueError(f"未知的 OpenAI 兼容厂商: {provider_name}")
-    provider = OpenAICompatibleProvider(api_key=api_key, base_url=base_url, provider_name=provider_name)
+        try:
+            prov = _get_catalog().get_provider(provider_name)
+            if prov:
+                base_url = prov.get("base_url")
+        except Exception:
+            pass
+    if not base_url:
+        raise ValueError(
+            f"未知的 OpenAI 兼容厂商: {provider_name}"
+            f"（请在 providers_catalog.yaml 中配置 type: openai_compat 和 base_url）"
+        )
+    provider = OpenAICompatibleProvider(
+        api_key=api_key, base_url=base_url, provider_name=provider_name,
+        read_timeout=read_timeout, connect_timeout=connect_timeout,
+    )
     if provider_name in SKIP_CAPABILITY_TEST_PROVIDERS:
         provider.skip_bulk_capability_test = True
     return provider

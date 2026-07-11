@@ -51,6 +51,7 @@ from src.providers.google import GoogleProvider
 from src.providers.groq import GroqProvider
 from src.providers.huggingface import HuggingFaceProvider
 from src.providers.ollama import OllamaProvider
+from src.providers.rapid_mlx import RapidMLXProvider
 from src.providers.openai_compat import create_openai_provider
 from src.scheduler.dispatcher import Dispatcher
 from src.scheduler.history import RequestHistory
@@ -135,6 +136,7 @@ def create_app() -> FastAPI:
         "cloudflare": lambda key: CloudflareProvider(key),
         "huggingface": lambda key: HuggingFaceProvider(key),
         "ollama": lambda key: OllamaProvider(key),
+        "rapid_mlx": lambda key: RapidMLXProvider(key),
     }
 
     # 自动发现 catalog 中 type=openai_compat 的厂商，无需手动逐个注册
@@ -147,7 +149,7 @@ def create_app() -> FastAPI:
             else:
                 logger.warning("厂商 %s 声明 type=openai_compat 但缺少 base_url，跳过", prov_id)
 
-    _NO_KEY_PROVIDERS = {"ollama"}
+    _NO_KEY_PROVIDERS = {"ollama", "rapid_mlx"}
 
     for name, factory in provider_factories.items():
         api_key = config_manager.get_api_key(name)
@@ -220,6 +222,20 @@ def create_app() -> FastAPI:
                     logger.warning("Ollama 启动模型发现失败（服务可能未运行）: %s", exc)
 
             asyncio.create_task(_ollama_background_discover())
+
+        rapid_mlx_prov = dispatcher.get_provider("rapid_mlx")
+        if isinstance(rapid_mlx_prov, RapidMLXProvider):
+            rapid_mlx_prov.set_breaker(dispatcher._breaker)
+
+            async def _rapid_mlx_background_discover():
+                try:
+                    added = await rapid_mlx_prov.discover_and_register(catalog)
+                    if added:
+                        logger.info("Rapid-MLX 启动发现 %d 个本地模型", len(added))
+                except Exception as exc:
+                    logger.warning("Rapid-MLX 启动模型发现失败（服务可能未运行）: %s", exc)
+
+            asyncio.create_task(_rapid_mlx_background_discover())
 
         yield
         flush_task.cancel()

@@ -49,7 +49,7 @@ class ProviderCallMixin:
             session_id = request.session_id or ""
 
         if timeout <= 0:
-            timeout = 300
+            timeout = 600
         if provider_name == "cursor":
             timeout = max(timeout, 600)
 
@@ -149,12 +149,6 @@ class ProviderCallMixin:
                 reply_len, finish_reason, tc_summary, content_preview,
             )
 
-            raw_msg_dict = msg_obj.model_dump() if msg_obj and hasattr(msg_obj, "model_dump") else {}
-            logger.debug(
-                "[%s] trace=%s 完整响应 message 对象:\n%s",
-                tag, trace_id,
-                json.dumps(raw_msg_dict, ensure_ascii=False, default=str),
-            )
             return result
         except asyncio.TimeoutError:
             elapsed_ms = (time.monotonic_ns() - start_ns) / 1_000_000

@@ -5171,3 +5171,78 @@ spark/xopqwen35v35b:
   stream_ttfb_ms: 377
   reasoning_response: 先开一开关久后关，开另一开关，进屋：亮灯、热灯、灭灯对应三开关。
   tested_at: '2026-06-12 15:33:09'
+agnes/agnes-2.0-flash:
+  provider: agnes
+  model: agnes-2.0-flash
+  available: true
+  tool_calling: true
+  tc_method: native
+  multi_turn_tc: true
+  chinese: true
+  vision: true
+  json_mode: true
+  streaming: true
+  reasoning: true
+  latency_ms: 7819
+  error: null
+  probe_response: 'get_current_time({"city": "北京"})'
+  mt_response: 北京现在是 2026年5月13日 16:00:00。
+  chinese_response: 同时响起的三个或更多音高。
+  vision_response: Red
+  json_sample: "{\n  \"instruments\": [\n    {\n      \"name\": \"钢琴\",\n      \"\
+    type\": \"键盘乐器\"\n    },\n    {"
+  stream_chunks: 4
+  stream_ttfb_ms: 7584
+  reasoning_response: 开一灯久后关，开二灯亮，摸三灯热。
+  tested_at: '2026-07-02 10:09:01'
+agnes/agnes-image-2.1-flash:
+  provider: agnes
+  model: agnes-image-2.1-flash
+  available: false
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: 'Client error ''404 Not Found'' for url ''https://apihub.agnes-ai.com/v1/chat/completions''
+
+    For more information check: https'
+  tested_at: '2026-07-02 11:57:12'
+agnes/agnes-video-v2.0:
+  provider: agnes
+  model: agnes-video-v2.0
+  available: false
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: 'Client error ''404 Not Found'' for url ''https://apihub.agnes-ai.com/v1/chat/completions''
+
+    For more information check: https'
+  tested_at: '2026-07-02 10:11:47'
+agnes/agnes-image-2.0-flash:
+  provider: agnes
+  model: agnes-image-2.0-flash
+  available: false
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: 'Client error ''404 Not Found'' for url ''https://apihub.agnes-ai.com/v1/chat/completions''
+
+    For more information check: https'
+  tested_at: '2026-07-02 10:13:44'

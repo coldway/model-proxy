@@ -71,7 +71,7 @@ class AppSettings(BaseModel):
         description="单个 API consumer（按 Bearer token 区分）的每分钟请求数上限，0=不限制",
     )
     default_model_timeout: int = Field(
-        default=300,
+        default=600,
         description="模型请求默认超时（秒），模型级 timeout 未配置时使用此值；httpx 客户端超时取此值+60s",
     )
     http_connect_timeout: int = Field(

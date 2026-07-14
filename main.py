@@ -37,6 +37,7 @@ _load_env()
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from starlette.middleware.cors import CORSMiddleware
 
 from src.api.routes import init_routes, router
@@ -372,6 +373,9 @@ def create_app() -> FastAPI:
         logger.info("认证已启用: %s", " + ".join(_auth_parts))
 
     app.include_router(router)
+
+    _static_dir = Path(__file__).parent / "src" / "api" / "static"
+    app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
 
     @app.get("/ui", response_class=HTMLResponse)
     async def ui_panel():

@@ -5184,7 +5184,7 @@ agnes/agnes-2.0-flash:
   streaming: true
   reasoning: true
   latency_ms: 7819
-  error: null
+  error: unavailable (503)
   probe_response: 'get_current_time({"city": "北京"})'
   mt_response: 北京现在是 2026年5月13日 16:00:00。
   chinese_response: 同时响起的三个或更多音高。
@@ -5194,7 +5194,7 @@ agnes/agnes-2.0-flash:
   stream_chunks: 4
   stream_ttfb_ms: 7584
   reasoning_response: 开一灯久后关，开二灯亮，摸三灯热。
-  tested_at: '2026-07-02 10:09:01'
+  tested_at: '2026-07-14 12:55:13'
 agnes/agnes-image-2.1-flash:
   provider: agnes
   model: agnes-image-2.1-flash

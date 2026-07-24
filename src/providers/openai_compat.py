@@ -75,8 +75,16 @@ class OpenAICompatibleProvider(BaseProvider):
         data = resp.json()
 
         choice = data["choices"][0]
-        usage = data.get("usage", {})
+        usage_raw = data.get("usage")
         msg = choice["message"]
+
+        usage_info = None
+        if usage_raw and (usage_raw.get("prompt_tokens") or usage_raw.get("completion_tokens") or usage_raw.get("total_tokens")):
+            usage_info = UsageInfo(
+                prompt_tokens=usage_raw.get("prompt_tokens", 0),
+                completion_tokens=usage_raw.get("completion_tokens", 0),
+                total_tokens=usage_raw.get("total_tokens", 0),
+            )
 
         return ChatCompletionResponse(
             id=data.get("id", f"chatcmpl-{uuid.uuid4().hex[:12]}"),
@@ -93,11 +101,7 @@ class OpenAICompatibleProvider(BaseProvider):
                     finish_reason=choice.get("finish_reason", "stop"),
                 )
             ],
-            usage=UsageInfo(
-                prompt_tokens=usage.get("prompt_tokens", 0),
-                completion_tokens=usage.get("completion_tokens", 0),
-                total_tokens=usage.get("total_tokens", 0),
-            ),
+            usage=usage_info,
         )
 
     async def stream_chat_completion(
@@ -134,20 +138,33 @@ class OpenAICompatibleProvider(BaseProvider):
 
     async def image_generation(self, model: str, **kwargs) -> dict:
         url = f"{self._base_url}/images/generations"
+        extra_body = kwargs.pop("extra_body", None)
         payload = {"model": model, **kwargs}
+        if extra_body:
+            payload["extra_body"] = extra_body
         resp = await self._client.post(url, headers=self._build_headers(), json=payload, timeout=120.0)
         resp.raise_for_status()
         return resp.json()
 
     async def create_video(self, model: str, **kwargs) -> dict:
         url = f"{self._base_url}/videos"
+        image_url = kwargs.pop("image_url", None)
+        extra_body = kwargs.pop("extra_body", None)
         payload = {"model": model, **kwargs}
+        if image_url and "image" not in payload:
+            payload["image"] = image_url
+        if extra_body:
+            payload["extra_body"] = extra_body
         resp = await self._client.post(url, headers=self._build_headers(), json=payload, timeout=300.0)
         resp.raise_for_status()
         return resp.json()
 
-    async def poll_video(self, task_id: str) -> dict:
-        url = f"{self._base_url}/videos/{task_id}"
+    async def poll_video(self, task_id: str, video_id: str | None = None) -> dict:
+        if video_id:
+            base = self._base_url.replace("/v1", "")
+            url = f"{base}/agnesapi?video_id={video_id}"
+        else:
+            url = f"{self._base_url}/videos/{task_id}"
         resp = await self._client.get(url, headers=self._build_headers(), timeout=30.0)
         resp.raise_for_status()
         return resp.json()

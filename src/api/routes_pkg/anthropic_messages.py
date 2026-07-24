@@ -497,7 +497,7 @@ async def _stream_anthropic_response(
 # API 路由
 # ===========================
 
-@router.post("", response_model=AnthropicResponse, response_model_exclude_none=True)
+@router.post("", response_model=AnthropicResponse, response_model_exclude_none=True, summary="Anthropic Messages API", description="兼容 Anthropic SDK 的消息生成接口。自动将请求转换为 OpenAI 格式调度，响应转换回 Anthropic 格式。支持 stream、system prompt、tool_use。")
 async def create_message(request: AnthropicMessagesRequest, req: Request):
     """Anthropic Messages API 入口
     

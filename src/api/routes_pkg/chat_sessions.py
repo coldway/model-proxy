@@ -32,7 +32,7 @@ router = APIRouter()
 
 # --- 模型目录 ---
 
-@router.get("/api/catalog/providers")
+@router.get("/api/catalog/providers", summary="厂商目录")
 async def catalog_providers():
     """获取目录中所有厂商及其模型"""
     if not _deps.catalog:
@@ -40,7 +40,7 @@ async def catalog_providers():
     return {"providers": _deps.catalog.get_all_providers()}
 
 
-@router.get("/api/catalog/provider/{provider_id}/models")
+@router.get("/api/catalog/provider/{provider_id}/models", summary="厂商模型目录")
 async def catalog_provider_models(provider_id: str):
     """获取指定厂商的模型列表"""
     if not _deps.catalog:
@@ -49,7 +49,7 @@ async def catalog_provider_models(provider_id: str):
     return {"provider": provider_id, "models": models}
 
 
-@router.get("/api/catalog/search")
+@router.get("/api/catalog/search", summary="搜索模型")
 async def catalog_search(q: str = ""):
     """搜索模型目录"""
     if not _deps.catalog:
@@ -63,7 +63,7 @@ async def catalog_search(q: str = ""):
     return {"results": _deps.catalog.search_models(q)}
 
 
-@router.post("/api/catalog/model/add")
+@router.post("/api/catalog/model/add", summary="添加到目录")
 async def catalog_add_model(provider_id: str, model_id: str, name: str = "", description: str = "", default_rpd: int = 0, default_rpm: int = 0, category: str = "通用"):
     """向目录添加模型"""
     if not _deps.catalog:
@@ -75,7 +75,7 @@ async def catalog_add_model(provider_id: str, model_id: str, name: str = "", des
     return {"status": "ok", "message": f"模型 {model_id} 已添加到 {provider_id} 目录"}
 
 
-@router.delete("/api/catalog/model/delete")
+@router.delete("/api/catalog/model/delete", summary="从目录移除")
 async def catalog_delete_model(provider_id: str, model_id: str):
     """从目录删除模型"""
     if not _deps.catalog:
@@ -86,7 +86,7 @@ async def catalog_delete_model(provider_id: str, model_id: str):
     return {"status": "ok", "message": f"模型 {model_id} 已从 {provider_id} 目录删除"}
 
 
-@router.post("/api/catalog/model/activate")
+@router.post("/api/catalog/model/activate", summary="激活模型")
 async def catalog_activate_model(provider_id: str, model_id: str, priority: int = 99):
     """从目录中激活模型"""
     if not _deps.catalog:
@@ -96,7 +96,7 @@ async def catalog_activate_model(provider_id: str, model_id: str, priority: int 
     raise HTTPException(status_code=404, detail="模型在目录中不存在")
 
 
-@router.post("/api/config/model/delete")
+@router.post("/api/config/model/delete", summary="删除已激活模型")
 async def config_delete_model(provider: str, model_name: str):
     """停用模型"""
     if not _deps.catalog:
@@ -108,18 +108,18 @@ async def config_delete_model(provider: str, model_name: str):
 
 # --- 聊天会话 CRUD ---
 
-@router.get("/api/chat/sessions")
+@router.get("/api/chat/sessions", summary="会话列表")
 async def list_chat_sessions():
     return {"sessions": _deps.session_mgr.list_sessions()}
 
 
-@router.post("/api/chat/sessions")
+@router.post("/api/chat/sessions", summary="创建会话")
 async def create_chat_session(model: str = "auto", title: str = "新对话"):
     session = _deps.session_mgr.create(model=model, title=title)
     return {"session": {"id": session.id, "title": session.title, "model": session.model}}
 
 
-@router.get("/api/chat/sessions/{session_id}")
+@router.get("/api/chat/sessions/{session_id}", summary="会话详情")
 async def get_chat_session(session_id: str):
     session = _deps.session_mgr.get(session_id)
     if not session:
@@ -127,7 +127,7 @@ async def get_chat_session(session_id: str):
     return {"session": {"id": session.id, "title": session.title, "model": session.model, "messages": session.messages, "tokens_est": session.total_tokens_est, "created_at": session.created_at, "updated_at": session.updated_at}}
 
 
-@router.delete("/api/chat/sessions/{session_id}")
+@router.delete("/api/chat/sessions/{session_id}", summary="删除会话")
 async def delete_chat_session(session_id: str):
     from src.scheduler.memory import get_memory_manager
     memory_mgr = get_memory_manager()
@@ -139,33 +139,33 @@ async def delete_chat_session(session_id: str):
     raise HTTPException(status_code=404, detail="会话不存在")
 
 
-@router.get("/api/chat/trash")
+@router.get("/api/chat/trash", summary="回收站")
 async def list_trash_sessions():
     return {"sessions": _deps.session_mgr.list_trash()}
 
 
-@router.post("/api/chat/trash/{session_id}/restore")
+@router.post("/api/chat/trash/{session_id}/restore", summary="恢复会话")
 async def restore_trash_session(session_id: str):
     if _deps.session_mgr.restore(session_id):
         return {"status": "ok"}
     raise HTTPException(status_code=404, detail="回收站中无此会话")
 
 
-@router.delete("/api/chat/trash/{session_id}")
+@router.delete("/api/chat/trash/{session_id}", summary="永久删除")
 async def permanent_delete_session(session_id: str):
     if _deps.session_mgr.permanent_delete(session_id):
         return {"status": "ok"}
     raise HTTPException(status_code=404, detail="回收站中无此会话")
 
 
-@router.put("/api/chat/sessions/{session_id}/title")
+@router.put("/api/chat/sessions/{session_id}/title", summary="修改标题")
 async def rename_chat_session(session_id: str, title: str):
     if _deps.session_mgr.rename(session_id, title):
         return {"status": "ok"}
     raise HTTPException(status_code=404, detail="会话不存在")
 
 
-@router.put("/api/chat/sessions/{session_id}/model")
+@router.put("/api/chat/sessions/{session_id}/model", summary="切换模型")
 async def switch_session_model(session_id: str, body: dict):
     session = _deps.session_mgr.get(session_id)
     if not session:
@@ -185,7 +185,7 @@ async def switch_session_model(session_id: str, body: dict):
     return {"status": "ok", "old_model": old_model, "new_model": new_model, "max_context_tokens": max_ctx or session.get_max_context_tokens()}
 
 
-@router.post("/api/chat/sessions/{session_id}/regenerate")
+@router.post("/api/chat/sessions/{session_id}/regenerate", summary="重新生成")
 async def regenerate_chat_message(session_id: str, request: ChatCompletionRequest | None = None):
     """重新生成最后一条 assistant 回复"""
     from src.scheduler.memory import get_memory_manager
@@ -210,7 +210,7 @@ async def regenerate_chat_message(session_id: str, request: ChatCompletionReques
         return await _do_send_chat(session, request, trace_id, memory_mgr)
 
 
-@router.post("/api/chat/sessions/{session_id}/edit/{msg_index}")
+@router.post("/api/chat/sessions/{session_id}/edit/{msg_index}", summary="编辑消息重发")
 async def edit_chat_message(session_id: str, msg_index: int, body: dict):
     """编辑指定位置的消息"""
     session = _deps.session_mgr.get(session_id)
@@ -228,7 +228,7 @@ async def edit_chat_message(session_id: str, msg_index: int, body: dict):
 
 # --- 发送消息（非流式） ---
 
-@router.post("/api/chat/sessions/{session_id}/send")
+@router.post("/api/chat/sessions/{session_id}/send", summary="发送消息")
 async def send_chat_message(session_id: str, request: ChatCompletionRequest):
     """向指定会话发送消息并获取回复"""
     from src.scheduler.memory import get_memory_manager
@@ -297,7 +297,7 @@ async def _do_send_chat(session, request, trace_id: str, memory_mgr):
 
 # --- 发送消息（流式） ---
 
-@router.post("/api/chat/sessions/{session_id}/stream")
+@router.post("/api/chat/sessions/{session_id}/stream", summary="流式发送")
 async def stream_chat_message(session_id: str, request: ChatCompletionRequest):
     """向指定会话发送消息（流式 SSE 响应）"""
     from src.scheduler.memory import get_memory_manager
@@ -487,20 +487,20 @@ async def _do_stream_chat(session, request, trace_id: str, memory_mgr, user_msg:
 
 # --- Cost & Memory ---
 
-@router.get("/api/cost/stats")
+@router.get("/api/cost/stats", summary="费用统计")
 async def get_cost_stats():
     if not _deps.cost_tracker:
         return {"error": "成本追踪未启用"}
     return _deps.cost_tracker.get_stats()
 
 
-@router.get("/api/memory/stats")
+@router.get("/api/memory/stats", summary="记忆统计")
 async def get_memory_stats():
     from src.scheduler.memory import get_memory_manager
     return get_memory_manager().get_long_term_stats()
 
 
-@router.get("/api/memory/entries")
+@router.get("/api/memory/entries", summary="记忆条目")
 async def list_memory_entries(limit: int = 50):
     from src.scheduler.memory import get_memory_manager
     store = get_memory_manager()._store
@@ -509,7 +509,7 @@ async def list_memory_entries(limit: int = 50):
     return {"entries": [e.to_dict() for e in entries[:limit]], "total": store.size()}
 
 
-@router.post("/api/memory/consolidate/{session_id}")
+@router.post("/api/memory/consolidate/{session_id}", summary="整合记忆")
 async def consolidate_session_memory(session_id: str):
     from src.scheduler.memory import get_memory_manager
     mgr = get_memory_manager()
@@ -517,7 +517,7 @@ async def consolidate_session_memory(session_id: str):
     return {"consolidated": added}
 
 
-@router.post("/api/memory/add")
+@router.post("/api/memory/add", summary="添加记忆")
 async def add_memory_entry(body: dict):
     from src.scheduler.memory import get_memory_manager, MemoryEntry
     import time as _time
@@ -537,7 +537,7 @@ async def add_memory_entry(body: dict):
     return {"status": "ok", "id": entry.id}
 
 
-@router.delete("/api/memory/entries/{entry_id}")
+@router.delete("/api/memory/entries/{entry_id}", summary="删除记忆")
 async def delete_memory_entry(entry_id: str):
     from src.scheduler.memory import get_memory_manager
     mgr = get_memory_manager()
@@ -546,7 +546,7 @@ async def delete_memory_entry(entry_id: str):
     raise HTTPException(status_code=404, detail="记忆条目不存在")
 
 
-@router.post("/api/memory/import")
+@router.post("/api/memory/import", summary="导入记忆")
 async def import_memory(body: dict):
     from src.scheduler.memory import get_memory_manager, MemoryEntry
     mgr = get_memory_manager()

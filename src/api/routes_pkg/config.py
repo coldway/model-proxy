@@ -18,12 +18,12 @@ from src.api.routes_pkg.deps import _deps
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(tags=["config"])
 
 
 # --- 配置管理 API ---
 
-@router.get("/api/config")
+@router.get("/api/config", summary="获取当前配置")
 async def get_config():
     """获取当前配置（隐藏 API Key）"""
     result = {}
@@ -47,7 +47,7 @@ class ApiKeyUpdateRequest(BaseModel):
     api_key: str
 
 
-@router.post("/api/config/apikey")
+@router.post("/api/config/apikey", summary="更新厂商 API Key")
 async def update_api_key(body: ApiKeyUpdateRequest):
     """更新厂商 API Key，同时动态注册/注销厂商 Provider"""
     provider = body.provider
@@ -71,21 +71,21 @@ async def update_api_key(body: ApiKeyUpdateRequest):
     return {"status": "ok", "message": f"{provider} API Key 已更新"}
 
 
-@router.post("/api/config/model/toggle")
+@router.post("/api/config/model/toggle", summary="启用/禁用模型")
 async def toggle_model(provider: str, model_name: str, enabled: bool):
     """启用/禁用模型"""
     _deps.config_manager.toggle_model(provider, model_name, enabled)
     return {"status": "ok", "message": f"{model_name} 已{'启用' if enabled else '禁用'}"}
 
 
-@router.post("/api/config/model/priority")
+@router.post("/api/config/model/priority", summary="更新模型优先级")
 async def update_priority(provider: str, model_name: str, priority: int):
     """更新模型优先级"""
     _deps.config_manager.update_model_priority(provider, model_name, priority)
     return {"status": "ok"}
 
 
-@router.post("/api/config/reload")
+@router.post("/api/config/reload", summary="热重载配置")
 async def reload_config():
     """热重载配置（重新读取 catalog 和 config.yaml，无需重启服务）"""
     try:
@@ -105,7 +105,7 @@ async def reload_config():
         raise HTTPException(status_code=500, detail=f"热重载失败: {str(e)[:200]}")
 
 
-@router.post("/api/config/model/add")
+@router.post("/api/config/model/add", summary="添加新模型")
 async def add_model(provider: str, name: str, priority: int = 99, rpd: int = 0, rpm: int = 0):
     """添加新模型（先加入目录，再激活）"""
     if _deps.catalog:
@@ -118,7 +118,7 @@ async def add_model(provider: str, name: str, priority: int = 99, rpd: int = 0, 
     return {"status": "ok", "message": f"模型 {name} 已添加到 {provider}"}
 
 
-@router.post("/api/provider/toggle")
+@router.post("/api/provider/toggle", summary="启用/禁用厂商")
 async def toggle_provider(provider: str, enabled: bool):
     """启用/禁用厂商，同时动态注册/注销 Provider"""
     if _deps.catalog:
@@ -164,7 +164,7 @@ async def toggle_provider(provider: str, enabled: bool):
     return {"status": "ok", "message": f"{provider} 已{'启用' if enabled else '禁用'}"}
 
 
-@router.post("/api/provider/ollama/refresh")
+@router.post("/api/provider/ollama/refresh", summary="刷新 Ollama 模型")
 async def refresh_ollama_models():
     """刷新 Ollama 本地模型列表"""
     from src.providers.ollama import OllamaProvider
@@ -181,7 +181,7 @@ async def refresh_ollama_models():
         raise HTTPException(status_code=502, detail=f"无法连接 Ollama: {e}") from e
 
 
-@router.post("/api/provider/ollama/pull")
+@router.post("/api/provider/ollama/pull", summary="拉取 Ollama 模型")
 async def pull_ollama_model(model: str):
     """拉取 Ollama 模型（SSE 流式进度）"""
     from src.providers.ollama import OllamaProvider
@@ -210,7 +210,7 @@ async def pull_ollama_model(model: str):
     return StreamingResponse(_stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
-@router.delete("/api/provider/ollama/models/{model_name:path}")
+@router.delete("/api/provider/ollama/models/{model_name:path}", summary="删除 Ollama 模型")
 async def delete_ollama_model(model_name: str):
     """删除 Ollama 本地模型"""
     from src.providers.ollama import OllamaProvider
@@ -229,7 +229,7 @@ async def delete_ollama_model(model_name: str):
     return {"status": "ok", "message": f"模型 {model_name} 已删除"}
 
 
-@router.get("/api/provider/ollama/running")
+@router.get("/api/provider/ollama/running", summary="Ollama 活跃模型")
 async def list_ollama_running():
     """查询当前加载在 VRAM 中的 Ollama 模型"""
     from src.providers.ollama import OllamaProvider
@@ -240,7 +240,7 @@ async def list_ollama_running():
     return {"status": "ok", "models": running}
 
 
-@router.post("/api/provider/ollama/test-tool-calling/{model_name:path}")
+@router.post("/api/provider/ollama/test-tool-calling/{model_name:path}", summary="测试 Tool Calling")
 async def test_ollama_tool_calling(model_name: str):
     """动态测试 Ollama 模型是否支持 tool calling"""
     from src.providers.ollama import OllamaProvider
@@ -255,14 +255,14 @@ async def test_ollama_tool_calling(model_name: str):
     return {"status": "ok", "model": model_name, "tool_calling": supports}
 
 
-@router.post("/api/provider/priority")
+@router.post("/api/provider/priority", summary="更新厂商优先级")
 async def update_provider_priority(provider: str, priority: int):
     """更新厂商优先级"""
     _deps.config_manager.update_provider_priority(provider, priority)
     return {"status": "ok", "message": f"{provider} 优先级已更新为 {priority}"}
 
 
-@router.post("/api/provider/reorder")
+@router.post("/api/provider/reorder", summary="批量排序厂商")
 async def reorder_providers(ordered_ids: list[str]):
     """批量重新排序厂商优先级"""
     if not _deps.catalog:
@@ -271,7 +271,7 @@ async def reorder_providers(ordered_ids: list[str]):
     return {"status": "ok", "message": "厂商优先级已更新"}
 
 
-@router.post("/api/settings")
+@router.post("/api/settings", summary="更新运行时设置")
 async def update_settings(log_level: str | None = None, default_provider: str | None = None, auto_switch: bool | None = None):
     """动态更新运行时设置"""
     messages = []
@@ -303,7 +303,7 @@ def _build_discovery_guide(prov_id: str, prov_data: dict) -> str:
     return f"请访问 {url} 获取 API Key" if url else "请查看厂商官网获取 API Key"
 
 
-@router.get("/api/discovery", response_model=list[ProviderDiscovery])
+@router.get("/api/discovery", response_model=list[ProviderDiscovery], summary="发现可用厂商")
 async def discover_providers():
     """查找可免费使用的大模型厂商（自动从 catalog 读取，无需手动维护列表）"""
     if not _deps.catalog:
@@ -322,7 +322,7 @@ async def discover_providers():
     return discoveries
 
 
-@router.get("/api/provider/{provider_name}/models")
+@router.get("/api/provider/{provider_name}/models", summary="拉取厂商模型列表")
 async def fetch_provider_models(provider_name: str, force: bool = False, auto_test: bool = False):
     """拉取厂商最新模型列表（默认不自动测试能力，需手动点击测试按钮）"""
     if not _deps.dispatcher.has_provider(provider_name):
@@ -396,7 +396,7 @@ def _apply_capabilities_to_catalog(provider_name: str, test_results: list[dict])
 
 # --- 模型能力测试 ---
 
-@router.post("/api/capabilities/test")
+@router.post("/api/capabilities/test", summary="测试模型能力")
 async def test_capabilities(provider: str = "", model: str = "", force: bool = False):
     """测试模型能力"""
     if not _deps.capability_tester:
@@ -446,7 +446,7 @@ async def test_capabilities(provider: str = "", model: str = "", force: bool = F
     return {"results": all_results, "summary": summary}
 
 
-@router.get("/api/capabilities")
+@router.get("/api/capabilities", summary="模型能力缓存")
 async def get_capabilities():
     """查看已缓存的模型能力"""
     if not _deps.capability_tester:
@@ -456,7 +456,7 @@ async def get_capabilities():
     return {"capabilities": cached, "summary": summary}
 
 
-@router.delete("/api/capabilities/clear")
+@router.delete("/api/capabilities/clear", summary="清除能力缓存")
 async def clear_capabilities():
     """清除能力缓存"""
     if not _deps.capability_tester:
@@ -466,7 +466,7 @@ async def clear_capabilities():
     return {"status": "ok", "message": "能力缓存已清除"}
 
 
-@router.put("/api/capabilities/{provider_name}/{model_id:path}")
+@router.put("/api/capabilities/{provider_name}/{model_id:path}", summary="手动设置模型能力")
 async def update_capability(provider_name: str, model_id: str, body: dict):
     """手动设置/覆盖某个模型的能力值（部分更新）
 
@@ -498,7 +498,7 @@ async def update_capability(provider_name: str, model_id: str, body: dict):
     return {"status": "ok", "provider": provider_name, "model": model_id, "capabilities": merged}
 
 
-@router.delete("/api/capabilities/{provider_name}/{model_id:path}")
+@router.delete("/api/capabilities/{provider_name}/{model_id:path}", summary="删除模型能力缓存")
 async def delete_capability(provider_name: str, model_id: str):
     """删除某个模型的能力缓存"""
     if not _deps.capability_tester:

@@ -2,6 +2,88 @@
 
 所有接口兼容 OpenAI SDK 格式。服务默认监听 `http://127.0.0.1:8000`。
 
+## 快速接入
+
+### 交互式文档（Swagger）
+
+服务启动后可访问以下地址获取交互式 API 文档：
+
+| 文档 | 地址 | 说明 |
+|------|------|------|
+| Swagger UI | http://127.0.0.1:8000/docs | 交互式调试，支持 "Try it out" |
+| ReDoc | http://127.0.0.1:8000/redoc | 阅读友好的文档布局 |
+| OpenAPI JSON | http://127.0.0.1:8000/openapi.json | 原始 Schema，可导入 Postman/Apifox |
+
+> 文档页面无需认证即可访问。
+
+### 支持的协议
+
+| 协议 | 端点 | SDK |
+|------|------|-----|
+| **OpenAI** | `POST /v1/chat/completions` | `openai` Python/Node SDK |
+| **Anthropic** | `POST /v1/messages` | `anthropic` Python/Node SDK |
+
+两种协议共享同一套调度引擎和模型池，选择哪种协议取决于你的项目已使用哪个 SDK。
+
+### OpenAI SDK 接入
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://127.0.0.1:8000/v1",
+    api_key="your-api-token",  # conf/config.yaml 中的 api_token
+)
+
+resp = client.chat.completions.create(
+    model="auto",
+    messages=[{"role": "user", "content": "Hello"}],
+    stream=True,
+)
+for chunk in resp:
+    print(chunk.choices[0].delta.content or "", end="")
+```
+
+### Anthropic SDK 接入
+
+```python
+from anthropic import Anthropic
+
+client = Anthropic(
+    base_url="http://127.0.0.1:8000/v1",
+    api_key="your-api-token",
+)
+
+message = client.messages.create(
+    model="auto",
+    max_tokens=1024,
+    messages=[{"role": "user", "content": "Hello"}],
+)
+print(message.content[0].text)
+```
+
+**Anthropic 流式调用**:
+
+```python
+with client.messages.stream(
+    model="auto",
+    max_tokens=1024,
+    messages=[{"role": "user", "content": "Hello"}],
+) as stream:
+    for text in stream.text_stream:
+        print(text, end="")
+```
+
+### 认证
+
+如果 `conf/config.yaml` 中配置了 `api_token`，所有 `/v1/*` 请求需要携带 Bearer Token：
+
+```
+Authorization: Bearer your-api-token
+```
+
+---
+
 ## 推理接口
 
 ### POST /v1/chat/completions
@@ -108,6 +190,79 @@ data: [DONE]
 | 500 | 内部错误 | 厂商 API 非 429 的其他异常（如 503 临时不可用） |
 
 > 指定具体模型时，若厂商返回 429 限流，将返回明确的 429 错误并建议切换到 auto 模式。auto 模式下 429 会被静默跳过并自动尝试下一个候选模型。
+
+### POST /v1/messages (Anthropic 协议)
+
+兼容 Anthropic Messages API，使用 Anthropic SDK 直接调用。内部将请求转换为 OpenAI 格式调用 dispatcher，再将响应转换回 Anthropic 格式。
+
+**请求体**
+
+| 字段 | 类型 | 必填 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| model | string | 是 | - | 模型名称，`"auto"` 自动选择 |
+| messages | array | 是 | - | 消息列表，Anthropic 格式 `[{role, content}]` |
+| max_tokens | int | 是 | - | 最大输出 token 数 |
+| system | string/array | 否 | null | 系统提示词 |
+| temperature | float | 否 | 1.0 | 温度参数 |
+| stream | bool | 否 | false | 是否启用流式 SSE |
+| tools | array | 否 | null | 工具定义列表 |
+| stop_sequences | array | 否 | null | 停止词列表 |
+| metadata | object | 否 | null | 扩展元数据（Cursor 参数等） |
+
+**请求示例**
+
+```json
+{
+  "model": "auto",
+  "max_tokens": 1024,
+  "messages": [
+    {"role": "user", "content": "用 Python 写一个快速排序"}
+  ],
+  "system": "你是一个高级程序员"
+}
+```
+
+**响应体**
+
+```json
+{
+  "id": "msg_abc123",
+  "type": "message",
+  "role": "assistant",
+  "content": [{"type": "text", "text": "以下是快速排序..."}],
+  "model": "gemini-2.5-flash",
+  "stop_reason": "end_turn",
+  "usage": {"input_tokens": 15, "output_tokens": 120}
+}
+```
+
+**流式响应**（`stream: true`）
+
+以 SSE 格式返回 Anthropic 标准事件序列：
+
+```
+event: message_start
+data: {"type":"message_start","message":{"id":"msg_abc","type":"message","role":"assistant","model":"gemini-2.5-flash","content":[],"usage":{"input_tokens":15,"output_tokens":0}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"以下是"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":120}}
+
+event: message_stop
+data: {"type":"message_stop"}
+```
+
+**Tool Use 支持**
+
+Anthropic 风格的 tool_use 会被自动转换为 OpenAI function calling 格式调用，响应中的 tool_calls 会转换回 Anthropic tool_use content block。
 
 ### POST /v1/images/generations
 

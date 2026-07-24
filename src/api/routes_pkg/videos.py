@@ -17,10 +17,10 @@ from src.models.schemas import ProxyInfo, VideoGenerationRequest
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(tags=["videos"])
 
 
-@router.post("/v1/videos")
+@router.post("/v1/videos", summary="创建视频生成任务", description="提交异步视频生成任务，返回 task_id 用于轮询进度。支持 kling、runway、pika 等厂商。")
 async def create_video(request: VideoGenerationRequest):
     """创建视频生成任务（异步），返回 task_id 供客户端轮询"""
     trace_id = uuid.uuid4().hex[:12]
@@ -60,8 +60,8 @@ async def create_video(request: VideoGenerationRequest):
     return JSONResponse(content=result)
 
 
-@router.get("/v1/videos/{task_id}")
-async def poll_video(task_id: str, provider_id: str = Query(description="厂商 ID，从创建响应的 provider_id 字段获取")):
+@router.get("/v1/videos/{task_id}", summary="查询视频任务状态", description="根据 task_id 轮询视频生成任务进度，完成后返回视频 URL。")
+async def poll_video(task_id: str, provider_id: str = Query(description="厂商 ID，从创建响应的 provider_id 字段获取"), video_id: str | None = Query(default=None, description="视频 ID（Agnes 推荐使用此字段轮询）")):
     """查询视频生成任务状态"""
     trace_id = uuid.uuid4().hex[:12]
     start_time = time.time()
@@ -69,7 +69,7 @@ async def poll_video(task_id: str, provider_id: str = Query(description="厂商 
     provider = resolve_provider_by_id(provider_id)
 
     try:
-        result = await provider.poll_video(task_id)
+        result = await provider.poll_video(task_id, video_id=video_id)
     except NotImplementedError as exc:
         raise HTTPException(status_code=501, detail=f"厂商 {provider_id} 不支持视频状态查询") from exc
     except HTTPException:

@@ -9,10 +9,10 @@ from fastapi import APIRouter
 
 from src.api.routes_pkg.deps import _deps
 
-router = APIRouter()
+router = APIRouter(tags=["history"])
 
 
-@router.get("/api/history")
+@router.get("/api/history", summary="请求历史列表")
 async def get_history(limit: int = 50):
     """获取最近请求历史"""
     cap = 2000
@@ -24,7 +24,7 @@ async def get_history(limit: int = 50):
     return {"records": _deps.history.get_recent(limit), "stats": _deps.history.get_stats()}
 
 
-@router.get("/api/history/stats")
+@router.get("/api/history/stats", summary="请求统计汇总")
 async def get_history_stats():
     """获取请求统计汇总"""
     if not _deps.history:
@@ -32,19 +32,19 @@ async def get_history_stats():
     return _deps.history.get_stats()
 
 
-@router.get("/api/routing/log")
+@router.get("/api/routing/log", summary="路由决策日志")
 async def get_routing_log():
     """获取最近的路由决策日志"""
     return {"decisions": _deps.dispatcher.get_route_log() if _deps.dispatcher else []}
 
 
-@router.get("/api/routing/breaker")
+@router.get("/api/routing/breaker", summary="熔断状态")
 async def get_breaker_status():
     """获取厂商熔断状态"""
     return {"breakers": _deps.dispatcher.get_breaker_status() if _deps.dispatcher else {}}
 
 
-@router.post("/api/breaker/reset")
+@router.post("/api/breaker/reset", summary="重置熔断")
 async def reset_breaker(provider: str = ""):
     """手动重置熔断状态"""
     if not _deps.dispatcher:
@@ -53,7 +53,7 @@ async def reset_breaker(provider: str = ""):
     return {"status": "ok", "cleared": count}
 
 
-@router.get("/api/blacklist")
+@router.get("/api/blacklist", summary="429 黑名单")
 async def get_blacklist():
     """获取 429 黑名单"""
     bl = _deps.rate_limiter.get_blacklist()
@@ -66,35 +66,35 @@ async def get_blacklist():
     }
 
 
-@router.delete("/api/blacklist/clear")
+@router.delete("/api/blacklist/clear", summary="清除黑名单")
 async def clear_blacklist(provider: str = "", model: str = ""):
     """清除 429 黑名单"""
     count = _deps.rate_limiter.clear_blacklist(provider, model)
     return {"status": "ok", "cleared": count}
 
 
-@router.get("/api/session-bindings")
+@router.get("/api/session-bindings", summary="会话绑定列表")
 async def get_session_bindings():
     """获取所有活跃的会话-模型绑定"""
     bindings = _deps.dispatcher.get_all_session_bindings()
     return {"bindings": bindings, "count": len(bindings)}
 
 
-@router.delete("/api/session-bindings/clear")
+@router.delete("/api/session-bindings/clear", summary="清除会话绑定")
 async def clear_session_bindings(session_id: str = ""):
     """清除会话绑定"""
     count = _deps.dispatcher.clear_session_binding(session_id)
     return {"status": "ok", "cleared": count}
 
 
-@router.get("/api/payload-limits")
+@router.get("/api/payload-limits", summary="Payload 上限记录")
 async def get_payload_limits():
     """获取所有模型的 payload 上限记录"""
     limits = _deps.dispatcher._payload_tracker.get_all_limits()
     return {"limits": limits, "count": len(limits)}
 
 
-@router.delete("/api/payload-limits/clear")
+@router.delete("/api/payload-limits/clear", summary="清除 Payload 记录")
 async def clear_payload_limits(provider: str = "", model: str = ""):
     """清除 payload 上限记录"""
     count = _deps.dispatcher._payload_tracker.clear(provider, model)

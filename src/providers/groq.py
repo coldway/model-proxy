@@ -176,7 +176,7 @@ class GroqProvider(BaseProvider):
             data = resp.json()
 
         choice = data["choices"][0]
-        usage = data.get("usage", {})
+        usage = data.get("usage") or {}
         msg = choice["message"]
 
         return ChatCompletionResponse(
@@ -198,7 +198,7 @@ class GroqProvider(BaseProvider):
                 prompt_tokens=usage.get("prompt_tokens", 0),
                 completion_tokens=usage.get("completion_tokens", 0),
                 total_tokens=usage.get("total_tokens", 0),
-            ),
+            ) if usage.get("prompt_tokens") or usage.get("completion_tokens") else None,
         )
 
     async def stream_chat_completion(

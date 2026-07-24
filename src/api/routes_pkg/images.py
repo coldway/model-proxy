@@ -17,10 +17,10 @@ from src.models.schemas import ImageGenerationRequest, ProxyInfo
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(tags=["images"])
 
 
-@router.post("/v1/images/generations")
+@router.post("/v1/images/generations", summary="图像生成", description="兼容 OpenAI Images API 的图像生成接口。支持 flux、dall-e 等模型。")
 async def image_generations(request: ImageGenerationRequest):
     """图像生成接口，透传到上游 Provider"""
     trace_id = uuid.uuid4().hex[:12]

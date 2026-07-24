@@ -166,6 +166,14 @@ class ChatCompletionRequest(BaseModel):
         default=None,
         description="会话标识：首次请求成功后自动绑定模型,后续携带相同 session_id 的请求将路由到同一模型",
     )
+
+    model_type: str | None = Field(
+        default=None,
+        description="模型类型路由（可选显式覆盖）：image（图像生成）、video（视频生成），不传时根据 model 名称自动检测。"
+                    "若 model 名含 image/imagen/dall-e/flux 自动走图像生成；"
+                    "含 video/runway/kling/pika/sora 自动走视频生成；其余走文字模型。"
+                    "显式传入 model_type 优先于自动检测。",
+    )
     mode: str | None = Field(
         default=None,
         description="执行模式（仅 Cursor provider）：plan（规划模式，只读）、ask（问答模式，只读）、agent（默认，全权限）",
@@ -244,7 +252,7 @@ class ChatCompletionResponse(BaseModel):
     created: int
     model: str
     choices: list[Choice]
-    usage: UsageInfo = Field(default_factory=UsageInfo)
+    usage: UsageInfo | None = Field(default=None, description="Token 用量统计（仅上游支持时返回）")
     proxy_info: ProxyInfo | None = Field(default=None, description="model-proxy 路由元数据")
 
 
@@ -334,12 +342,15 @@ class ProviderModelsResponse(BaseModel):
 # --- 图像生成 ---
 
 class ImageGenerationRequest(BaseModel):
-    model: str = Field(description="图像模型 ID，如 agnes-image-2.1-flash")
-    prompt: str = Field(description="图像描述")
+    model: str = Field(description="图像模型 ID，如 agnes-image-2.0-flash")
+    prompt: str = Field(description="图像描述或编辑指令")
     n: int = Field(default=1, ge=1, le=10, description="生成数量")
     size: str = Field(default="1024x1024", description="图像尺寸，如 1024x1024, 1024x768")
     seed: int | None = Field(default=None, description="随机种子，用于复现")
     response_format: str = Field(default="url", description="返回格式: url 或 b64_json")
+    image: list[str] | None = Field(default=None, description="输入图片数组（图生图/多图合成），支持 URL 或 Data URI Base64")
+    return_base64: bool | None = Field(default=None, description="文生图需要 Base64 时设为 true")
+    extra_body: dict[str, Any] | None = Field(default=None, description="Agnes 扩展参数，如 {response_format, image}")
 
 
 class ImageGenerationResponse(BaseModel):
@@ -357,7 +368,13 @@ class VideoGenerationRequest(BaseModel):
     height: int = Field(default=768, description="视频高度（像素）")
     num_frames: int = Field(default=121, description="总帧数（需满足 8n+1 且 <= 441）")
     frame_rate: int = Field(default=24, description="帧率")
-    image_url: str | None = Field(default=None, description="参考图片 URL（图生视频模式）")
+    image: str | None = Field(default=None, description="参考图片 URL（图生视频模式）")
+    image_url: str | None = Field(default=None, description="参考图片 URL（兼容旧字段，同 image）")
+    mode: str | None = Field(default=None, description="生成模式：ti2vid / keyframes")
+    seed: int | None = Field(default=None, description="随机种子，用于复现")
+    negative_prompt: str | None = Field(default=None, description="反向提示词")
+    num_inference_steps: int | None = Field(default=None, description="推理步数")
+    extra_body: dict[str, Any] | None = Field(default=None, description="Agnes 扩展参数，如 {image: [...], mode: 'keyframes'}")
 
 
 class VideoCreateResponse(BaseModel):

@@ -21,10 +21,10 @@ from src.models.schemas import (
 )
 from src.api.routes_pkg.deps import _deps
 
-router = APIRouter()
+router = APIRouter(tags=["models"])
 
 
-@router.get("/v1/models", response_model=ModelListResponse)
+@router.get("/v1/models", response_model=ModelListResponse, summary="列出可用模型", description="返回所有已启用厂商的已启用模型列表，含优先级、限速和能力信息。")
 async def list_models():
     """列出所有已启用厂商的已启用模型（含已探测的能力信息）"""
     models = []
@@ -62,7 +62,7 @@ async def list_models():
     return ModelListResponse(models=models)
 
 
-@router.get("/v1/providers", response_model=ProviderListResponse)
+@router.get("/v1/providers", response_model=ProviderListResponse, summary="列出所有厂商", description="返回系统中配置的所有厂商及其启用状态、已注册模型数量。")
 async def list_providers():
     """查询支持的厂商列表"""
     providers = []
@@ -84,7 +84,7 @@ async def list_providers():
     return ProviderListResponse(providers=providers)
 
 
-@router.get("/v1/providers/{provider_id}/models", response_model=ProviderModelsResponse)
+@router.get("/v1/providers/{provider_id}/models", response_model=ProviderModelsResponse, summary="列出厂商模型", description="返回指定厂商下的所有模型及其配置信息。")
 async def list_provider_models(provider_id: str):
     """查询指定厂商支持的模型列表（含能力信息）"""
     prov = _deps.config_manager.config.providers.get(provider_id)
@@ -117,7 +117,7 @@ async def list_provider_models(provider_id: str):
     return ProviderModelsResponse(provider=provider_id, models=models)
 
 
-@router.get("/v1/usage", response_model=UsageResponse)
+@router.get("/v1/usage", response_model=UsageResponse, summary="用量统计", description="返回各厂商/模型的调用次数与 Token 消耗统计。")
 async def get_usage():
     """获取使用统计"""
     stats = []

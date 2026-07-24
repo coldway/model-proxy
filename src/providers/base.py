@@ -50,7 +50,7 @@ class BaseProvider(ABC):
         """创建视频任务（子类按需覆盖）"""
         raise NotImplementedError(f"{self.__class__.__name__} 不支持视频生成")
 
-    async def poll_video(self, task_id: str) -> dict:
+    async def poll_video(self, task_id: str, video_id: str | None = None) -> dict:
         """查询视频任务状态（子类按需覆盖）"""
         raise NotImplementedError(f"{self.__class__.__name__} 不支持视频状态查询")
 

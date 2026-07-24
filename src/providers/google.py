@@ -132,7 +132,7 @@ class GoogleProvider(BaseProvider):
                 prompt_tokens=data.get("usageMetadata", {}).get("promptTokenCount", 0),
                 completion_tokens=data.get("usageMetadata", {}).get("candidatesTokenCount", 0),
                 total_tokens=data.get("usageMetadata", {}).get("totalTokenCount", 0),
-            ),
+            ) if data.get("usageMetadata") else None,
         )
 
     async def stream_chat_completion(

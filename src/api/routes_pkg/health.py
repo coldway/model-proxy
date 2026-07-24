@@ -10,18 +10,18 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 
 from src.api.routes_pkg.deps import _deps
 
-router = APIRouter()
+router = APIRouter(tags=["system"])
 
 _PROCESS_START_TIME = time.time()
 
 
-@router.get("/health")
+@router.get("/health", summary="存活探针")
 async def health_probe():
     """进程存活探针（负载均衡 / k8s liveness）"""
     return {"status": "ok"}
 
 
-@router.get("/ready")
+@router.get("/ready", summary="就绪探针")
 async def ready_probe():
     """就绪探针：配置中至少有一个 provider 填写了 API Key"""
     if not _deps.config_manager:
@@ -38,7 +38,7 @@ async def ready_probe():
     return {"ready": True}
 
 
-@router.get("/metrics")
+@router.get("/metrics", summary="Prometheus 指标")
 async def prometheus_metrics():
     """Prometheus text format 指标导出"""
     lines: list[str] = []

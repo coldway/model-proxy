@@ -266,13 +266,23 @@ def create_app() -> FastAPI:
 
     admin_token = settings.admin_token.strip()
     api_token = settings.api_token.strip()
-    OPEN_PATHS = frozenset({"/", "/ui", "/health", "/ready"})
+    OPEN_PATHS = frozenset({"/", "/ui", "/health", "/ready", "/docs", "/redoc", "/openapi.json"})
 
     app = FastAPI(
         title="Model Proxy",
-        description="免费大模型推理代理服务",
+        description="免费大模型推理代理服务。支持 OpenAI 和 Anthropic 两种协议接入，13+ 家厂商自动调度。",
         version="0.3.0",
         lifespan=lifespan,
+        openapi_tags=[
+            {"name": "chat", "description": "OpenAI 兼容的聊天补全接口（/v1/chat/completions）"},
+            {"name": "anthropic", "description": "Anthropic Messages API 兼容层（/v1/messages）"},
+            {"name": "models", "description": "模型列表、厂商信息与用量统计"},
+            {"name": "images", "description": "图像生成接口"},
+            {"name": "videos", "description": "视频生成接口（异步任务）"},
+            {"name": "config", "description": "配置管理（API Key、厂商启停、模型优先级）"},
+            {"name": "history", "description": "请求历史记录与统计"},
+            {"name": "system", "description": "健康探针与系统状态"},
+        ],
     )
 
     _cors_origins = settings.cors_origins.strip()
@@ -387,6 +397,8 @@ def create_app() -> FastAPI:
 
     logger.info("Model Proxy 启动于 http://%s:%s", settings.host, settings.port)
     logger.info("UI 面板: http://%s:%s/ui", settings.host, settings.port)
+    logger.info("Swagger API 文档: http://%s:%s/docs", settings.host, settings.port)
+    logger.info("ReDoc API 文档: http://%s:%s/redoc", settings.host, settings.port)
 
     return app
 

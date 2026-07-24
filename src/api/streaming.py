@@ -48,10 +48,12 @@ async def _stream_generator(
     has_error = False
     collected_text: list[str] = []
     final_usage: dict | None = None
+    usage_is_estimated = False
     try:
         async for chunk in content_iterator:
             if isinstance(chunk, dict) and "__usage__" in chunk:
                 final_usage = chunk["__usage__"]
+                usage_is_estimated = chunk.get("__estimated__", False)
                 continue
             delta = chunk if isinstance(chunk, dict) else {"content": chunk}
             if isinstance(delta, dict) and "content" in delta and delta["content"]:
@@ -101,7 +103,7 @@ async def _stream_generator(
                 "finish_reason": "stop",
             }],
         }
-        if final_usage:
+        if final_usage and not usage_is_estimated:
             end_data["usage"] = final_usage
         if proxy_info:
             end_data["proxy_info"] = proxy_info.model_dump()

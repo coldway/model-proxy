@@ -2,7 +2,7 @@ providers:
   google:
     name: Google AI Studio
     enabled: false
-    priority: 6
+    priority: 7
     url: https://aistudio.google.com/
     description: Google 提供的免费 Gemini 系列模型
     api_key_guide: https://aistudio.google.com/apikey
@@ -108,7 +108,7 @@ providers:
   groq:
     name: Groq
     enabled: false
-    priority: 7
+    priority: 8
     url: https://console.groq.com/
     description: Groq 提供的高速推理服务
     api_key_guide: https://console.groq.com/keys
@@ -210,7 +210,7 @@ providers:
     type: openai_compat
     base_url: https://api.cerebras.ai/v1
     enabled: false
-    priority: 10
+    priority: 11
     url: https://cloud.cerebras.ai/
     description: Cerebras 提供极速推理（~2000 tokens/s），免费层非常慷慨
     api_key_guide: https://cloud.cerebras.ai/ 注册后在 Dashboard 获取 API Key，兼容 OpenAI
@@ -239,7 +239,7 @@ providers:
     type: openai_compat
     base_url: https://api.sambanova.ai/v1
     enabled: false
-    priority: 4
+    priority: 5
     url: https://cloud.sambanova.ai/
     description: SambaNova Cloud 免费推理，速度极快，支持 Llama/DeepSeek 等大模型
     api_key_guide: https://cloud.sambanova.ai/ 注册后在 API 页面获取 Key，兼容 OpenAI 格式
@@ -277,7 +277,7 @@ providers:
   github:
     name: GitHub Models
     enabled: false
-    priority: 8
+    priority: 9
     url: https://github.com/marketplace/models
     description: GitHub 模型市场，使用 GitHub Token 调用
     api_key_guide: Settings > Developer settings > Personal access tokens
@@ -330,7 +330,7 @@ providers:
     type: openai_compat
     base_url: https://openrouter.ai/api/v1
     enabled: false
-    priority: 12
+    priority: 13
     url: https://openrouter.ai/
     description: OpenRouter 聚合平台，部分模型完全免费（标注 :free 后缀）
     api_key_guide: https://openrouter.ai/keys 注册获取 Key，接口完全兼容 OpenAI
@@ -364,7 +364,7 @@ providers:
     type: openai_compat
     base_url: https://api.mistral.ai/v1
     enabled: false
-    priority: 13
+    priority: 14
     url: https://console.mistral.ai/
     description: Mistral AI 官方平台，实验接口免费层，支持最新 Mistral 模型
     api_key_guide: https://console.mistral.ai/api-keys/ 注册后生成 API Key
@@ -396,7 +396,7 @@ providers:
   cloudflare:
     name: Cloudflare Workers AI
     enabled: false
-    priority: 14
+    priority: 15
     url: https://ai.cloudflare.com/
     description: Cloudflare 提供免费 AI 推理（每日 10,000 neurons），无需信用卡
     api_key_guide: 在 Cloudflare Dashboard > AI > Workers AI 中获取 Account ID 和 API Token
@@ -428,7 +428,7 @@ providers:
   huggingface:
     name: HuggingFace Inference API
     enabled: false
-    priority: 15
+    priority: 16
     url: https://huggingface.co/inference-api
     description: HuggingFace 免费推理 API，支持数千个开源模型，有速率限制但无需付费
     api_key_guide: https://huggingface.co/settings/tokens 创建 Access Token
@@ -462,7 +462,7 @@ providers:
     type: openai_compat
     base_url: https://integrate.api.nvidia.com/v1
     enabled: false
-    priority: 16
+    priority: 17
     url: https://build.nvidia.com/explore/discover
     description: NVIDIA NIM 免费推理 API（需手机验证）
     api_key_guide: https://build.nvidia.com/ 注册后获取 API Key
@@ -507,7 +507,7 @@ providers:
     type: openai_compat
     base_url: https://api.cohere.ai/compatibility/v1
     enabled: false
-    priority: 17
+    priority: 18
     url: https://cohere.com
     description: Cohere 免费 API（20 RPM / 1000 请求/月）
     api_key_guide: https://dashboard.cohere.com/api-keys 注册获取
@@ -552,7 +552,7 @@ providers:
     type: openai_compat
     base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
     enabled: false
-    priority: 5
+    priority: 6
     billing_type: paid
     url: https://bailian.console.aliyun.com/
     description: 阿里云百炼平台，提供通义千问系列模型（OpenAI 兼容接口）
@@ -650,7 +650,7 @@ providers:
     type: openai_compat
     base_url: https://maas-api.cn-huabei-1.xf-yun.com/v2
     enabled: false
-    priority: 2
+    priority: 3
     billing_type: paid
     url: https://maas.xfyun.cn/
     description: 讯飞星辰 MaaS 平台，提供星火 X2、DeepSeek、GLM、Qwen 等多系列模型（付费，OpenAI 兼容接口）
@@ -838,7 +838,7 @@ providers:
   cursor:
     name: Cursor Agent CLI
     enabled: false
-    priority: 9
+    priority: 10
     url: https://www.cursor.com/
     description: 通过 Cursor CLI 调用模型。全量测试（111 个）后仅 auto / composer-2.5 确认可用
     api_key_guide: '安装 Cursor CLI 并登录即可使用（无需 API Key）
@@ -903,7 +903,7 @@ providers:
     type: openai_compat
     base_url: https://token.sensenova.cn/v1
     enabled: false
-    priority: 11
+    priority: 12
     billing_type: free
     url: https://platform.sensenova.cn/
     description: 商汤科技 SenseNova 大模型平台，提供 SenseNova 6.7 Flash-Lite（多模态 Agent）、U1 Fast（图像生成）、DeepSeek
@@ -957,10 +957,13 @@ providers:
       description: Rapid-MLX | rapid-mlx
       category: 本地
       tool_calling: true
-      enabled: true
-      priority: 10
     - id: mlx-community/embeddinggemma-300m-8bit
       name: mlx-community/embeddinggemma-300m-8bit
+      description: Rapid-MLX | rapid-mlx
+      category: 本地
+      tool_calling: false
+    - id: mlx-community/Kokoro-82M-bf16
+      name: mlx-community/Kokoro-82M-bf16
       description: Rapid-MLX | rapid-mlx
       category: 本地
       tool_calling: false
@@ -968,8 +971,8 @@ providers:
       priority: 10
   ollama:
     name: Ollama 本地模型
-    enabled: true
-    priority: 3
+    enabled: false
+    priority: 4
     url: https://ollama.com/
     description: 本地运行的开源模型（无需 API Key，模型自动发现）
     api_key_guide: 无需 API Key

@@ -325,18 +325,36 @@ async def discover_providers():
 @router.get("/api/provider/{provider_name}/models", summary="拉取厂商模型列表")
 async def fetch_provider_models(provider_name: str, force: bool = False, auto_test: bool = False):
     """拉取厂商最新模型列表（默认不自动测试能力，需手动点击测试按钮）"""
-    if not _deps.dispatcher.has_provider(provider_name):
+    provider = None
+    temp_provider = False
+
+    if _deps.dispatcher.has_provider(provider_name):
+        provider = _deps.dispatcher.get_provider(provider_name)
+    else:
         has_key = _deps.config_manager.has_api_key(provider_name) if _deps.config_manager else False
         if not has_key:
             raise HTTPException(status_code=404, detail=f"厂商 {provider_name} 未注册：请先填写 API Key")
-        raise HTTPException(status_code=404, detail=f"厂商 {provider_name} 未注册：API Key 已配置但加载失败")
+        factory = _deps.provider_factories.get(provider_name)
+        if not factory:
+            raise HTTPException(status_code=404, detail=f"厂商 {provider_name} 无对应 Provider 实现")
+        api_key = _deps.config_manager.get_api_key(provider_name)
+        try:
+            provider = factory(api_key)
+            temp_provider = True
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"厂商 {provider_name} 初始化失败: {e}") from e
 
-    provider = _deps.dispatcher.get_provider(provider_name)
     try:
         models = await provider.list_models()
     except Exception as e:
         logger.error("拉取 %s 模型列表失败: %s", provider_name, e, exc_info=True)
-        raise HTTPException(status_code=502, detail=f"拉取 {provider_name} 模型列表失败")
+        raise HTTPException(status_code=502, detail=f"拉取 {provider_name} 模型列表失败: {e}")
+    finally:
+        if temp_provider and hasattr(provider, "close"):
+            try:
+                await provider.close()
+            except Exception:
+                pass
 
     result = {"provider": provider_name, "available_models": models}
 

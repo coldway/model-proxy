@@ -31,6 +31,7 @@ function switchTab(name, el) {
     location.hash = name;
     if (name === 'routing') loadRoutingLog();
     if (name === 'memory') loadMemory();
+    if (name === 'rapid-mlx') { loadRapidMLXInstances(); loadRapidMLXCatalog(); }
     if (name === 'logs') startLogPolling();
     else stopLogPolling();
 }
@@ -505,7 +506,7 @@ async function loadProviderModels(providerId) {
             <div style="display:flex;align-items:center;gap:4px;flex-shrink:0">
                 <button class="btn btn-ghost btn-sm" style="font-size:0.6rem;padding:2px 6px" onclick="event.stopPropagation();testSingleModel('${providerId}','${m.id}')" title="检测此模型的 tool calling、中文、视觉等能力">🔍 测试</button>
                 ${cap ? `<button class="btn btn-ghost btn-sm" style="font-size:0.6rem;padding:2px 6px" onclick="event.stopPropagation();editCapabilities('${providerId}','${m.id}')" title="手动编辑能力标记">✏️ 编辑</button>` : `<button class="btn btn-ghost btn-sm" style="font-size:0.6rem;padding:2px 6px" onclick="event.stopPropagation();editCapabilities('${providerId}','${m.id}')" title="手动标记能力（无需测试）">➕ 标记</button>`}
-                ${cap ? `<button class="btn btn-ghost btn-sm" style="font-size:0.6rem;padding:2px 6px;color:var(--accent-red)" onclick="event.stopPropagation();deleteCapability('${providerId}','${m.id}')" title="清除此模型的能力缓存">🗑</button>` : ''}
+                <button class="btn btn-ghost btn-sm" style="font-size:0.6rem;padding:2px 6px;color:var(--accent-red)" onclick="event.stopPropagation();removeCatalogModel('${providerId}','${m.id}')" title="从目录中移除此模型">🗑</button>
                 <label class="toggle" onclick="event.stopPropagation()">
                     <input type="checkbox" ${isEnabled ? 'checked' : ''} onchange="toggleModelAndReload('${providerId}','${m.id}',this.checked)">
                     <span class="slider"></span>
@@ -830,6 +831,42 @@ async function deleteConfigModel(provider, modelId) {
     }
 }
 
+// --- 从目录中移除模型 ---
+async function removeCatalogModel(providerId, modelId) {
+    if (providerId === 'rapid_mlx') {
+        const choice = confirm(`卸载模型 "${modelId}"？\n\n此操作将：\n1. 停止运行中的实例\n2. 从配置中移除\n3. 删除本地模型文件（释放磁盘空间）\n\n确认继续？`);
+        if (!choice) return;
+        toast(`正在卸载 ${modelId}...`, 'info');
+        try {
+            const resp = await apiFetch(API + `/api/rapid-mlx/instances/uninstall/${encodeURIComponent(modelId)}`, {method:'DELETE'});
+            const data = await resp.json();
+            if (resp.ok) {
+                const msg = data.files_deleted
+                    ? `${modelId} 已完全卸载（本地文件已删除）`
+                    : `${modelId} 实例已移除，但本地文件删除失败: ${data.rm_output}`;
+                toast(msg, data.files_deleted ? 'success' : 'warning');
+            } else {
+                toast(data.detail || '卸载失败', 'error');
+            }
+        } catch (err) { toast('卸载失败: ' + err.message, 'error'); }
+        apiFetch(API + `/api/catalog/model/delete?provider_id=${providerId}&model_id=${modelId}`, {method:'DELETE'}).catch(() => {});
+        loadProviderModels(currentProvider);
+        loadProviderCards();
+        return;
+    }
+    if (!confirm(`确认从目录中移除 ${modelId}？\n移除后需重新拉取才能添加回来。`)) return;
+    const resp = await apiFetch(API + `/api/catalog/model/delete?provider_id=${providerId}&model_id=${modelId}`, {method:'DELETE'});
+    if (resp.ok) {
+        apiFetch(API + `/api/capabilities/${providerId}/${encodeURIComponent(modelId)}`, {method: 'DELETE'}).catch(() => {});
+        toast(`${modelId} 已从目录移除`, 'success');
+        loadProviderModels(currentProvider);
+        loadProviderCards();
+    } else {
+        const err = await resp.json().catch(() => ({}));
+        toast(err.detail || '移除失败', 'error');
+    }
+}
+
 // --- 厂商弹窗内搜索 ---
 let provSearchTimer = null;
 function debouncedProviderSearch() {
@@ -977,7 +1014,8 @@ async function fetchRemoteModels() {
                 } else if (inCatalog) {
                     actionHtml = `<button class="btn btn-primary btn-sm" onclick="activateFromCatalog('${currentProvider}','${modelId}')">启用</button>`;
                 } else {
-                    actionHtml = `<button class="btn btn-sm btn-secondary" onclick="pullModelToCatalog('${currentProvider}','${modelId}')">拉取到目录</button>`;
+                    const btnText = currentProvider === 'rapid_mlx' ? '启动实例' : '拉取到目录';
+                    actionHtml = `<button class="btn btn-sm btn-secondary" onclick="pullModelToCatalog('${currentProvider}','${modelId}')">${btnText}</button>`;
                 }
 
                 const testBtnHtml = `<button class="btn btn-ghost btn-sm" style="font-size:0.65rem;padding:2px 6px" onclick="testSingleRemoteModel('${currentProvider}','${modelId}')" title="检测此模型的 tool calling、中文、视觉等能力">🔍 测试</button>`;
@@ -1046,6 +1084,25 @@ async function testSingleRemoteModel(providerId, modelId) {
 }
 
 async function pullModelToCatalog(providerId, modelId) {
+    if (providerId === 'rapid_mlx') {
+        if (!confirm(`将启动 rapid-mlx 实例: "${modelId}"\n如果模型未下载会自动从 HuggingFace 拉取。确认继续？`)) return;
+        toast(`正在启动 ${modelId}...`, 'info');
+        try {
+            const resp = await apiFetch('/api/rapid-mlx/instances/start', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ model: modelId }),
+            });
+            const data = await resp.json();
+            if (data.status === 'ok') {
+                toast(`${modelId} 启动成功 (port=${data.instance.port})`, 'success');
+            } else {
+                toast(`启动失败: ${data.detail || JSON.stringify(data)}`, 'error');
+            }
+        } catch (err) { toast('启动失败: ' + err.message, 'error'); }
+        fetchRemoteModels();
+        return;
+    }
     const resp = await apiFetch(API + `/api/catalog/model/add?provider_id=${providerId}&model_id=${modelId}&name=${modelId}&category=通用`, {method:'POST'});
     if (resp.ok) {
         toast(`${modelId} 已拉取到模型目录`, 'success');
@@ -1086,6 +1143,29 @@ async function manualAddModel() {
     const rpd = document.getElementById('manual-rpd').value;
     const rpm = document.getElementById('manual-rpm').value;
     if (!modelId) { toast('请输入模型 ID', 'error'); return; }
+
+    if (currentProvider === 'rapid_mlx') {
+        if (!confirm(`将启动 rapid-mlx 实例: "${modelId}"\n如果模型未下载会自动从 HuggingFace 拉取（可能需要几分钟）。\n确认继续？`)) return;
+        toast(`正在启动 ${modelId}（如需下载可能较慢）...`, 'info');
+        try {
+            const resp = await apiFetch('/api/rapid-mlx/instances/start', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ model: modelId }),
+            });
+            const data = await resp.json();
+            if (data.status === 'ok') {
+                document.getElementById('manual-model-id').value = '';
+                toast(`${modelId} 启动成功 (port=${data.instance.port})`, 'success');
+                loadProviderModels(currentProvider);
+                loadProviderCards();
+            } else {
+                toast(`启动失败: ${data.detail || JSON.stringify(data)}`, 'error');
+            }
+        } catch (err) { toast('启动失败: ' + err.message, 'error'); }
+        return;
+    }
+
     await apiFetch(API + `/api/config/model/add?provider=${currentProvider}&name=${modelId}&priority=${priority}&rpd=${rpd}&rpm=${rpm}`, {method:'POST'});
     document.getElementById('manual-model-id').value = '';
     loadProviderModels(currentProvider);
@@ -2260,4 +2340,298 @@ async function importMemory(event) {
         loadMemory();
     } catch (err) { toast('导入失败: ' + err.message, 'error'); }
     event.target.value = '';
+}
+
+// --- Rapid-MLX 实例管理 ---
+
+async function loadRapidMLXInstances() {
+    try {
+        const resp = await apiFetch('/api/rapid-mlx/instances');
+        const data = await resp.json();
+        const grid = document.getElementById('rmlx-instances-grid');
+        document.getElementById('rmlx-total').textContent = data.total;
+        document.getElementById('rmlx-running').textContent = data.running;
+
+        if (!data.instances || data.instances.length === 0) {
+            grid.innerHTML = '<div class="empty-state"><h4>暂无实例</h4><p>点击「+ 启动新实例」或「发现外部实例」开始</p></div>';
+        } else {
+            grid.innerHTML = data.instances.map(inst => renderRapidMLXInstance(inst)).join('');
+        }
+
+        // 加载 URL 映射
+        const urlResp = await apiFetch('/api/rapid-mlx/model-urls');
+        const urlData = await urlResp.json();
+        const mapEl = document.getElementById('rmlx-url-map');
+        if (urlData.mapping && Object.keys(urlData.mapping).length > 0) {
+            mapEl.innerHTML = Object.entries(urlData.mapping).map(([model, url]) =>
+                `<div style="display:flex;justify-content:space-between;padding:6px 12px;background:var(--bg-tertiary);border-radius:var(--radius-xs);margin-bottom:4px">
+                    <span style="color:var(--accent-blue)">${escapeHtml(model)}</span>
+                    <span style="color:var(--text-muted)">${escapeHtml(url)}</span>
+                </div>`
+            ).join('');
+        } else {
+            mapEl.innerHTML = '<div style="padding:12px;color:var(--text-muted);text-align:center">无运行中的实例</div>';
+        }
+    } catch (err) {
+        toast('加载 Rapid-MLX 实例失败: ' + err.message, 'error');
+    }
+}
+
+function renderRapidMLXInstance(inst) {
+    const statusColors = {
+        running: 'var(--accent-green)',
+        starting: 'var(--accent-blue)',
+        stopped: 'var(--text-muted)',
+        error: 'var(--accent-red)',
+        unknown: 'var(--text-muted)',
+    };
+    const statusColor = statusColors[inst.status] || 'var(--text-muted)';
+    const statusDot = `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${statusColor};margin-right:6px"></span>`;
+    const uptime = inst.uptime_seconds ? formatUptime(inst.uptime_seconds) : '';
+    const memInfo = inst.memory_mb ? `${inst.memory_mb >= 1024 ? (inst.memory_mb/1024).toFixed(1) + ' GB' : inst.memory_mb + ' MB'}` : '';
+    const errorLine = inst.error ? `<div style="font-size:0.75rem;color:var(--accent-red);margin-top:4px">⚠ ${escapeHtml(inst.error)}</div>` : '';
+
+    return `<div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:var(--bg-tertiary);border-radius:var(--radius);border:1px solid var(--border)">
+        <div style="flex:1;min-width:0">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                ${statusDot}
+                <strong style="font-size:0.9rem">${escapeHtml(inst.model)}</strong>
+                <span style="font-size:0.75rem;color:var(--text-muted);background:var(--bg-secondary);padding:2px 8px;border-radius:10px">:${inst.port}</span>
+                ${inst.pid ? `<span style="font-size:0.7rem;color:var(--text-muted)">PID ${inst.pid}</span>` : ''}
+                ${uptime ? `<span style="font-size:0.7rem;color:var(--text-muted)">⏱ ${uptime}</span>` : ''}
+                ${memInfo ? `<span style="font-size:0.7rem;color:var(--accent-orange)">💾 ${memInfo}</span>` : ''}
+                ${inst.restart_count ? `<span style="font-size:0.65rem;color:var(--text-muted);background:var(--bg-secondary);padding:1px 5px;border-radius:8px">重启×${inst.restart_count}</span>` : ''}
+            </div>
+            ${inst.request_count ? `<div style="font-size:0.72rem;color:var(--text-muted);margin-top:4px">📊 请求: ${inst.request_count} | 平均延迟: ${inst.avg_latency_ms}ms${inst.last_request_ago_s != null ? ' | 最近: ' + formatAgo(inst.last_request_ago_s) : ''}</div>` : ''}
+            ${inst.extra_args && inst.extra_args.length ? `<div style="font-size:0.72rem;color:var(--text-muted);margin-top:4px;font-family:monospace">${escapeHtml(inst.extra_args.join(' '))}</div>` : ''}
+            ${errorLine}
+        </div>
+        <div style="display:flex;gap:6px;flex-shrink:0">
+            ${inst.status === 'running' ? `<button class="btn btn-ghost btn-sm" onclick="stopRapidMLXInstance('${escapeAttr(inst.model)}', ${inst.port})" title="停止">⏹</button>` : ''}
+            ${inst.status === 'stopped' || inst.status === 'error' ? `<button class="btn btn-ghost btn-sm" onclick="restartRapidMLXInstance('${escapeAttr(inst.model)}', ${inst.port})" title="启动">▶</button>` : ''}
+            ${inst.status === 'running' ? `<button class="btn btn-ghost btn-sm" onclick="restartRapidMLXInstance('${escapeAttr(inst.model)}', ${inst.port})" title="重启">🔄</button>` : ''}
+            <button class="btn btn-ghost btn-sm" onclick="removeRapidMLXInstance('${escapeAttr(inst.model)}', ${inst.port})" title="移除" style="color:var(--accent-red)">✕</button>
+        </div>
+    </div>`;
+}
+
+function formatUptime(seconds) {
+    if (seconds < 60) return `${seconds}s`;
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}m${seconds % 60}s`;
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    return `${h}h${m}m`;
+}
+
+function formatAgo(seconds) {
+    if (seconds < 5) return '刚刚';
+    if (seconds < 60) return `${seconds}s前`;
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}分钟前`;
+    return `${Math.floor(seconds / 3600)}小时前`;
+}
+
+function escapeAttr(s) {
+    return s.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+}
+
+function showRapidMLXStartModal() {
+    document.getElementById('rmlx-model').value = '';
+    document.getElementById('rmlx-port').value = '';
+    document.getElementById('rmlx-served-name').value = '';
+    document.getElementById('rmlx-extra-args').value = '';
+    document.getElementById('rmlx-auto-start').checked = true;
+    showModal('rmlx-start');
+}
+
+async function startRapidMLXInstance() {
+    const model = document.getElementById('rmlx-model').value.trim();
+    if (!model) { toast('请输入模型名称', 'error'); return; }
+
+    const portVal = document.getElementById('rmlx-port').value.trim();
+    const extraArgsStr = document.getElementById('rmlx-extra-args').value.trim();
+    const body = {
+        model,
+        port: portVal ? parseInt(portVal) : null,
+        served_model_name: document.getElementById('rmlx-served-name').value.trim(),
+        extra_args: extraArgsStr ? extraArgsStr.split(/\s+/) : [],
+        auto_start: document.getElementById('rmlx-auto-start').checked,
+    };
+
+    try {
+        toast('正在启动 ' + model + '...', 'info');
+        hideModal('rmlx-start');
+        const resp = await apiFetch('/api/rapid-mlx/instances/start', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(body),
+        });
+        const data = await resp.json();
+        if (resp.ok) {
+            toast(data.message || '实例已启动', 'success');
+        } else {
+            toast(data.detail || '启动失败', 'error');
+        }
+        loadRapidMLXInstances();
+    } catch (err) {
+        toast('启动失败: ' + err.message, 'error');
+    }
+}
+
+async function stopRapidMLXInstance(model, port) {
+    if (!confirm(`确定停止实例 ${model}@${port}？`)) return;
+    try {
+        const resp = await apiFetch('/api/rapid-mlx/instances/stop', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ model, port }),
+        });
+        const data = await resp.json();
+        toast(data.message || '已停止', resp.ok ? 'success' : 'error');
+        loadRapidMLXInstances();
+    } catch (err) { toast('操作失败: ' + err.message, 'error'); }
+}
+
+async function restartRapidMLXInstance(model, port) {
+    try {
+        toast('正在重启 ' + model + '...', 'info');
+        const resp = await apiFetch('/api/rapid-mlx/instances/restart', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ model, port }),
+        });
+        const data = await resp.json();
+        toast(data.message || '已重启', resp.ok ? 'success' : 'error');
+        loadRapidMLXInstances();
+    } catch (err) { toast('操作失败: ' + err.message, 'error'); }
+}
+
+async function removeRapidMLXInstance(model, port) {
+    if (!confirm(`确定移除实例 ${model}@${port}？（将停止并从配置中删除）`)) return;
+    try {
+        const resp = await apiFetch(`/api/rapid-mlx/instances/${encodeURIComponent(model)}?port=${port}`, {
+            method: 'DELETE',
+        });
+        const data = await resp.json();
+        toast(data.message || '已移除', resp.ok ? 'success' : 'error');
+        loadRapidMLXInstances();
+    } catch (err) { toast('操作失败: ' + err.message, 'error'); }
+}
+
+async function discoverRapidMLX() {
+    try {
+        toast('正在发现外部实例...', 'info');
+        const resp = await apiFetch('/api/rapid-mlx/discover', { method: 'POST' });
+        const data = await resp.json();
+        if (data.discovered > 0) {
+            toast(`发现 ${data.discovered} 个外部实例`, 'success');
+        } else {
+            toast('未发现新的外部实例', 'info');
+        }
+        loadRapidMLXInstances();
+    } catch (err) { toast('发现失败: ' + err.message, 'error'); }
+}
+
+// === Rapid-MLX 模型市场 ===
+let _rmlxCatalogData = [];
+let _rmlxRunningModels = new Set();
+let _rmlxCachedRepos = new Set();
+
+async function loadRapidMLXCatalog() {
+    const grid = document.getElementById('rmlx-catalog-grid');
+    grid.innerHTML = '<div class="empty-state"><h4>加载中...</h4></div>';
+    try {
+        const [catalogResp, instancesResp, cachedResp] = await Promise.all([
+            apiFetch('/api/rapid-mlx/catalog'),
+            apiFetch('/api/rapid-mlx/instances'),
+            apiFetch('/api/rapid-mlx/cached'),
+        ]);
+        const catalogData = await catalogResp.json();
+        const instancesData = await instancesResp.json();
+        const cachedData = await cachedResp.json();
+
+        _rmlxCatalogData = catalogData.models || [];
+        _rmlxRunningModels = new Set((instancesData.instances || [])
+            .filter(i => i.status === 'running')
+            .map(i => i.model));
+        const cachedModels = cachedData.models || [];
+        _rmlxCachedRepos = new Set(cachedModels.map(m => m.hf_repo).concat(
+            cachedModels.map(m => m.alias).filter(a => a !== '(unmapped)')
+        ));
+
+        filterRapidMLXCatalog();
+    } catch (err) {
+        grid.innerHTML = `<div class="empty-state"><h4>加载失败</h4><p style="font-size:0.8rem;color:var(--text-muted)">${err.message}<br>请检查 rapid-mlx 是否已安装</p></div>`;
+    }
+}
+
+function filterRapidMLXCatalog() {
+    const typeFilter = document.getElementById('rmlx-catalog-filter').value;
+    const searchTerm = document.getElementById('rmlx-catalog-search').value.toLowerCase();
+    const grid = document.getElementById('rmlx-catalog-grid');
+
+    let filtered = _rmlxCatalogData;
+    if (typeFilter) filtered = filtered.filter(m => m.type === typeFilter);
+    if (searchTerm) filtered = filtered.filter(m => m.alias.toLowerCase().includes(searchTerm));
+
+    if (filtered.length === 0) {
+        grid.innerHTML = '<div class="empty-state"><h4>无匹配模型</h4></div>';
+        return;
+    }
+
+    const header = `<div style="grid-column:1/-1;font-size:0.75rem;color:var(--text-muted);padding-bottom:4px">共 ${filtered.length} 个模型（来自 rapid-mlx models 官方目录）</div>`;
+    grid.innerHTML = header + filtered.map(renderCatalogCard).join('');
+}
+
+function renderCatalogCard(model) {
+    const isAudio = model.type === 'audio';
+    const badge = isAudio
+        ? `<span style="background:var(--accent-orange);color:#fff;padding:2px 6px;border-radius:4px;font-size:0.7rem">${model.kind || 'audio'}</span>`
+        : `<span style="background:var(--accent-blue);color:#fff;padding:2px 6px;border-radius:4px;font-size:0.7rem">text</span>`;
+
+    const isRunning = _rmlxRunningModels.has(model.alias);
+    const isCached = _rmlxCachedRepos.has(model.alias) || (model.hf_id && _rmlxCachedRepos.has(model.hf_id));
+    let statusBadge = '';
+    if (isRunning) {
+        statusBadge = '<span style="background:var(--accent-green);color:#fff;padding:2px 6px;border-radius:4px;font-size:0.65rem;margin-left:4px">运行中</span>';
+    } else if (isCached) {
+        statusBadge = '<span style="background:#666;color:#fff;padding:2px 6px;border-radius:4px;font-size:0.65rem;margin-left:4px">已缓存</span>';
+    }
+
+    const info = isAudio
+        ? `<div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px">${model.hf_id || ''}</div>`
+        : `<div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px">${model.tools ? 'tools: ' + model.tools : ''} ${model.reasoning ? '| reasoning: ' + model.reasoning : ''}</div>`;
+
+    const aliasEsc = model.alias.replace(/'/g, "\\'");
+    const btnLabel = isRunning ? '已启动' : '启动';
+    const btnDisabled = isRunning ? 'disabled style="flex-shrink:0;margin-left:8px;opacity:0.5"' : 'style="flex-shrink:0;margin-left:8px"';
+    return `<div style="padding:10px 12px;border:1px solid var(--border);border-radius:8px;display:flex;justify-content:space-between;align-items:center${isRunning ? ';border-color:var(--accent-green)' : ''}">
+        <div style="overflow:hidden">
+            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+                ${badge}
+                <strong style="font-size:0.85rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${model.alias}</strong>
+                ${statusBadge}
+            </div>
+            ${info}
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="quickStartFromCatalog('${aliasEsc}')" ${btnDisabled}>${btnLabel}</button>
+    </div>`;
+}
+
+async function quickStartFromCatalog(alias) {
+    if (!confirm(`确定启动模型 "${alias}"？\n将自动分配端口。如果模型未下载，会先下载再启动。`)) return;
+    try {
+        toast(`正在启动 ${alias}...`, 'info');
+        const resp = await apiFetch('/api/rapid-mlx/instances/start', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model: alias }),
+        });
+        const data = await resp.json();
+        if (data.status === 'ok') {
+            toast(`${alias} 启动成功 (port=${data.instance.port})`, 'success');
+            loadRapidMLXInstances();
+        } else {
+            toast(`启动失败: ${data.detail || JSON.stringify(data)}`, 'error');
+        }
+    } catch (err) { toast('启动失败: ' + err.message, 'error'); }
 }

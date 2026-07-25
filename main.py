@@ -58,6 +58,7 @@ from src.scheduler.dispatcher import Dispatcher
 from src.scheduler.history import RequestHistory
 from src.scheduler.rate_limiter import RateLimiter
 from src.providers.utils import configure_timeouts
+from src.services.rapid_mlx_manager import RapidMLXManager
 
 from src.api.log_buffer import install as install_log_buffer, preload_from_file as preload_logs
 
@@ -168,10 +169,19 @@ def create_app() -> FastAPI:
 
     capability_tester = CapabilityTester(capability_cache)
 
+    # 初始化 Rapid-MLX 多实例管理器
+    rapid_mlx_mgr = RapidMLXManager()
+
     init_routes(
         config_manager, dispatcher, rate_limiter,
         history, catalog, provider_factories, capability_tester,
     )
+
+    # 注入 manager 到 API 路由
+    from src.api.routes_pkg.rapid_mlx import set_manager as set_rmlx_route_manager
+    from src.api.routes_pkg.audio import set_audio_manager
+    set_rmlx_route_manager(rapid_mlx_mgr)
+    set_audio_manager(rapid_mlx_mgr)
 
     _PERIODIC_FLUSH_INTERVAL = 60
 
@@ -227,16 +237,31 @@ def create_app() -> FastAPI:
         rapid_mlx_prov = dispatcher.get_provider("rapid_mlx")
         if isinstance(rapid_mlx_prov, RapidMLXProvider):
             rapid_mlx_prov.set_breaker(dispatcher._breaker)
+            rapid_mlx_prov.set_manager(rapid_mlx_mgr)
 
-            async def _rapid_mlx_background_discover():
+            async def _rapid_mlx_background_init():
                 try:
+                    # 发现外部已运行的实例
+                    discovered = await rapid_mlx_mgr.discover_external()
+                    if discovered:
+                        logger.info("发现 %d 个外部 Rapid-MLX 实例", len(discovered))
+
+                    # 启动所有配置为 auto_start 的实例
+                    started = await rapid_mlx_mgr.start_all_enabled()
+                    if started:
+                        logger.info("自动启动 %d 个 Rapid-MLX 实例", len(started))
+
+                    # 模型发现 → 注册到 catalog
                     added = await rapid_mlx_prov.discover_and_register(catalog)
                     if added:
                         logger.info("Rapid-MLX 启动发现 %d 个本地模型", len(added))
                 except Exception as exc:
-                    logger.warning("Rapid-MLX 启动模型发现失败（服务可能未运行）: %s", exc)
+                    logger.warning("Rapid-MLX 初始化失败: %s", exc)
 
-            asyncio.create_task(_rapid_mlx_background_discover())
+            asyncio.create_task(_rapid_mlx_background_init())
+
+            # 启动周期性健康检查
+            await rapid_mlx_mgr.start_health_loop()
 
         yield
         flush_task.cancel()
@@ -250,6 +275,7 @@ def create_app() -> FastAPI:
         except asyncio.CancelledError:
             pass
         logger.info("正在优雅关闭…")
+        await rapid_mlx_mgr.close()
         rate_limiter.flush()
         history.flush()
         catalog.flush()

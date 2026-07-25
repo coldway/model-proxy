@@ -11,6 +11,7 @@ from fastapi import APIRouter
 
 from src.api.routes_pkg import (
     anthropic_messages,
+    audio,
     chat_completions,
     chat_sessions,
     config,
@@ -20,6 +21,7 @@ from src.api.routes_pkg import (
     images,
     logs,
     models,
+    rapid_mlx,
     testing,
     videos,
 )
@@ -39,6 +41,8 @@ router.include_router(cursor.router)
 router.include_router(anthropic_messages.router)
 router.include_router(images.router)
 router.include_router(videos.router)
+router.include_router(audio.router)
+router.include_router(rapid_mlx.router)
 
 # 向后兼容导出（internal_tools.py 等直接 import 这些）
 StructuredTestRequest = testing.StructuredTestRequest

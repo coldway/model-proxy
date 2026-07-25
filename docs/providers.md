@@ -403,3 +403,201 @@ API 不兼容 OpenAI 格式时（如 Google Gemini、Cloudflare），需要额�
 | OpenAI 兼容厂商 | `conf/providers_catalog.yaml`（加 `type` + `base_url`） | `ui.html`（自定义图标） |
 | 付费 OpenAI 兼容 | 上 + `openai_compat.py`（`SKIP_CAPABILITY_TEST_PROVIDERS`） | 同上 |
 | 自定义协议厂商 | `src/providers/xxx.py` + `main.py` + `providers_catalog.yaml` | `ui.html` |
+
+---
+
+## Rapid-MLX 多实例管理系统
+
+### 概述
+
+Rapid-MLX 是 Apple Silicon 本地推理引擎。由于每个 `rapid-mlx serve` 进程只能加载一个模型，运行多个模型需要多个进程监听不同端口。
+
+Model Proxy 提供了完整的多实例管理系统 (`RapidMLXManager`)，自动处理：
+
+- 进程启动/停止/重启
+- 端口自动分配（范围 8001-8099）
+- 按模型名路由请求到正确实例
+- 周期性健康检查
+- 配置持久化（`conf/rapid_mlx_instances.yaml`）
+- 外部实例自动发现（通过 `rapid-mlx ps`）
+
+### 架构
+
+```
+┌─────────────────────────────────────────┐
+│           Model Proxy (port 8000)        │
+│                                          │
+│  RapidMLXProvider                        │
+│    ├─ _resolve_base_url(model)           │
+│    │   → 查询 Manager.get_model_url_map  │
+│    │   → 路由到对应实例端口              │
+│    │                                      │
+│  RapidMLXManager                         │
+│    ├─ 实例 A: Qwen3-8B (port 8001)      │
+│    ├─ 实例 B: kokoro   (port 8002)       │
+│    └─ 实例 C: gemma    (port 8003)       │
+└──────────────┬───────────────────────────┘
+               │
+    ┌──────────┼──────────┐
+    ▼          ▼          ▼
+ rapid-mlx  rapid-mlx  rapid-mlx
+ :8001      :8002      :8003
+ Qwen3-8B   kokoro     gemma
+```
+
+### 配置文件
+
+`conf/rapid_mlx_instances.yaml`:
+
+```yaml
+port_range:
+  start: 8001
+  end: 8099
+
+instances:
+- model: mlx-community/Qwen3-8B-4bit
+  port: 8001
+  enabled: true
+  auto_start: true
+  extra_args: ["--enable-auto-tool-choice", "--tool-call-parser", "qwen3"]
+
+- model: kokoro
+  port: 8002
+  enabled: true
+  auto_start: false  # 外部启动，不自动管理
+```
+
+### API 端点
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/rapid-mlx/instances` | 列出所有实例及状态 |
+| POST | `/api/rapid-mlx/instances/start` | 启动新实例 |
+| POST | `/api/rapid-mlx/instances/stop` | 停止实例 |
+| POST | `/api/rapid-mlx/instances/restart` | 重启实例 |
+| DELETE | `/api/rapid-mlx/instances/{model}?port=N` | 移除实例配置 |
+| POST | `/api/rapid-mlx/instances/start-all` | 启动所有已配置实例 |
+| POST | `/api/rapid-mlx/instances/stop-all` | 停止所有实例 |
+| POST | `/api/rapid-mlx/discover` | 发现外部运行的实例 |
+| GET | `/api/rapid-mlx/health` | 健康检查 |
+| GET | `/api/rapid-mlx/model-urls` | 模型→URL映射 |
+| POST | `/api/rapid-mlx/reload` | 重载配置文件 |
+
+### 使用示例
+
+```bash
+# 启动新模型实例（自动分配端口）
+curl -X POST http://localhost:8000/api/rapid-mlx/instances/start \
+  -H 'Content-Type: application/json' \
+  -d '{"model": "mlx-community/Qwen3-8B-4bit", "extra_args": ["--enable-auto-tool-choice"]}'
+
+# 查看运行状态
+curl http://localhost:8000/api/rapid-mlx/instances
+
+# 停止实例
+curl -X POST http://localhost:8000/api/rapid-mlx/instances/stop \
+  -H 'Content-Type: application/json' \
+  -d '{"model": "mlx-community/Qwen3-8B-4bit", "port": 8001}'
+```
+
+### 生命周期
+
+1. **启动时**: Manager 加载配置 → `discover_external()` 发现已运行的外部实例 → `start_all_enabled()` 启动配置中 `auto_start: true` 的实例 → Provider `discover_and_register()` 注册模型到 Catalog
+2. **运行中**: 周期性健康检查（30s 间隔）→ 自动更新实例状态 → 宕机实例自动重启
+3. **关闭时**: Manager 取消健康检查任务 → 关闭 HTTP 客户端（不主动杀进程，除非手动 stop）
+
+### 自动重启（Auto Recovery）
+
+健康检查循环集成了自动重启机制，当检测到实例宕掉时自动拉起：
+
+| 参数 | 值 | 说明 |
+|------|---|------|
+| 检查间隔 | 30s | 每 30 秒探测一次所有实例 |
+| 最大重启次数 | 3 次 / 5 分钟 | 超限后暂停重启，避免重启风暴 |
+| 冷却期 | 300s (5分钟) | 冷却期过后重启计数器清零 |
+
+**触发条件**（全部满足才会重启）：
+- 实例状态变为 `error`
+- `config.enabled = true`
+- `config.auto_start = true`
+- 5 分钟内重启次数未超过 3 次
+
+**日志示例**：
+```
+16:17:35 [INFO] 检测到实例 kokoro@8002 宕机，尝试自动重启 (#1)
+16:17:35 [INFO] 重启 Rapid-MLX: rapid-mlx serve kokoro --port 8002
+16:17:48 [INFO] 实例已恢复: kokoro (port=8002, pid=52482)
+```
+
+**API 响应中的重启信息**：
+```json
+{
+  "model": "kokoro",
+  "status": "running",
+  "restart_count": 1,
+  "pid": 52482
+}
+```
+
+### 模型路由策略
+
+`RapidMLXProvider._resolve_base_url(model)` 负责将请求的模型名映射到正确实例端口：
+
+1. **精确匹配**：`model` 直接命中 `get_model_url_map()` 中的 key（config.model 或 served_model_name）
+2. **子串匹配**：处理 HuggingFace 完整 ID 与短别名的映射。例如请求 `mlx-community/Kokoro-82M-bf16` 时，通过 `"kokoro" in "mlx-community/kokoro-82m-bf16"` 匹配到 kokoro 实例
+3. **回退**：未匹配到任何实例时使用默认 `_base_url`
+
+TTS 音频路由（`audio.py`）使用类似的子串匹配策略，在 `get_model_url_map()` 中查找包含 "kokoro" 的 key。
+
+### Binary 查找策略
+
+`_find_rapid_mlx_bin()` 按以下优先级查找 `rapid-mlx` 可执行文件：
+
+| 优先级 | 路径 | 说明 |
+|--------|------|------|
+| 1 | `.venv/bin/rapid-mlx` | 项目 venv 内（依赖最隔离） |
+| 2 | `~/.pyenv/shims/rapid-mlx` | pyenv 管理的版本（通常有 `[audio]` extra） |
+| 3 | `shutil.which("rapid-mlx")` | 系统 PATH（launchd 环境可能只有 `/opt/homebrew/bin`） |
+
+> **注意**：launchd 环境的 PATH 不含 pyenv shims。如果需要 `rapid-mlx[audio]`（TTS 模型需要），必须确保优先级 1 或 2 的路径可用。推荐在 model-proxy venv 中 `pip install "rapid-mlx[audio]"`。
+
+### Catalog 模型注册策略
+
+`RapidMLXProvider.discover_and_register()` 在自动注册模型时遵循以下规则：
+
+- **只注册完整 HuggingFace ID**（包含 `/` 的 model ID，如 `mlx-community/Kokoro-82M-bf16`）
+- **跳过短别名**（如 `kokoro`），避免同一模型在 Catalog 中出现重复条目
+- 已存在的模型不会重复注册
+
+### 模型市场（Model Catalog）
+
+UI 和 API 提供了 rapid-mlx 官方模型目录的浏览和一键启动功能。
+
+#### API 端点
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/rapid-mlx/catalog` | 获取所有可用模型（158 文本 + 30 音频） |
+| GET | `/api/rapid-mlx/catalog?type=text` | 仅文本模型 |
+| GET | `/api/rapid-mlx/catalog?type=audio` | 仅音频模型 |
+| GET | `/api/rapid-mlx/cached` | 本地已下载的模型 |
+
+#### 一键启动流程
+
+1. 用户在模型市场浏览/搜索模型
+2. 点击"启动"按钮
+3. 系统自动分配空闲端口（8001-8099 范围）
+4. 调用 `rapid-mlx serve <alias> --port <port>` 启动进程
+5. 如果模型未下载，`rapid-mlx` 会自动从 HuggingFace 下载
+6. 等待健康检查通过后标记为 RUNNING
+7. 实例自动加入 `get_model_url_map()`，后续请求可直接路由
+
+#### UI 状态标记
+
+模型卡片会根据当前状态显示不同标记：
+
+| 标记 | 颜色 | 含义 |
+|------|------|------|
+| 运行中 | 绿色 | 该模型有实例正在运行 |
+| 已缓存 | 灰色 | 模型已下载到本地但未启动 |
+| （无标记） | — | 需要下载后才能启动 |

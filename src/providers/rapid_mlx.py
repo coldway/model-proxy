@@ -5,6 +5,7 @@
 
 特性：
 - 无需 API Key
+- 多实例支持：通过 RapidMLXManager 管理多个 rapid-mlx 进程（不同模型/端口）
 - 实时查询当前加载的模型（/v1/models），带短时缓存
 - 支持流式 / 非流式 / tool calling / reasoning
 - base_url 可通过 config.yaml 的 api_key 字段自定义，默认 http://localhost:8001
@@ -49,6 +50,9 @@ class RapidMLXProvider(BaseProvider):
 
     ``api_key`` 参数用于传递自定义 base_url（Rapid-MLX 不需要密钥）。
     为空时使用 ``http://localhost:8001``。
+
+    支持多实例模式：通过 set_manager() 注入 RapidMLXManager，
+    请求时根据 model 名自动路由到对应实例的端口。
     """
 
     def __init__(self, api_key: str = ""):
@@ -63,6 +67,11 @@ class RapidMLXProvider(BaseProvider):
         self._models_cache_time: float = 0
         self._breaker_ref: Any = None
         self._provider_id: str = "rapid_mlx"
+        self._manager: Any = None
+
+    def set_manager(self, manager: Any) -> None:
+        """注入 RapidMLXManager，启用多实例路由。"""
+        self._manager = manager
 
     def set_breaker(self, breaker: Any, provider_id: str = "rapid_mlx") -> None:
         """注入 CircuitBreaker 引用，使内部方法能感知熔断状态。"""
@@ -84,6 +93,24 @@ class RapidMLXProvider(BaseProvider):
 
     async def close(self) -> None:
         await self._client.aclose()
+
+    def _resolve_base_url(self, model: str) -> str:
+        """根据模型名解析对应实例的 base_url（多实例路由核心）
+        
+        匹配逻辑：
+        1. 精确匹配 model_url_map（配置名 + served_model_name）
+        2. 遍历 model_url_map 做子串匹配（完整 HF ID 包含别名的情况）
+        3. 回退到默认 base_url
+        """
+        if self._manager:
+            url_map = self._manager.get_model_url_map()
+            if model in url_map:
+                return url_map[model]
+            model_lower = model.lower()
+            for key, url in url_map.items():
+                if key.lower() in model_lower or model_lower in key.lower():
+                    return url
+        return self._base_url
 
     # ------------------------------------------------------------------
     # OpenAI 兼容的 chat completion
@@ -122,7 +149,9 @@ class RapidMLXProvider(BaseProvider):
         if self._is_broken():
             raise httpx.ConnectError("Rapid-MLX 处于熔断状态，暂时不可用")
 
-        url = f"{self._base_url}/v1/chat/completions"
+        base_url = self._resolve_base_url(model)
+        url = f"{base_url}/v1/chat/completions"
+        t0 = time.time()
         try:
             resp = await self._client.post(
                 url,
@@ -135,6 +164,9 @@ class RapidMLXProvider(BaseProvider):
             raise httpx.ConnectError(f"Rapid-MLX 连接失败: {e}") from e
 
         self._record_success()
+        latency_ms = (time.time() - t0) * 1000
+        if self._manager:
+            self._manager.record_request(model, latency_ms)
         data = resp.json()
 
         choices = data.get("choices") or []
@@ -176,7 +208,8 @@ class RapidMLXProvider(BaseProvider):
         if self._is_broken():
             raise httpx.ConnectError("Rapid-MLX 处于熔断状态，暂时不可用")
 
-        url = f"{self._base_url}/v1/chat/completions"
+        base_url = self._resolve_base_url(model)
+        url = f"{base_url}/v1/chat/completions"
         try:
             async with self._client.stream(
                 "POST",
@@ -217,33 +250,59 @@ class RapidMLXProvider(BaseProvider):
     # ------------------------------------------------------------------
 
     async def _fetch_models(self, force: bool = False) -> list[dict[str, Any]]:
-        """获取模型列表，默认使用缓存（TTL=60s）"""
+        """获取模型列表，多实例模式下聚合所有实例的模型"""
         now = time.time()
         if not force and self._models_cache is not None and (now - self._models_cache_time) < _MODELS_CACHE_TTL:
             return self._models_cache
 
-        if self._is_broken():
+        if self._is_broken() and not self._manager:
             return self._models_cache or []
 
-        url = f"{self._base_url}/v1/models"
-        try:
-            resp = await self._client.get(url, timeout=_CONNECT_TIMEOUT)
-            resp.raise_for_status()
-            data = resp.json()
-            self._models_cache = data.get("data", [])
+        all_models: list[dict[str, Any]] = []
+        seen_ids: set[str] = set()
+
+        if self._manager:
+            url_map = self._manager.get_model_url_map()
+            urls_to_query = set(url_map.values()) or {self._base_url}
+        else:
+            urls_to_query = {self._base_url}
+
+        for base_url in urls_to_query:
+            url = f"{base_url}/v1/models"
+            try:
+                resp = await self._client.get(url, timeout=_CONNECT_TIMEOUT)
+                resp.raise_for_status()
+                data = resp.json()
+                for m in data.get("data", []):
+                    mid = m.get("id", "")
+                    if mid and mid not in seen_ids:
+                        all_models.append(m)
+                        seen_ids.add(mid)
+                self._record_success()
+            except (httpx.ConnectError, httpx.ConnectTimeout) as e:
+                logger.debug("获取 Rapid-MLX 模型列表失败（%s）: %s", base_url, e)
+            except Exception as e:
+                logger.debug("获取 Rapid-MLX 模型列表失败（%s）: %s", base_url, e)
+
+        if all_models:
+            self._models_cache = all_models
             self._models_cache_time = now
-            self._record_success()
-            return self._models_cache
-        except (httpx.ConnectError, httpx.ConnectTimeout) as e:
-            self._record_failure()
-            logger.warning("获取 Rapid-MLX 模型列表失败（%s）: %s", self._base_url, e)
-            return self._models_cache or []
-        except Exception as e:
-            logger.warning("获取 Rapid-MLX 模型列表失败（%s）: %s", self._base_url, e)
-            return self._models_cache or []
+        elif not self._models_cache:
+            self._models_cache = []
+            self._models_cache_time = now
+
+        return self._models_cache or []
 
     async def list_models(self) -> list[str]:
-        """查询 Rapid-MLX 当前加载的模型列表"""
+        """返回 rapid-mlx 全部可用模型（来自 rapid-mlx models 命令）
+        
+        如果 Manager 可用，优先使用其 list_available_models()（188+ 模型）。
+        否则回退到查询运行中实例的 /v1/models。
+        """
+        if self._manager:
+            catalog_models = self._manager.list_available_models()
+            if catalog_models:
+                return [m["alias"] for m in catalog_models]
         models = await self._fetch_models()
         return [m["id"] for m in models if "id" in m]
 
@@ -252,17 +311,25 @@ class RapidMLXProvider(BaseProvider):
     # ------------------------------------------------------------------
 
     async def health_check(self) -> bool:
-        """检查 Rapid-MLX 服务是否可达"""
-        try:
-            resp = await self._client.get(
-                f"{self._base_url}/v1/models", timeout=_CONNECT_TIMEOUT,
-            )
-            ok = resp.status_code == 200
-            if ok:
-                self._record_success()
-            return ok
-        except Exception:
-            return False
+        """检查 Rapid-MLX 服务是否可达（多实例模式下只要有一个可达即为健康）"""
+        urls_to_check: set[str] = set()
+        if self._manager:
+            url_map = self._manager.get_model_url_map()
+            urls_to_check = set(url_map.values())
+        if not urls_to_check:
+            urls_to_check = {self._base_url}
+
+        for base_url in urls_to_check:
+            try:
+                resp = await self._client.get(
+                    f"{base_url}/v1/models", timeout=_CONNECT_TIMEOUT,
+                )
+                if resp.status_code == 200:
+                    self._record_success()
+                    return True
+            except Exception:
+                continue
+        return False
 
     # ------------------------------------------------------------------
     # 动态模型发现 → 注册到 Catalog
@@ -271,7 +338,10 @@ class RapidMLXProvider(BaseProvider):
     async def discover_and_register(
         self, catalog: Any, provider_id: str = "rapid_mlx"
     ) -> list[str]:
-        """查询 Rapid-MLX 已加载的模型，自动注册到 Catalog，返回新增模型 ID 列表。"""
+        """查询 Rapid-MLX 已加载的模型，自动注册到 Catalog，返回新增模型 ID 列表。
+        
+        只注册完整的 HuggingFace ID（包含 '/'），跳过短别名以避免重复。
+        """
         models = await self._fetch_models(force=True)
         if not models:
             return []
@@ -290,9 +360,13 @@ class RapidMLXProvider(BaseProvider):
         existing_ids = {m["id"] for m in catalog.get_models(provider_id)}
         added: list[str] = []
 
+        full_ids = {m.get("id", "") for m in models if "/" in m.get("id", "")}
+
         for m in models:
             model_id = m.get("id", "")
             if not model_id or model_id in existing_ids:
+                continue
+            if "/" not in model_id and full_ids:
                 continue
 
             owned_by = m.get("owned_by", "")

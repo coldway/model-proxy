@@ -5246,3 +5246,7 @@ agnes/agnes-image-2.0-flash:
 
     For more information check: https'
   tested_at: '2026-07-02 10:13:44'
+rapid_mlx/mlx-community/Kokoro-82M-bf16:
+  available: false
+  error: unavailable (503)
+  tested_at: '2026-07-27 11:29:21'

@@ -162,12 +162,28 @@ networks:
 
 ```bash
 cd ~/services/model-proxy
+
+# 确保 personal_proxy 网络已存在（由 Caddy 的 docker compose 创建）
+docker network inspect personal_proxy > /dev/null 2>&1 || \
+  docker network create personal_proxy
+
+# 构建并启动
 docker compose up -d --build
 
-# 验证
+# 验证容器状态
 docker compose ps
-docker compose logs -f --tail=20
+
+# 确认已加入 personal_proxy 网络（输出应包含 model-proxy）
+docker network inspect personal_proxy --format '{{range .Containers}}{{.Name}} {{end}}'
 ```
+
+> **重要**: 如果上述命令输出中没有看到 `model-proxy`，手动加入：
+> ```bash
+> docker network connect personal_proxy model-proxy
+> ```
+>
+> 这通常发生在 `personal_proxy` 网络在 model-proxy 启动后才创建的情况。
+> 重启后会自动加入（`docker-compose.yml` 已声明该网络）。
 
 ### 6. 配置 Caddy 反向代理
 
@@ -257,19 +273,35 @@ sudo ufw enable
 ### 8. 验证
 
 ```bash
-# 检查可用模型（-k 跳过自签名证书校验）
+# 1. 确认网络互通
+docker exec personal-caddy-caddy-1 nslookup model-proxy
+# 应返回 model-proxy 的 IP 地址
+
+# 2. 健康检查（不需要认证）
+curl -k https://YOUR_SERVER_IP/health
+
+# 3. 检查可用模型（-k 跳过自签名证书校验）
 curl -k https://YOUR_SERVER_IP/v1/models \
   -H "Authorization: Bearer your-access-api-key"
 
-# 测试推理
+# 4. 测试推理
 curl -k https://YOUR_SERVER_IP/v1/chat/completions \
   -H "Authorization: Bearer your-access-api-key" \
   -H "Content-Type: application/json" \
   -d '{"model":"auto","messages":[{"role":"user","content":"你好"}]}'
 
-# 访问管理面板
-# 浏览器打开 https://YOUR_SERVER_IP/ui（需信任自签名证书）
+# 5. 访问管理面板（浏览器打开，需信任自签名证书）
+# https://YOUR_SERVER_IP/ui
 ```
+
+**常见问题排查**:
+
+| 现象 | 原因 | 解决 |
+|------|------|------|
+| 502 Bad Gateway | model-proxy 不在 personal_proxy 网络 | `docker network connect personal_proxy model-proxy` |
+| Connection refused | model-proxy 容器未运行 | `docker compose up -d` |
+| nslookup NXDOMAIN | 同上，DNS 无法解析容器名 | 确认网络连接 |
+| 401 Unauthorized | API Key 不匹配 | 检查 `conf/config.yaml` 中的 `api_token` 或 `api_keys` |
 
 ---
 

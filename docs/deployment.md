@@ -35,266 +35,52 @@ python main.py
 
 ---
 
-## Docker 部署
+## 生产部署（Docker，推荐）
 
-### Dockerfile
+### 架构
 
-在项目根目录创建 `Dockerfile`：
-
-```dockerfile
-FROM python:3.11-slim
-
-WORKDIR /app
-
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-COPY src/ src/
-COPY conf/providers_catalog.yaml conf/providers_catalog.yaml
-COPY main.py .
-
-EXPOSE 8000
-
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+```
+客户端请求 → Caddy (:80) → Docker 容器 (model-proxy:8000)
+                                  ↓
+                         conf/config.yaml (volume 挂载)
+                         data/ (持久化目录)
 ```
 
-### 构建与运行
+### 1. 准备服务器
 
 ```bash
-# 构建镜像
-docker build -t model-proxy:latest .
+# 安装 Docker（如未安装）
+curl -fsSL https://get.docker.com | sh
+sudo systemctl enable --now docker
 
-# 运行容器
-docker run -d \
-  --name model-proxy \
-  -p 8000:8000 \
-  -v $(pwd)/conf/config.yaml:/app/conf/config.yaml:ro \
-  -v $(pwd)/data:/app/data \
-  model-proxy:latest
+# 安装 Caddy（如未安装）
+sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+sudo apt update && sudo apt install caddy
 ```
 
-关键点说明：
-- `conf/config.yaml` 通过 volume 挂载注入，镜像内不包含任何 API Key
-- `data/` 目录挂载以持久化请求历史（`request_history.jsonl`）
-- `providers_catalog.yaml` 已在构建时复制进镜像，如需动态修改也可改为 volume 挂载
-
-### Docker Compose
-
-```yaml
-version: "3.9"
-
-services:
-  model-proxy:
-    build: .
-    container_name: model-proxy
-    ports:
-      - "8000:8000"
-    volumes:
-      - ./conf/config.yaml:/app/conf/config.yaml:ro
-      - ./data:/app/data
-    restart: unless-stopped
-    environment:
-      - PYTHONUNBUFFERED=1
-```
+### 2. 克隆代码
 
 ```bash
-docker compose up -d
-```
-
----
-
-## 生产环境部署
-
-### 1. 服务配置调优
-
-编辑 `conf/config.yaml` 中的 `settings`：
-
-```yaml
-settings:
-  host: "0.0.0.0"       # 生产环境监听所有接口
-  port: 8000
-  default_provider: "google"
-  auto_switch: true
-  log_level: "warning"   # 生产环境降低日志等级
-```
-
-### 2. 使用 Uvicorn 单 Worker 运行（Linux/macOS/Windows）
-
-> **⚠️ 重要：** 本项目为**单 Worker 进程设计**，所有状态（dispatcher、rate_limiter、history、session 等）以进程内单例持有。
-> 不支持 `uvicorn --workers N` 或 `gunicorn --workers N` 多进程模式（会导致状态不一致）。
-> 如需水平扩展，应在反向代理层做负载均衡（多实例各自独立），或改用外部存储（Redis 等）管理共享状态。
-
-```bash
-# 生产环境推荐：单 worker + 反向代理（Nginx/Caddy）
-uvicorn main:app --host 0.0.0.0 --port 8000 --workers 1
-
-# 或使用 Gunicorn 管理单 Worker（支持优雅重启）
-pip install gunicorn
-gunicorn main:app \
-  --workers 1 \
-  --worker-class uvicorn.workers.UvicornWorker \
-  --bind 0.0.0.0:8000 \
-  --access-logfile - \
-  --error-logfile -
-```
-
-### 3. 反向代理
-
-#### Caddy（推荐，自动化配置、无需域名）
-
-编辑 `/etc/caddy/Caddyfile`：
-
-```caddyfile
-# model-proxy - IP 访问模式（无域名/HTTPS）
-:80 {
-    # API 接口 + SSE 流式输出
-    handle /v1/* {
-        reverse_proxy localhost:8000 {
-            transport http {
-                read_timeout 0
-            }
-            flush_interval -1
-        }
-    }
-
-    # Web 管理面板
-    handle /ui* {
-        reverse_proxy localhost:8000
-    }
-
-    # Swagger 文档
-    handle /docs* {
-        reverse_proxy localhost:8000
-    }
-    handle /openapi.json {
-        reverse_proxy localhost:8000
-    }
-
-    # 默认代理
-    handle {
-        reverse_proxy localhost:8000
-    }
-}
-```
-
-```bash
-sudo systemctl restart caddy
-```
-
-> **关键**: `flush_interval -1` 确保 SSE 流式输出不被 Caddy 缓冲。
-
-#### Nginx
-
-推荐在前端放置 Nginx，处理 TLS 终止和请求缓冲：
-
-```nginx
-server {
-    listen 443 ssl;
-    server_name proxy.example.com;
-
-    ssl_certificate     /etc/ssl/certs/proxy.crt;
-    ssl_certificate_key /etc/ssl/private/proxy.key;
-
-    location / {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-
-        # SSE 流式输出需要禁用缓冲
-        proxy_buffering off;
-        proxy_cache off;
-    }
-}
-```
-
-### 4. Systemd 服务（Linux）
-
-```ini
-[Unit]
-Description=Model Proxy - 免费大模型推理代理
-After=network.target
-
-[Service]
-Type=simple
-User=model-proxy
-WorkingDirectory=/opt/model-proxy
-Environment=PATH=/opt/model-proxy/.venv/bin
-ExecStart=/opt/model-proxy/.venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-```
-
-```bash
-sudo cp model-proxy.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now model-proxy
-```
-
----
-
-## 安全建议
-
-| 措施 | 说明 |
-|------|------|
-| **API Key 保护** | `conf/config.yaml` 禁止提交 Git，Docker 部署时通过 volume 或环境变量注入 |
-| **网络隔离** | 生产环境建议 Uvicorn 仅监听 127.0.0.1，由 Nginx 统一对外 |
-| **TLS 加密** | 通过 Nginx 或云负载均衡器添加 HTTPS |
-| **访问控制** | 可在 Nginx 层添加 IP 白名单或 Basic Auth |
-| **日志审计** | `data/request_history.jsonl` 不记录消息内容，仅存元数据 |
-
----
-
-## 健康检查
-
-容器编排和负载均衡可使用以下端点进行健康检查：
-
-```bash
-# 检查服务是否存活
-curl http://127.0.0.1:8000/v1/models
-
-# 检查使用量（验证调度器正常）
-curl http://127.0.0.1:8000/v1/usage
-```
-
-Docker 健康检查示例：
-
-```dockerfile
-HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
-  CMD curl -f http://localhost:8000/v1/models || exit 1
-```
-
----
-
-## 快速独立部署（完整步骤）
-
-适用于将 model-proxy 作为独立服务部署到服务器（非 Docker 方式）。
-
-### Step 1: 上传代码
-
-```bash
-rsync -avz --exclude='__pycache__' --exclude='.venv' --exclude='data/' \
-  ./AI-agent/model-proxy/ user@SERVER_IP:/opt/model-proxy/
-```
-
-### Step 2: 安装依赖
-
-```bash
-ssh user@SERVER_IP
+# 从 Gitea 克隆
+git clone http://YOUR_GITEA:3000/your-org/model-proxy.git /opt/model-proxy
 cd /opt/model-proxy
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+
+# 或通过 rsync 上传
+rsync -avz --exclude='__pycache__' --exclude='.venv' --exclude='data/' \
+  ./model-proxy/ user@SERVER_IP:/opt/model-proxy/
 ```
 
-### Step 3: 配置
+### 3. 配置
 
 ```bash
-# 编辑配置，确保 host 为 0.0.0.0 或 127.0.0.1（取决于是否使用反向代理）
+cd /opt/model-proxy
+
+# 复制配置模板
+cp conf/config.yaml.example conf/config.yaml
+
+# 编辑配置，填入 API Keys
 vim conf/config.yaml
 ```
 
@@ -302,55 +88,103 @@ vim conf/config.yaml
 
 ```yaml
 settings:
-  host: "127.0.0.1"    # 有 Caddy/Nginx 时用 127.0.0.1，无则 0.0.0.0
+  host: "0.0.0.0"
   port: 8000
-  log_level: "warning"
+  api_key: "your-access-api-key"  # 公网访问时必须设置
   auto_switch: true
+  log_level: "warning"
+
+providers:
+  - name: google
+    api_key: "your-google-api-key"
+    # ...
 ```
 
-### Step 4: 配置 Systemd
+生成强访问密钥：
 
 ```bash
-sudo tee /etc/systemd/system/model-proxy.service << 'EOF'
-[Unit]
-Description=Model Proxy - LLM 推理代理
-After=network.target
-
-[Service]
-Type=simple
-User=root
-WorkingDirectory=/opt/model-proxy
-Environment=PATH=/opt/model-proxy/.venv/bin:/usr/bin
-ExecStart=/opt/model-proxy/.venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000
-Restart=always
-RestartSec=5
-StandardOutput=journal
-StandardError=journal
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-sudo systemctl daemon-reload
-sudo systemctl enable --now model-proxy
-sudo systemctl status model-proxy
+openssl rand -hex 32
 ```
 
-### Step 5: 配置 Caddy
+### 4. Docker Compose 配置
+
+项目已包含 `docker-compose.yml`：
+
+```yaml
+services:
+  model-proxy:
+    build: .
+    container_name: model-proxy
+    ports:
+      - "127.0.0.1:8000:8000"   # 仅本机可访问，由 Caddy 代理公网流量
+    volumes:
+      - ./conf/config.yaml:/app/conf/config.yaml:ro
+      - ./data:/app/data
+    restart: unless-stopped
+    environment:
+      - PYTHONUNBUFFERED=1
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/v1/models"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+```
+
+> **安全**: `ports` 绑定 `127.0.0.1`，确保外部无法绕过 Caddy 直连。
+
+### 5. 构建并启动
+
+```bash
+cd /opt/model-proxy
+docker compose up -d --build
+
+# 验证
+docker compose ps
+docker compose logs -f --tail=20
+```
+
+### 6. 配置 Caddy 反向代理
 
 ```bash
 sudo tee /etc/caddy/Caddyfile << 'EOF'
 :80 {
+    # LLM API（OpenAI/Anthropic 协议）
     handle /v1/* {
-        reverse_proxy localhost:8000 {
+        reverse_proxy 127.0.0.1:8000 {
             transport http {
                 read_timeout 0
             }
             flush_interval -1
         }
     }
+
+    # 管理面板 - 仅内网可访问
+    @internal remote_ip 127.0.0.1 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
+    handle /ui* {
+        @external not remote_ip 127.0.0.1 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
+        respond @external "Forbidden" 403
+        reverse_proxy 127.0.0.1:8000
+    }
+
+    # Swagger 文档 - 仅内网
+    handle /docs* {
+        @external_docs not remote_ip 127.0.0.1 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
+        respond @external_docs "Forbidden" 403
+        reverse_proxy 127.0.0.1:8000
+    }
+
+    # 健康检查（公开）
+    handle /health {
+        reverse_proxy 127.0.0.1:8000
+    }
+
     handle {
-        reverse_proxy localhost:8000
+        respond "Not Found" 404
     }
 }
 EOF
@@ -358,277 +192,185 @@ EOF
 sudo systemctl restart caddy
 ```
 
-### Step 6: 验证
+> **关键**: `flush_interval -1` 确保 SSE 流式输出不被 Caddy 缓冲。
+
+### 7. 防火墙
 
 ```bash
-# 检查服务状态
-curl http://SERVER_IP/v1/models
+sudo ufw allow 80/tcp     # Caddy 公网入口
+sudo ufw allow 443/tcp    # HTTPS（可选）
+sudo ufw allow 22/tcp     # SSH
+sudo ufw deny 8000/tcp    # 禁止直接访问容器端口
+sudo ufw enable
+```
+
+### 8. 验证
+
+```bash
+# 检查可用模型
+curl http://YOUR_SERVER_IP/v1/models \
+  -H "Authorization: Bearer your-access-api-key"
 
 # 测试推理
-curl http://SERVER_IP/v1/chat/completions \
+curl http://YOUR_SERVER_IP/v1/chat/completions \
+  -H "Authorization: Bearer your-access-api-key" \
   -H "Content-Type: application/json" \
   -d '{"model":"auto","messages":[{"role":"user","content":"你好"}]}'
 ```
 
 ---
 
-## 与 Novel Engine 联合部署
+## 日常运维
 
-如果 model-proxy 与 Novel Engine 在同一台服务器：
+### 常用命令
 
-**方式 A**: Docker Compose 内部通信（推荐）
+```bash
+cd /opt/model-proxy
 
-Novel 的 `docker-compose.prod.yml` 已包含 model-proxy 服务。设置：
+# 查看状态
+docker compose ps
 
-```env
-MODEL_PROXY_URL=http://model-proxy:8000/v1
+# 查看日志
+docker compose logs -f --tail=50
+
+# 重启
+docker compose restart
+
+# 更新部署（代码更新后）
+git pull origin main
+docker compose up -d --build
+
+# 停止
+docker compose down
+
+# 清理旧镜像
+docker image prune -f
 ```
 
-**方式 B**: 宿主机独立 Systemd + Docker 互通
+### 配置变更
 
-model-proxy 作为宿主机 Systemd 服务运行，Novel Docker 容器通过 `host.docker.internal` 访问：
+修改 `conf/config.yaml` 后无需重新构建镜像（volume 挂载）：
 
-```env
-MODEL_PROXY_URL=http://host.docker.internal:8000/v1
+```bash
+# 修改配置
+vim conf/config.yaml
+
+# 重启容器使配置生效
+docker compose restart
 ```
 
-Docker Compose 中需添加：
+### 日志管理
 
-```yaml
-services:
-  novel-api:
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+```bash
+# Docker 日志自动轮转，配置 /etc/docker/daemon.json
+sudo tee /etc/docker/daemon.json << 'EOF'
+{
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "10m",
+    "max-file": "3"
+  }
+}
+EOF
+
+sudo systemctl restart docker
 ```
 
 ---
 
 ## 一键部署脚本 (deploy.sh)
 
-项目根目录提供 `deploy.sh`，封装所有部署操作。
-
-### 首次部署
-
-```bash
-cd /opt/model-proxy
-
-# 1. 确认 API Keys 配置
-vim conf/config.yaml
-
-# 2. 一键安装（创建 venv + 安装依赖 + 注册 Systemd + 启动 + 验证）
-bash deploy.sh install
-
-# 3. 可选：配置 Caddy 反向代理（80 端口对外）
-bash deploy.sh caddy
-```
-
-### 命令参考
+项目提供 `deploy.sh` 脚本封装 Docker 部署操作：
 
 | 命令 | 用途 |
 |------|------|
-| `bash deploy.sh install` | 首次安装（Python 环境 + Systemd + 启动） |
-| `bash deploy.sh start` | 启动服务 |
-| `bash deploy.sh stop` | 停止服务 |
-| `bash deploy.sh restart` | 重启服务 |
-| `bash deploy.sh status` | 查看运行状态（PID、内存、启动时间） |
-| `bash deploy.sh logs` | 查看实时日志（journalctl） |
+| `bash deploy.sh install` | 首次安装（检查 Docker + 构建 + 启动 + Caddy 配置） |
+| `bash deploy.sh start` | 启动容器 |
+| `bash deploy.sh stop` | 停止容器 |
+| `bash deploy.sh restart` | 重启容器 |
+| `bash deploy.sh update` | 拉取代码 + 重新构建 + 重启 |
+| `bash deploy.sh status` | 查看容器状态 |
+| `bash deploy.sh logs` | 查看实时日志 |
 | `bash deploy.sh logs 100` | 查看最近 100 行日志 |
-| `bash deploy.sh update` | 代码更新后重装依赖并重启 |
-| `bash deploy.sh caddy` | 安装并配置 Caddy 反向代理 |
-| `bash deploy.sh test` | 测试推理是否正常（检查模型数 + 发送测试请求） |
-
-### 脚本功能说明
-
-**`install` 自动执行的操作**:
-1. 检查/安装 Python3
-2. 创建 `.venv` 虚拟环境
-3. 安装 `requirements.txt` 依赖
-4. 自动将 `conf/config.yaml` 的 `host` 改为 `0.0.0.0`
-5. 创建 `data/` 目录（持久化请求历史）
-6. 注册 Systemd 服务（`model-proxy.service`）
-7. 启动服务并验证
-
-**`caddy` 自动执行的操作**:
-1. 检测并安装 Caddy（支持 amd64/arm64）
-2. 写入 Caddyfile（SSE 流式支持 `flush_interval -1`）
-3. 重启并 enable Caddy
-
-**`test` 验证内容**:
-1. 调用 `/v1/models` 确认服务可达，输出可用模型数
-2. 发送测试推理请求，确认能正常响应
-
-### 安全检查
-
-- 脚本在启动前检查 `conf/config.yaml` 是否存在
-- 如果未发现任何 API Key，输出警告提示
-- 生产环境自动关闭 `reload=True`（通过 Systemd 的 uvicorn 直接运行）
-
-### 日志管理
-
-使用 Systemd journal 管理日志：
-
-```bash
-# 实时查看
-bash deploy.sh logs
-
-# 查看最近 1 小时
-sudo journalctl -u model-proxy --since "1 hour ago"
-
-# 导出日志
-sudo journalctl -u model-proxy --since today > /tmp/model-proxy-today.log
-```
-
-### 升级流程
-
-```bash
-cd /opt/model-proxy
-
-# 1. 拉取/上传最新代码
-git pull  # 或 rsync
-
-# 2. 一键升级（自动重装依赖 + 重启）
-bash deploy.sh update
-```
+| `bash deploy.sh caddy` | 配置 Caddy 反向代理 |
+| `bash deploy.sh test` | 测试推理接口 |
 
 ---
 
-## 公网暴露安全加固
+## 安全加固
 
-当 model-proxy 需要公网可访问（供远程服务通过 OpenAI/Anthropic 协议调用）时，必须实施以下安全措施。
+| 措施 | 说明 |
+|------|------|
+| API Key 鉴权 | `config.yaml` 中 `api_key` 字段，所有请求需 `Authorization: Bearer <key>` |
+| 端口绑定 127.0.0.1 | Docker 容器端口不暴露公网，仅 Caddy 可达 |
+| 管理面板限内网 | `/ui*`、`/docs*` 仅内网 IP 可访问 |
+| 防火墙 | UFW 只开放 80/443/22 |
+| 配置不入镜像 | `config.yaml` 通过 volume 注入，镜像不含密钥 |
+| 请求历史 | `data/request_history.jsonl` 仅存元数据，不记录消息内容 |
 
-### 1. 启用 API Key 鉴权
+---
 
-model-proxy 支持 Bearer Token 认证。客户端请求时需携带 `Authorization: Bearer <your-api-key>` 头。
+## 与 Novel Engine 联合部署
 
-在 `conf/config.yaml` 中配置访问密钥：
-
-```yaml
-settings:
-  host: "127.0.0.1"
-  port: 8000
-  api_key: "your-secret-api-key-here"  # 设置后所有请求需携带此 key
-```
-
-生成强密钥：
-
-```bash
-echo "api_key: $(openssl rand -hex 32)" >> conf/config.yaml
-```
-
-### 2. Caddy 公网访问配置（含限流）
-
-```caddyfile
-:80 {
-    # API 接口 + SSE 流式输出
-    handle /v1/* {
-        # 限流: 每 IP 每秒 10 请求
-        rate_limit {remote_host} 10r/s
-
-        reverse_proxy localhost:8000 {
-            transport http {
-                read_timeout 0
-            }
-            flush_interval -1
-        }
-    }
-
-    # Web 管理面板 - 仅内网可访问
-    @internal {
-        remote_ip 127.0.0.1 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
-    }
-    handle /ui* {
-        @external not remote_ip 127.0.0.1 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
-        respond @external "Forbidden" 403
-        reverse_proxy localhost:8000
-    }
-
-    # 健康检查（公开）
-    handle /health {
-        reverse_proxy localhost:8000
-    }
-
-    # 其他路径 - 拒绝
-    handle {
-        respond "Not Found" 404
-    }
-}
-```
-
-### 3. 防火墙配置
-
-```bash
-sudo ufw allow 80/tcp    # Caddy
-sudo ufw allow 443/tcp   # Caddy HTTPS（可选）
-sudo ufw allow 22/tcp    # SSH
-sudo ufw deny 8000/tcp   # 禁止直接访问 model-proxy 端口
-sudo ufw enable
-```
-
-### 4. 客户端使用示例
-
-外部服务（如 Novel Engine）连接公网 model-proxy：
-
-```bash
-# OpenAI 兼容协议
-curl http://YOUR_SERVER_IP/v1/chat/completions \
-  -H "Authorization: Bearer your-secret-api-key-here" \
-  -H "Content-Type: application/json" \
-  -d '{"model":"auto","messages":[{"role":"user","content":"你好"}]}'
-
-# 查看可用模型
-curl http://YOUR_SERVER_IP/v1/models \
-  -H "Authorization: Bearer your-secret-api-key-here"
-```
-
-Novel Engine 配置：
+Novel Engine 通过 OpenAI 兼容协议连接 model-proxy：
 
 ```yaml
 # novel_engine.yaml
 llm_backend:
   active: openai_compatible
   openai_compatible:
-    base_url: http://YOUR_SERVER_IP/v1
-    api_key: your-secret-api-key-here
+    base_url: http://YOUR_SERVER_IP/v1      # 公网地址
+    api_key: your-access-api-key
+```
+
+如果两者在同一台服务器，Novel Docker 容器可通过 Docker 网络直连：
+
+```yaml
+# novel docker-compose.prod.yml
+services:
+  novel-api:
+    environment:
+      - LLM_SERVICE_URL=http://host.docker.internal:8000/v1
+      - LLM_SERVICE_TOKEN=your-access-api-key
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 ```
 
 ---
 
-## Gitea 集成（CI/CD 自动部署）
+## Gitea 集成（自动部署）
 
 ### 仓库设置
 
 ```bash
-# 服务器上克隆 Gitea 仓库
-git clone http://YOUR_GITEA_IP:3000/your-org/model-proxy.git /opt/model-proxy
+git clone http://YOUR_GITEA:3000/your-org/model-proxy.git /opt/model-proxy
 ```
 
 ### Webhook 自动部署
 
-在 Gitea 仓库 Settings → Webhooks 添加：
-
-- **URL**: `http://YOUR_SERVER_IP:9000/hooks/model-proxy` (需搭配 webhook-receiver)
-- **Trigger**: Push to `main` branch
-
-或使用简易部署脚本定时拉取：
+配合 `deploy-receiver` 服务（详见 `storage-base/docs/自动部署系统搭建指南.md`），推送到 `main` 分支后自动执行：
 
 ```bash
-# /opt/scripts/auto-deploy-model-proxy.sh
-#!/bin/bash
-cd /opt/model-proxy
-git fetch origin main
-LOCAL=$(git rev-parse HEAD)
-REMOTE=$(git rev-parse origin/main)
-
-if [ "$LOCAL" != "$REMOTE" ]; then
-    echo "[$(date)] 检测到新提交，开始更新..."
-    git pull origin main
-    bash deploy.sh update
-    echo "[$(date)] 部署完成"
-fi
+git pull origin main && docker compose up -d --build
 ```
 
-添加 Cron 每 5 分钟检查：
+---
+
+## 健康检查
 
 ```bash
-echo "*/5 * * * * root /opt/scripts/auto-deploy-model-proxy.sh >> /var/log/model-proxy-deploy.log 2>&1" | sudo tee /etc/cron.d/model-proxy-autodeploy
+# 服务存活
+curl http://127.0.0.1:8000/v1/models
+
+# 查看使用量
+curl http://127.0.0.1:8000/v1/usage
 ```
+
+Docker Compose 已内置健康检查（每 30 秒 `/v1/models`），容器异常会自动重启。
+
+---
+
+## 重要设计约束
+
+> **单进程设计**: model-proxy 所有状态（dispatcher、rate_limiter、history、session）以进程内单例持有。
+> 不支持多 Worker/多实例。如需水平扩展，应在反向代理层做负载均衡（多容器各自独立状态），或改用外部存储。

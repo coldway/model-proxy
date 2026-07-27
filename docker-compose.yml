@@ -1,0 +1,27 @@
+services:
+  model-proxy:
+    build: .
+    container_name: model-proxy
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - ./conf/config.yaml:/app/conf/config.yaml:ro
+      - ./data:/app/data
+    restart: unless-stopped
+    environment:
+      - PYTHONUNBUFFERED=1
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/v1/models"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

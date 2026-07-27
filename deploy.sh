@@ -2,25 +2,14 @@
 # Created by model-proxy on 2026/07/27
 # Copyright © 2026
 #
-# Model Proxy 独立部署脚本
+# Model Proxy Docker 部署脚本
 # 用法: bash deploy.sh [命令]
-# 命令:
-#   install   - 首次安装（Python 环境 + 依赖 + Systemd + Caddy）
-#   start     - 启动服务
-#   stop      - 停止服务
-#   restart   - 重启服务
-#   status    - 查看服务状态
-#   logs      - 查看实时日志
-#   update    - 更新代码后重启
-#   caddy     - 配置 Caddy 反向代理
-#   test      - 测试推理是否正常
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-SERVICE_NAME="model-proxy"
-VENV_DIR="$SCRIPT_DIR/.venv"
-SYSTEMD_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
+CONTAINER_NAME="model-proxy"
+COMPOSE_FILE="$SCRIPT_DIR/docker-compose.yml"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -33,16 +22,27 @@ log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 log_step() { echo -e "${CYAN}[STEP]${NC} $1"; }
 
+check_docker() {
+    if ! command -v docker &>/dev/null; then
+        log_error "Docker 未安装"
+        echo "  安装: curl -fsSL https://get.docker.com | sh"
+        exit 1
+    fi
+    if ! docker compose version &>/dev/null; then
+        log_error "Docker Compose V2 未安装"
+        exit 1
+    fi
+}
+
 check_config() {
     if [ ! -f "$SCRIPT_DIR/conf/config.yaml" ]; then
         log_error "conf/config.yaml 不存在！"
-        echo "  请从 config.yaml.example 复制并填入 API Keys："
+        echo "  请从模板复制并填入 API Keys："
         echo "  cp conf/config.yaml.example conf/config.yaml"
         echo "  vim conf/config.yaml"
         exit 1
     fi
 
-    # 检查是否有至少一个有效的 provider key
     local has_key=0
     if grep -q "api_key: .\+" "$SCRIPT_DIR/conf/config.yaml" 2>/dev/null; then
         has_key=1
@@ -53,139 +53,132 @@ check_config() {
 }
 
 cmd_install() {
-    log_info "=== Model Proxy 首次安装 ==="
-
-    # 检查 Python
-    log_step "检查 Python 环境..."
-    if ! command -v python3 &>/dev/null; then
-        log_info "安装 Python3..."
-        sudo apt-get update && sudo apt-get install -y python3 python3-venv python3-pip
-    fi
-
-    local py_version
-    py_version=$(python3 --version 2>&1 | grep -oP '\d+\.\d+')
-    log_info "Python 版本: $py_version"
-
-    # 创建虚拟环境
-    log_step "创建 Python 虚拟环境..."
-    if [ ! -d "$VENV_DIR" ]; then
-        python3 -m venv "$VENV_DIR"
-    fi
-
-    # 安装依赖
-    log_step "安装依赖..."
-    "$VENV_DIR/bin/pip" install --no-cache-dir -r "$SCRIPT_DIR/requirements.txt"
-
-    # 检查配置
+    log_info "=== Model Proxy Docker 部署 ==="
+    check_docker
     check_config
 
-    # 修改 config.yaml 中的 host 为 0.0.0.0
-    log_step "调整生产配置..."
-    if grep -q 'host: 127.0.0.1' "$SCRIPT_DIR/conf/config.yaml"; then
-        sed -i 's/host: 127.0.0.1/host: 0.0.0.0/' "$SCRIPT_DIR/conf/config.yaml"
-        log_info "已将 host 改为 0.0.0.0"
-    fi
-    if grep -q 'log_level: debug' "$SCRIPT_DIR/conf/config.yaml"; then
-        sed -i 's/log_level: debug/log_level: info/' "$SCRIPT_DIR/conf/config.yaml"
-        log_info "已将 log_level 改为 info"
-    fi
-
-    # 创建 data 目录
+    # 创建持久化目录
     mkdir -p "$SCRIPT_DIR/data"
 
-    # 安装 Systemd 服务
-    log_step "配置 Systemd 服务..."
-    sudo tee "$SYSTEMD_FILE" > /dev/null << EOF
-[Unit]
-Description=Model Proxy - LLM 推理代理
-After=network.target
+    # 构建并启动
+    log_step "构建 Docker 镜像..."
+    cd "$SCRIPT_DIR"
+    docker compose build
 
-[Service]
-Type=simple
-User=$(whoami)
-WorkingDirectory=$SCRIPT_DIR
-Environment=PATH=$VENV_DIR/bin:/usr/bin:/bin
-ExecStart=$VENV_DIR/bin/uvicorn main:app --host 0.0.0.0 --port 8000 --workers 1
-Restart=always
-RestartSec=5
-StandardOutput=journal
-StandardError=journal
+    log_step "启动容器..."
+    docker compose up -d
 
-[Install]
-WantedBy=multi-user.target
-EOF
+    # 等待健康检查通过
+    log_step "等待服务就绪..."
+    for i in $(seq 1 30); do
+        if curl -sf http://127.0.0.1:8000/v1/models > /dev/null 2>&1; then
+            log_info "服务就绪 (${i}s)"
+            break
+        fi
+        sleep 1
+    done
 
-    sudo systemctl daemon-reload
-    sudo systemctl enable "$SERVICE_NAME"
-
-    # 启动服务
-    log_step "启动服务..."
-    sudo systemctl start "$SERVICE_NAME"
-    sleep 3
-
-    # 验证
     cmd_status
     echo ""
     cmd_test
 
-    log_info "=== 安装完成 ==="
-    log_info "服务地址: http://$(hostname -I | awk '{print $1}'):8000"
-    log_info "管理面板: http://$(hostname -I | awk '{print $1}'):8000/ui"
-    log_info "API 文档: http://$(hostname -I | awk '{print $1}'):8000/docs"
+    local server_ip
+    server_ip=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "127.0.0.1")
+    log_info "=== 部署完成 ==="
+    log_info "本机访问: http://127.0.0.1:8000"
+    log_info "如需公网访问，请执行: bash deploy.sh caddy"
 }
 
 cmd_start() {
+    check_docker
     check_config
-    log_info "启动 $SERVICE_NAME..."
-    sudo systemctl start "$SERVICE_NAME"
+    log_info "启动容器..."
+    cd "$SCRIPT_DIR"
+    docker compose up -d
     sleep 2
     cmd_status
 }
 
 cmd_stop() {
-    log_info "停止 $SERVICE_NAME..."
-    sudo systemctl stop "$SERVICE_NAME"
-    log_info "服务已停止"
+    check_docker
+    log_info "停止容器..."
+    cd "$SCRIPT_DIR"
+    docker compose down
+    log_info "容器已停止"
 }
 
 cmd_restart() {
+    check_docker
     check_config
-    log_info "重启 $SERVICE_NAME..."
-    sudo systemctl restart "$SERVICE_NAME"
-    sleep 2
+    log_info "重启容器..."
+    cd "$SCRIPT_DIR"
+    docker compose restart
+    sleep 3
     cmd_status
 }
 
 cmd_status() {
     echo ""
-    if sudo systemctl is-active --quiet "$SERVICE_NAME"; then
-        log_info "服务状态: ${GREEN}运行中${NC}"
-        echo "  PID: $(sudo systemctl show -p MainPID --value "$SERVICE_NAME")"
-        echo "  内存: $(sudo systemctl show -p MemoryCurrent --value "$SERVICE_NAME" 2>/dev/null || echo "N/A")"
-        echo "  运行时间: $(sudo systemctl show -p ActiveEnterTimestamp --value "$SERVICE_NAME")"
+    cd "$SCRIPT_DIR"
+    if docker compose ps --format "table {{.Name}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null | grep -q "$CONTAINER_NAME"; then
+        local status
+        status=$(docker inspect --format='{{.State.Status}}' "$CONTAINER_NAME" 2>/dev/null || echo "unknown")
+        local health
+        health=$(docker inspect --format='{{.State.Health.Status}}' "$CONTAINER_NAME" 2>/dev/null || echo "none")
+
+        if [ "$status" = "running" ]; then
+            log_info "容器状态: ${GREEN}运行中${NC} (health: $health)"
+            echo "  镜像: $(docker inspect --format='{{.Config.Image}}' "$CONTAINER_NAME" 2>/dev/null)"
+            echo "  端口: $(docker port "$CONTAINER_NAME" 2>/dev/null | head -1)"
+            echo "  启动: $(docker inspect --format='{{.State.StartedAt}}' "$CONTAINER_NAME" 2>/dev/null | cut -d. -f1)"
+            echo "  内存: $(docker stats --no-stream --format '{{.MemUsage}}' "$CONTAINER_NAME" 2>/dev/null)"
+        else
+            log_warn "容器状态: ${RED}$status${NC}"
+            echo "  最近日志:"
+            docker compose logs --tail=5 2>/dev/null
+        fi
     else
-        log_warn "服务状态: ${RED}已停止${NC}"
-        echo "  最近日志:"
-        sudo journalctl -u "$SERVICE_NAME" --no-pager -n 5
+        log_warn "容器未运行"
     fi
 }
 
 cmd_logs() {
     local lines="${1:-50}"
-    sudo journalctl -u "$SERVICE_NAME" -f -n "$lines"
+    cd "$SCRIPT_DIR"
+    docker compose logs -f --tail="$lines"
 }
 
 cmd_update() {
-    log_info "更新代码后重启..."
+    check_docker
+    check_config
+    log_info "更新部署..."
 
-    # 更新依赖（如果 requirements.txt 变化）
-    "$VENV_DIR/bin/pip" install --no-cache-dir -r "$SCRIPT_DIR/requirements.txt" --quiet
+    cd "$SCRIPT_DIR"
 
-    # 重启服务
-    sudo systemctl restart "$SERVICE_NAME"
-    sleep 3
+    # 拉取最新代码（如果是 git 仓库）
+    if [ -d .git ]; then
+        log_step "拉取最新代码..."
+        git pull origin main 2>/dev/null || git pull 2>/dev/null || true
+    fi
+
+    # 重新构建并启动
+    log_step "重新构建镜像..."
+    docker compose up -d --build --remove-orphans
+
+    # 等待就绪
+    log_step "等待服务就绪..."
+    for i in $(seq 1 30); do
+        if curl -sf http://127.0.0.1:8000/v1/models > /dev/null 2>&1; then
+            break
+        fi
+        sleep 1
+    done
+
+    # 清理旧镜像
+    docker image prune -f --filter "dangling=true" > /dev/null 2>&1 || true
 
     cmd_status
+    echo ""
     cmd_test
 }
 
@@ -193,28 +186,33 @@ cmd_caddy() {
     log_info "=== 配置 Caddy 反向代理 ==="
 
     if ! command -v caddy &>/dev/null; then
-        log_info "安装 Caddy..."
-        sudo apt-get update
-        sudo apt-get install -y debian-keyring debian-archive-keyring apt-transport-https curl
-        curl -1sLf 'https://dl.cloudflare.com/cloudflare-main.gpg' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg 2>/dev/null || true
-        echo "deb [signed-by=/usr/share/keyrings/caddy-stable-archive-keyring.gpg] https://dl.cloudflare.com/cloudflare-main.list * *" | sudo tee /etc/apt/sources.list.d/caddy-stable.list 2>/dev/null || true
-        sudo apt-get update && sudo apt-get install -y caddy || {
-            log_warn "APT 安装失败，尝试直接下载..."
+        log_step "安装 Caddy..."
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq debian-keyring debian-archive-keyring apt-transport-https curl > /dev/null
+
+        curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | \
+            sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg 2>/dev/null
+        curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | \
+            sudo tee /etc/apt/sources.list.d/caddy-stable.list > /dev/null
+        sudo apt-get update -qq && sudo apt-get install -y -qq caddy > /dev/null
+
+        if ! command -v caddy &>/dev/null; then
+            log_warn "APT 安装失败，尝试二进制安装..."
             local arch="amd64"
             [[ "$(uname -m)" == "aarch64" ]] && arch="arm64"
-            curl -o /tmp/caddy.tar.gz -L "https://github.com/caddyserver/caddy/releases/latest/download/caddy_2.9.1_linux_${arch}.tar.gz"
-            sudo tar -xzf /tmp/caddy.tar.gz -C /usr/local/bin caddy
+            curl -sL "https://github.com/caddyserver/caddy/releases/latest/download/caddy_2.9.1_linux_${arch}.tar.gz" | \
+                sudo tar -xz -C /usr/local/bin caddy
             sudo chmod +x /usr/local/bin/caddy
-        }
+        fi
     fi
 
-    log_info "写入 Caddyfile..."
+    log_step "写入 Caddyfile..."
+    sudo mkdir -p /etc/caddy
     sudo tee /etc/caddy/Caddyfile > /dev/null << 'CADDYEOF'
-# Model Proxy - IP 访问模式
 :80 {
-    # API 推理接口（SSE 流式）
+    # LLM API（SSE 流式输出）
     handle /v1/* {
-        reverse_proxy localhost:8000 {
+        reverse_proxy 127.0.0.1:8000 {
             transport http {
                 read_timeout 0
             }
@@ -222,23 +220,32 @@ cmd_caddy() {
         }
     }
 
-    # Web 管理面板 + 文档
+    # 管理面板（仅内网）
     handle /ui* {
-        reverse_proxy localhost:8000
-    }
-    handle /docs* {
-        reverse_proxy localhost:8000
-    }
-    handle /openapi.json {
-        reverse_proxy localhost:8000
-    }
-    handle /redoc* {
-        reverse_proxy localhost:8000
+        @external not remote_ip 127.0.0.1 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
+        respond @external "Forbidden" 403
+        reverse_proxy 127.0.0.1:8000
     }
 
-    # 默认
+    # API 文档（仅内网）
+    handle /docs* {
+        @ext_docs not remote_ip 127.0.0.1 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
+        respond @ext_docs "Forbidden" 403
+        reverse_proxy 127.0.0.1:8000
+    }
+    handle /openapi.json {
+        @ext_api not remote_ip 127.0.0.1 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
+        respond @ext_api "Forbidden" 403
+        reverse_proxy 127.0.0.1:8000
+    }
+
+    # 健康检查（公开）
+    handle /health {
+        reverse_proxy 127.0.0.1:8000
+    }
+
     handle {
-        reverse_proxy localhost:8000
+        respond "Not Found" 404
     }
 }
 CADDYEOF
@@ -247,22 +254,22 @@ CADDYEOF
     sudo systemctl enable caddy
 
     local server_ip
-    server_ip=$(hostname -I | awk '{print $1}')
+    server_ip=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "YOUR_IP")
     log_info "Caddy 配置完成"
-    log_info "访问地址:"
-    log_info "  推理接口: http://${server_ip}/v1/chat/completions"
-    log_info "  模型列表: http://${server_ip}/v1/models"
-    log_info "  管理面板: http://${server_ip}/ui"
-    log_info "  API 文档: http://${server_ip}/docs"
+    log_info "公网访问:"
+    log_info "  推理: http://${server_ip}/v1/chat/completions"
+    log_info "  模型: http://${server_ip}/v1/models"
+    log_info "内网访问:"
+    log_info "  面板: http://${server_ip}/ui"
+    log_info "  文档: http://${server_ip}/docs"
 }
 
 cmd_test() {
-    log_info "测试推理..."
+    log_info "测试推理接口..."
     local port=8000
     local response
 
-    # 先检查模型列表
-    response=$(curl -sf "http://localhost:$port/v1/models" 2>/dev/null || echo "FAILED")
+    response=$(curl -sf "http://127.0.0.1:$port/v1/models" 2>/dev/null || echo "FAILED")
     if [[ "$response" == "FAILED" ]]; then
         log_error "无法连接到 model-proxy (port $port)"
         return 1
@@ -272,8 +279,7 @@ cmd_test() {
     model_count=$(echo "$response" | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('data',[])))" 2>/dev/null || echo "0")
     log_info "可用模型数: $model_count"
 
-    # 测试推理
-    response=$(curl -sf -X POST "http://localhost:$port/v1/chat/completions" \
+    response=$(curl -sf -X POST "http://127.0.0.1:$port/v1/chat/completions" \
         -H "Content-Type: application/json" \
         -d '{"model":"auto","messages":[{"role":"user","content":"说一个字"}],"max_tokens":10}' \
         --max-time 30 2>/dev/null || echo "FAILED")
@@ -286,11 +292,19 @@ cmd_test() {
         if [ -n "$content" ]; then
             log_info "推理测试通过: \"$content\""
         else
-            local error
-            error=$(echo "$response" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('error',{}).get('message','')[:100])" 2>/dev/null || echo "$response")
-            log_warn "推理返回异常: $error"
+            log_warn "推理返回异常"
         fi
     fi
+}
+
+cmd_clean() {
+    check_docker
+    log_info "清理旧镜像和缓存..."
+    cd "$SCRIPT_DIR"
+    docker compose down --rmi local --volumes 2>/dev/null || true
+    docker image prune -f
+    docker builder prune -f
+    log_info "清理完成"
 }
 
 # 主入口
@@ -304,26 +318,29 @@ case "${1:-help}" in
     update)   cmd_update ;;
     caddy)    cmd_caddy ;;
     test)     cmd_test ;;
+    clean)    cmd_clean ;;
     *)
-        echo "Model Proxy 部署管理脚本"
+        echo "Model Proxy Docker 部署管理脚本"
         echo ""
         echo "用法: bash deploy.sh <命令>"
         echo ""
         echo "命令:"
-        echo "  install     首次安装（Python 环境 + 依赖 + Systemd 服务）"
-        echo "  start       启动服务"
-        echo "  stop        停止服务"
-        echo "  restart     重启服务"
-        echo "  status      查看服务状态"
+        echo "  install     首次部署（构建镜像 + 启动容器）"
+        echo "  start       启动容器"
+        echo "  stop        停止并移除容器"
+        echo "  restart     重启容器"
+        echo "  status      查看容器状态"
         echo "  logs [N]    查看实时日志（默认最近 50 行）"
-        echo "  update      更新代码后重启（重装依赖 + 重启）"
+        echo "  update      拉取代码 + 重新构建 + 重启"
         echo "  caddy       安装并配置 Caddy 反向代理"
         echo "  test        测试推理是否正常"
+        echo "  clean       清理所有容器和镜像"
         echo ""
         echo "首次部署:"
-        echo "  1. vim conf/config.yaml   # 填入 API Keys"
-        echo "  2. bash deploy.sh install # 安装 + 启动"
-        echo "  3. bash deploy.sh caddy   # 配置反向代理（可选）"
-        echo "  4. bash deploy.sh test    # 验证"
+        echo "  1. cp conf/config.yaml.example conf/config.yaml"
+        echo "  2. vim conf/config.yaml     # 填入 API Keys"
+        echo "  3. bash deploy.sh install   # 构建 + 启动"
+        echo "  4. bash deploy.sh caddy     # 配置反向代理（公网访问）"
+        echo "  5. bash deploy.sh test      # 验证"
         ;;
 esac

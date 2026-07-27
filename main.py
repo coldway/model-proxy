@@ -292,7 +292,19 @@ def create_app() -> FastAPI:
 
     admin_token = settings.admin_token.strip()
     api_token = settings.api_token.strip()
-    OPEN_PATHS = frozenset({"/", "/ui", "/health", "/ready", "/docs", "/redoc", "/openapi.json"})
+    api_keys_cfg = settings.api_keys
+    OPEN_PATHS = frozenset({"/", "/ui", "/health", "/ready", "/docs", "/redoc", "/openapi.json", "/favicon.ico"})
+
+    # 构建有效 Key 集合: {key_value: ApiKeyConfig}
+    from src.models.schemas import ApiKeyConfig
+    _valid_api_keys: dict[str, ApiKeyConfig] = {}
+    for kc in api_keys_cfg:
+        if kc.enabled and kc.key.strip():
+            _valid_api_keys[kc.key.strip()] = kc
+    if api_token:
+        _valid_api_keys.setdefault(api_token, ApiKeyConfig(key=api_token, name="default"))
+
+    _auth_enabled = bool(admin_token or _valid_api_keys)
 
     app = FastAPI(
         title="Model Proxy",
@@ -340,12 +352,12 @@ def create_app() -> FastAPI:
         response.headers["X-Trace-Id"] = trace_id
         return response
 
-    if admin_token or api_token:
+    if _auth_enabled:
         from collections import deque
         import time as _time
 
         _consumer_requests: dict[str, deque] = {}
-        _consumer_rpm = settings.per_consumer_rpm
+        _global_rpm = settings.per_consumer_rpm
         _consumer_gc_last = _time.time()
         _CONSUMER_GC_INTERVAL = 300
 
@@ -359,25 +371,43 @@ def create_app() -> FastAPI:
                 return False
             return hmac.compare_digest(given.encode(), expected.encode())
 
-        def _check_consumer_rate(token: str) -> bool:
-            """Per-consumer RPM 限流检查（滑动窗口）"""
+        def _find_api_key(bearer: str) -> ApiKeyConfig | None:
+            """在多 Key 集合中查找匹配的 Key 配置"""
+            if not bearer:
+                return None
+            for key_val, cfg in _valid_api_keys.items():
+                if hmac.compare_digest(bearer.encode(), key_val.encode()):
+                    return cfg
+            return None
+
+        def _check_consumer_rate(bearer: str, key_cfg: ApiKeyConfig | None) -> bool:
+            """Per-consumer RPM 限流检查（滑动窗口），支持 Key 级别独立限额"""
             nonlocal _consumer_gc_last
-            if _consumer_rpm <= 0 or not token:
+            # admin_token 不限流
+            if admin_token and _token_match(bearer, admin_token):
                 return True
-            if _token_match(token, admin_token):
+            # 确定此 Key 的 RPM 限制
+            rpm_limit = 0
+            if key_cfg and key_cfg.rpm > 0:
+                rpm_limit = key_cfg.rpm
+            elif _global_rpm > 0:
+                rpm_limit = _global_rpm
+            if rpm_limit <= 0:
                 return True
+
             now = _time.time()
             if now - _consumer_gc_last > _CONSUMER_GC_INTERVAL:
                 _consumer_gc_last = now
                 stale = [k for k, dq in _consumer_requests.items() if not dq or dq[-1] < now - 120]
                 for k in stale:
                     del _consumer_requests[k]
-            if token not in _consumer_requests:
-                _consumer_requests[token] = deque()
-            dq = _consumer_requests[token]
+
+            if bearer not in _consumer_requests:
+                _consumer_requests[bearer] = deque()
+            dq = _consumer_requests[bearer]
             while dq and dq[0] < now - 60:
                 dq.popleft()
-            if len(dq) >= _consumer_rpm:
+            if len(dq) >= rpm_limit:
                 return False
             dq.append(now)
             return True
@@ -387,26 +417,45 @@ def create_app() -> FastAPI:
             path = request.url.path
             if path in OPEN_PATHS:
                 return await call_next(request)
+
             bearer = _extract_bearer(request.headers.get("Authorization", ""))
+
             if path.startswith("/v1/"):
-                expected = api_token or admin_token
-                if expected and not _token_match(bearer, expected):
-                    return JSONResponse(status_code=401, content={"detail": "未授权：需要有效的 API 令牌"})
-                if not _check_consumer_rate(bearer):
-                    return JSONResponse(status_code=429, content={"detail": f"请求过于频繁，每分钟限 {_consumer_rpm} 次"})
+                if _valid_api_keys:
+                    key_cfg = _find_api_key(bearer)
+                    if key_cfg is None:
+                        return JSONResponse(
+                            status_code=401,
+                            content={"error": {"message": "Invalid API key", "type": "auth_error"}},
+                        )
+                    if not _check_consumer_rate(bearer, key_cfg):
+                        rpm = key_cfg.rpm if key_cfg.rpm > 0 else _global_rpm
+                        return JSONResponse(
+                            status_code=429,
+                            content={"error": {"message": f"Rate limit: {rpm} requests/min exceeded", "type": "rate_limit_error"}},
+                        )
                 return await call_next(request)
-            expected = admin_token or api_token
+
+            # 管理接口
+            expected = admin_token or (api_token if api_token else "")
             if expected and not _token_match(bearer, expected):
-                return JSONResponse(status_code=401, content={"detail": "未授权：需要有效的管理令牌"})
+                key_cfg = _find_api_key(bearer)
+                if key_cfg is None:
+                    return JSONResponse(status_code=401, content={"detail": "未授权：需要管理令牌"})
             return await call_next(request)
+
         _auth_parts = []
         if admin_token:
-            _auth_parts.append("管理面板 /api/*")
-        if api_token:
-            _auth_parts.append("OpenAI API /v1/*")
-        if _consumer_rpm > 0:
-            _auth_parts.append(f"Per-consumer RPM={_consumer_rpm}")
+            _auth_parts.append("管理面板认证")
+        if _valid_api_keys:
+            _auth_parts.append(f"API Keys: {len(_valid_api_keys)} 个")
+        if _global_rpm > 0:
+            _auth_parts.append(f"全局 RPM={_global_rpm}")
         logger.info("认证已启用: %s", " + ".join(_auth_parts))
+        for kv, cfg in _valid_api_keys.items():
+            label = cfg.name or kv[:8] + "..."
+            rpm_info = f"rpm={cfg.rpm}" if cfg.rpm > 0 else "rpm=全局"
+            logger.info("  Key [%s]: %s", label, rpm_info)
 
     app.include_router(router)
 
@@ -420,6 +469,13 @@ def create_app() -> FastAPI:
     @app.get("/", response_class=HTMLResponse)
     async def root():
         return '<meta http-equiv="refresh" content="0;url=/ui">'
+
+    @app.get("/favicon.ico", include_in_schema=False)
+    async def favicon():
+        from fastapi.responses import Response
+        # 1x1 transparent PNG
+        PIXEL = b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n\xb4\x00\x00\x00\x00IEND\xaeB`\x82'
+        return Response(content=PIXEL, media_type="image/png")
 
     logger.info("Model Proxy 启动于 http://%s:%s", settings.host, settings.port)
     logger.info("UI 面板: http://%s:%s/ui", settings.host, settings.port)

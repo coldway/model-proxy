@@ -50,5 +50,29 @@ settings:
   default_provider: "google"
   auto_switch: true
   log_level: "info"
-  # admin_token: ""    # 管理面板认证 token（可选）
-  # api_token: ""      # OpenAI API 认证 token（可选）
+
+  # ─── 认证配置（公网暴露时强烈建议启用） ───
+
+  # 方式一：单 Key 模式（简单场景）
+  # api_token: "sk-your-single-api-key"
+
+  # 方式二：多 Key 模式（多用户/多服务，各自独立限流）
+  # api_keys:
+  #   - key: "sk-novel-engine-abc123"
+  #     name: "novel-engine"       # 标识名（日志和统计中显示）
+  #     rpm: 120                   # 该 Key 独立的每分钟请求限额
+  #   - key: "sk-external-user-xyz789"
+  #     name: "external-client"
+  #     rpm: 30
+  #   - key: "sk-unlimited-admin-key"
+  #     name: "admin-level"
+  #     rpm: 0                     # 0 = 使用全局 per_consumer_rpm（默认不限）
+
+  # 管理面板认证（Web UI + 内部 API）
+  # admin_token: "adm-secret-token"
+
+  # 全局限流（api_keys 中未设置 rpm 的 Key 使用此值）
+  # per_consumer_rpm: 60          # 0 = 不限制
+
+  # ─── 生成强令牌 ───
+  # openssl rand -hex 32

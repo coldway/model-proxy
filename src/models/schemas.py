@@ -40,6 +40,14 @@ class ProviderConfig(BaseModel):
     models: list[ModelConfig] = Field(default_factory=list)
 
 
+class ApiKeyConfig(BaseModel):
+    """单个 API Key 的配置"""
+    key: str = Field(description="API Key 值")
+    name: str = Field(default="", description="Key 的标识名（用于日志和统计）")
+    rpm: int = Field(default=0, description="该 Key 的每分钟请求上限，0=使用全局 per_consumer_rpm")
+    enabled: bool = Field(default=True, description="是否启用此 Key")
+
+
 class AppSettings(BaseModel):
     host: str = "127.0.0.1"
     port: int = 8000
@@ -47,7 +55,11 @@ class AppSettings(BaseModel):
     auto_switch: bool = True
     log_level: str = "info"
     admin_token: str = Field(default="", description="管理面板认证令牌，为空则不启用认证")
-    api_token: str = Field(default="", description="OpenAI 兼容 API (/v1/*) 认证令牌，为空则不启用；客户端通过 api_key 传入")
+    api_token: str = Field(default="", description="OpenAI 兼容 API (/v1/*) 认证令牌（单 key 模式），为空则不启用")
+    api_keys: list[ApiKeyConfig] = Field(
+        default_factory=list,
+        description="多 API Key 配置列表。配置后 api_token 仍有效（作为额外的默认 Key）",
+    )
     route_cache_ttl: int = Field(default=600, description="路由缓存有效期（秒）")
     breaker_threshold: int = Field(default=3, description="连续失败 N 次触发厂商熔断")
     breaker_cooldown: int = Field(default=300, description="熔断冷却时间（秒）")

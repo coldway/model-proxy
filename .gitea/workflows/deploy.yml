@@ -1,0 +1,26 @@
+name: Deploy Model Proxy
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    steps:
+      - name: Pull & Deploy
+        run: |
+          cd /opt/model-proxy
+          git fetch origin main
+          git reset --hard origin/main
+          bash deploy.sh update
+
+      - name: Health Check
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:8000/v1/models > /dev/null && exit 0
+            sleep 1
+          done
+          echo "::error::健康检查失败"
+          cd /opt/model-proxy && docker compose logs --tail=20
+          exit 1

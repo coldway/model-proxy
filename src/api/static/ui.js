@@ -2230,6 +2230,9 @@ function copyCodeBlock(btn) {
 }
 
 // --- 初始化 ---
+if (!localStorage.getItem('mp_admin_token')) {
+    // 未认证，等待登录表单处理
+} else {
 initIntegrationGuide();
 selectCursorMode('agent');
 loadUsage();
@@ -2241,6 +2244,7 @@ loadSessionList().then(() => {
     if (savedId) switchSession(savedId).catch(() => {});
 });
 setInterval(loadUsage, 30000);
+}
 
 // 从 URL hash 恢复 tab 状态
 (function restoreTab() {

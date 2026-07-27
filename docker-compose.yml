@@ -5,7 +5,7 @@ services:
     ports:
       - "127.0.0.1:8000:8000"
     volumes:
-      - ./conf/config.yaml:/app/conf/config.yaml:ro
+      - ./conf:/app/conf
       - ./data:/app/data
     restart: unless-stopped
     environment:

@@ -424,6 +424,9 @@ def create_app() -> FastAPI:
             bearer = _extract_bearer(request.headers.get("Authorization", ""))
 
             if path.startswith("/v1/"):
+                # admin_token 直接放行（不限流）
+                if admin_token and _token_match(bearer, admin_token):
+                    return await call_next(request)
                 if _valid_api_keys:
                     key_cfg = _find_api_key(bearer)
                     if key_cfg is None:

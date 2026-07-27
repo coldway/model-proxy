@@ -166,12 +166,16 @@ docker compose logs -f --tail=20
 
 ### 6. 配置 Caddy 反向代理
 
-```bash
-sudo tee /etc/caddy/Caddyfile << 'EOF'
-:80 {
-    # LLM API（OpenAI/Anthropic 协议）
+model-proxy 容器通过 `personal_proxy` Docker 网络与 Caddy 容器互通，Caddy 使用容器名 `model-proxy` 作为上游地址。
+
+在现有 Caddyfile 中**追加** model-proxy 相关路由（与 Gitea 等共存）：
+
+```
+# 在现有 Caddyfile 的 site block 内添加以下路由：
+
+    # ─── model-proxy LLM API ───
     handle /v1/* {
-        reverse_proxy 127.0.0.1:8000 {
+        reverse_proxy model-proxy:8000 {
             transport http {
                 read_timeout 0
             }
@@ -179,44 +183,41 @@ sudo tee /etc/caddy/Caddyfile << 'EOF'
         }
     }
 
-    # 管理面板（公网可访问，由 admin_token 保护）
+    # model-proxy 管理面板（由 admin_token 保护）
     handle /ui* {
-        reverse_proxy 127.0.0.1:8000
+        reverse_proxy model-proxy:8000
     }
 
-    # Swagger 文档（公网可访问）
+    # model-proxy Swagger 文档
     handle /docs* {
-        reverse_proxy 127.0.0.1:8000
+        reverse_proxy model-proxy:8000
     }
     handle /redoc* {
-        reverse_proxy 127.0.0.1:8000
+        reverse_proxy model-proxy:8000
     }
     handle /openapi.json {
-        reverse_proxy 127.0.0.1:8000
+        reverse_proxy model-proxy:8000
     }
 
-    # 健康检查（公开）
+    # 健康检查
     handle /health {
-        reverse_proxy 127.0.0.1:8000
+        reverse_proxy model-proxy:8000
     }
 
-    # 静态资源（favicon 等）
     handle /favicon.ico {
-        reverse_proxy 127.0.0.1:8000
+        reverse_proxy model-proxy:8000
     }
-
-    handle {
-        respond "Not Found" 404
-    }
-}
-EOF
-
-sudo systemctl restart caddy
 ```
 
-> **关键**: `flush_interval -1` 确保 SSE 流式输出不被 Caddy 缓冲。
+重启 Caddy 容器：
 
-> **安全说明**: 管理面板 (`/ui`) 和 Swagger (`/docs`) 已开放公网访问。管理面板操作需要 `admin_token` 认证（在 `config.yaml` 中配置），确保使用强 Token。Swagger 为只读文档，暴露无安全风险。
+```bash
+docker restart personal-caddy-caddy-1
+```
+
+> **前提**: model-proxy 的 `docker-compose.yml` 已加入 `personal_proxy` 网络（项目已包含此配置）。
+> 
+> **关键**: `flush_interval -1` 确保 SSE 流式输出不被 Caddy 缓冲。
 
 ### 7. 防火墙
 

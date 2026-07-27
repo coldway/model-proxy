@@ -293,7 +293,7 @@ def create_app() -> FastAPI:
     admin_token = settings.admin_token.strip()
     api_token = settings.api_token.strip()
     api_keys_cfg = settings.api_keys
-    OPEN_PATHS = frozenset({"/", "/favicon.ico", "/mp/ui", "/mp/health", "/mp/ready", "/mp/docs", "/mp/redoc", "/mp/openapi.json", "/mp/favicon.ico"})
+    OPEN_PATHS = frozenset({"/", "/mp/ui", "/mp/health", "/mp/ready", "/mp/docs", "/mp/redoc", "/mp/openapi.json", "/mp/favicon.ico"})
 
     # 构建有效 Key 集合: {key_value: ApiKeyConfig}
     from src.models.schemas import ApiKeyConfig
@@ -474,7 +474,6 @@ def create_app() -> FastAPI:
         return '<meta http-equiv="refresh" content="0;url=/mp/ui">'
 
     @app.get("/mp/favicon.ico", include_in_schema=False)
-    @app.get("/favicon.ico", include_in_schema=False)
     async def favicon():
         from fastapi.responses import Response
         # 1x1 transparent PNG

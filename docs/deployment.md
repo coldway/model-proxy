@@ -221,6 +221,11 @@ https://{$SERVER_IP} {
         reverse_proxy model-proxy:8000
     }
 
+    # model-proxy 静态资源（管理面板 JS/CSS）
+    handle /static/* {
+        reverse_proxy model-proxy:8000
+    }
+
     # model-proxy API 文档
     handle /docs* {
         reverse_proxy model-proxy:8000

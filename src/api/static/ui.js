@@ -1,6 +1,7 @@
 // --- HTTP 与鉴权 ---
 const API = '/mp';
 let currentPriorityTarget = null;
+let _authPrompting = false;
 
 function authHeaders() {
     const token = localStorage.getItem('mp_admin_token');
@@ -10,13 +11,14 @@ function authHeaders() {
 function apiFetch(url, opts = {}) {
     opts.headers = {...(opts.headers || {}), ...authHeaders()};
     return fetch(url, opts).then(resp => {
-        if (resp.status === 401) {
+        if (resp.status === 401 && !_authPrompting) {
+            _authPrompting = true;
             const token = prompt('请输入管理令牌 (admin_token):');
             if (token) {
                 localStorage.setItem('mp_admin_token', token);
-                opts.headers['Authorization'] = 'Bearer ' + token;
-                return fetch(url, opts);
+                location.reload();
             }
+            return new Response(JSON.stringify({}), {status: 200});
         }
         return resp;
     });

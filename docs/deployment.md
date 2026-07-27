@@ -206,7 +206,7 @@ https://{$SERVER_IP} {
         reverse_proxy gitea:3000
     }
 
-    # ─── model-proxy LLM API（OpenAI/Anthropic 协议）───
+    # ─── model-proxy: v1 协议接口（OpenAI/Anthropic）───
     handle /v1/* {
         reverse_proxy model-proxy:8000 {
             transport http {
@@ -216,18 +216,12 @@ https://{$SERVER_IP} {
         }
     }
 
-    # model-proxy 管理面板及 AJAX API
-    handle /ui* {
-        reverse_proxy model-proxy:8000
-    }
-    handle /static/* {
-        reverse_proxy model-proxy:8000
-    }
-    handle /api/* {
+    # ─── model-proxy: 管理面板 + API + 监控 ───
+    handle /mp/* {
         reverse_proxy model-proxy:8000
     }
 
-    # model-proxy API 文档与监控
+    # Swagger 文档（FastAPI 内置路径）
     handle /docs* {
         reverse_proxy model-proxy:8000
     }
@@ -237,20 +231,8 @@ https://{$SERVER_IP} {
     handle /openapi.json {
         reverse_proxy model-proxy:8000
     }
-    handle /health {
-        reverse_proxy model-proxy:8000
-    }
-    handle /ready {
-        reverse_proxy model-proxy:8000
-    }
-    handle /metrics {
-        reverse_proxy model-proxy:8000
-    }
-    handle /favicon.ico {
-        reverse_proxy model-proxy:8000
-    }
 
-    # 兜底：个人站点或 404
+    # 兜底
     handle {
         reverse_proxy personal-site:80
     }
@@ -284,10 +266,9 @@ sudo ufw enable
 ```bash
 # 1. 确认网络互通
 docker exec personal-caddy-caddy-1 nslookup model-proxy
-# 应返回 model-proxy 的 IP 地址
 
 # 2. 健康检查（不需要认证）
-curl -k https://YOUR_SERVER_IP/health
+curl -k https://YOUR_SERVER_IP/mp/health
 
 # 3. 检查可用模型（-k 跳过自签名证书校验）
 curl -k https://YOUR_SERVER_IP/v1/models \
@@ -300,7 +281,7 @@ curl -k https://YOUR_SERVER_IP/v1/chat/completions \
   -d '{"model":"auto","messages":[{"role":"user","content":"你好"}]}'
 
 # 5. 访问管理面板（浏览器打开，需信任自签名证书）
-# https://YOUR_SERVER_IP/ui
+# https://YOUR_SERVER_IP/mp/ui
 ```
 
 **常见问题排查**:
@@ -396,7 +377,7 @@ sudo systemctl restart docker
 | 措施 | 说明 |
 |------|------|
 | 多 API Key 鉴权 | `config.yaml` 中 `api_keys` 列表，各 Key 独立限流，请求需 `Authorization: Bearer <key>` |
-| 管理面板 Token | `/ui*` 需要 `admin_token` 认证，未登录无法操作 |
+| 管理面板 Token | `/mp/ui` 需要 `admin_token` 认证，未登录无法操作 |
 | 端口绑定 127.0.0.1 | Docker 容器端口不暴露公网，仅 Caddy 可达 |
 | 防火墙 | UFW 只开放 80/443/22 |
 | 配置不入镜像 | `config.yaml` 通过 volume 注入，镜像不含密钥 |
@@ -457,7 +438,7 @@ jobs:
       - name: Health Check
         run: |
           for i in $(seq 1 30); do
-            curl -sf http://127.0.0.1:8000/health > /dev/null && exit 0
+            curl -sf http://127.0.0.1:8000/mp/health > /dev/null && exit 0
             sleep 1
           done
           echo "::error::健康检查失败"
@@ -488,6 +469,9 @@ curl http://127.0.0.1:8000/v1/models
 
 # 查看使用量
 curl http://127.0.0.1:8000/v1/usage
+
+# 管理面板
+# http://127.0.0.1:8000/mp/ui
 ```
 
 Docker Compose 已内置健康检查（每 30 秒 `/v1/models`），容器异常会自动重启。

@@ -293,7 +293,7 @@ def create_app() -> FastAPI:
     admin_token = settings.admin_token.strip()
     api_token = settings.api_token.strip()
     api_keys_cfg = settings.api_keys
-    OPEN_PATHS = frozenset({"/", "/ui", "/health", "/ready", "/docs", "/redoc", "/openapi.json", "/favicon.ico"})
+    OPEN_PATHS = frozenset({"/", "/mp/ui", "/mp/health", "/mp/ready", "/docs", "/redoc", "/openapi.json", "/mp/favicon.ico"})
 
     # 构建有效 Key 集合: {key_value: ApiKeyConfig}
     from src.models.schemas import ApiKeyConfig
@@ -415,7 +415,7 @@ def create_app() -> FastAPI:
         @app.middleware("http")
         async def auth_middleware(request: Request, call_next):
             path = request.url.path
-            if path in OPEN_PATHS:
+            if path in OPEN_PATHS or path.startswith("/mp/static/"):
                 return await call_next(request)
 
             bearer = _extract_bearer(request.headers.get("Authorization", ""))
@@ -460,17 +460,17 @@ def create_app() -> FastAPI:
     app.include_router(router)
 
     _static_dir = Path(__file__).parent / "src" / "api" / "static"
-    app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
+    app.mount("/mp/static", StaticFiles(directory=str(_static_dir)), name="static")
 
-    @app.get("/ui", response_class=HTMLResponse)
+    @app.get("/mp/ui", response_class=HTMLResponse)
     async def ui_panel():
         return get_ui_html()
 
     @app.get("/", response_class=HTMLResponse)
     async def root():
-        return '<meta http-equiv="refresh" content="0;url=/ui">'
+        return '<meta http-equiv="refresh" content="0;url=/mp/ui">'
 
-    @app.get("/favicon.ico", include_in_schema=False)
+    @app.get("/mp/favicon.ico", include_in_schema=False)
     async def favicon():
         from fastapi.responses import Response
         # 1x1 transparent PNG
@@ -478,7 +478,7 @@ def create_app() -> FastAPI:
         return Response(content=PIXEL, media_type="image/png")
 
     logger.info("Model Proxy 启动于 http://%s:%s", settings.host, settings.port)
-    logger.info("UI 面板: http://%s:%s/ui", settings.host, settings.port)
+    logger.info("UI 面板: http://%s:%s/mp/ui", settings.host, settings.port)
     logger.info("Swagger API 文档: http://%s:%s/docs", settings.host, settings.port)
     logger.info("ReDoc API 文档: http://%s:%s/redoc", settings.host, settings.port)
 

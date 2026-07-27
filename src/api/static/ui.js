@@ -1,5 +1,5 @@
 // --- HTTP 与鉴权 ---
-const API = '';
+const API = '/mp';
 let currentPriorityTarget = null;
 
 function authHeaders() {
@@ -105,7 +105,7 @@ async function loadRoutingLog() {
 // --- 使用量 ---
 async function loadUsage() {
     try {
-        const resp = await fetch(API + '/v1/usage');
+        const resp = await fetch('/v1/usage');
         const data = await resp.json();
         const grid = document.getElementById('usage-grid');
 
@@ -1277,7 +1277,7 @@ let currentSessionId = null;
 
 async function loadChatModelSelector() {
     try {
-        const resp = await fetch(API + '/v1/models');
+        const resp = await fetch('/v1/models');
         const data = await resp.json();
         const select = document.getElementById('chat-model');
         const currentVal = select.value;

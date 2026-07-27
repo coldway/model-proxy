@@ -18,7 +18,7 @@ jobs:
       - name: Health Check
         run: |
           for i in $(seq 1 30); do
-            curl -sf http://127.0.0.1:8000/health > /dev/null && exit 0
+            curl -sf http://127.0.0.1:8000/mp/health > /dev/null && exit 0
             sleep 1
           done
           echo "::error::健康检查失败"

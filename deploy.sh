@@ -71,7 +71,7 @@ cmd_install() {
     # 等待健康检查通过
     log_step "等待服务就绪..."
     for i in $(seq 1 30); do
-        if curl -sf http://127.0.0.1:8000/v1/models > /dev/null 2>&1; then
+        if curl -sf http://127.0.0.1:8000/mp/health > /dev/null 2>&1; then
             log_info "服务就绪 (${i}s)"
             break
         fi
@@ -168,7 +168,7 @@ cmd_update() {
     # 等待就绪
     log_step "等待服务就绪..."
     for i in $(seq 1 30); do
-        if curl -sf http://127.0.0.1:8000/v1/models > /dev/null 2>&1; then
+        if curl -sf http://127.0.0.1:8000/mp/health > /dev/null 2>&1; then
             break
         fi
         sleep 1
@@ -220,27 +220,16 @@ cmd_caddy() {
         }
     }
 
-    # 管理面板（仅内网）
-    handle /ui* {
-        @external not remote_ip 127.0.0.1 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
-        respond @external "Forbidden" 403
+    # 管理路由（统一 /mp 前缀）
+    handle /mp/* {
         reverse_proxy 127.0.0.1:8000
     }
 
-    # API 文档（仅内网）
+    # API 文档
     handle /docs* {
-        @ext_docs not remote_ip 127.0.0.1 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
-        respond @ext_docs "Forbidden" 403
         reverse_proxy 127.0.0.1:8000
     }
     handle /openapi.json {
-        @ext_api not remote_ip 127.0.0.1 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
-        respond @ext_api "Forbidden" 403
-        reverse_proxy 127.0.0.1:8000
-    }
-
-    # 健康检查（公开）
-    handle /health {
         reverse_proxy 127.0.0.1:8000
     }
 
@@ -259,8 +248,7 @@ CADDYEOF
     log_info "公网访问:"
     log_info "  推理: http://${server_ip}/v1/chat/completions"
     log_info "  模型: http://${server_ip}/v1/models"
-    log_info "内网访问:"
-    log_info "  面板: http://${server_ip}/ui"
+    log_info "  面板: http://${server_ip}/mp/ui"
     log_info "  文档: http://${server_ip}/docs"
 }
 
@@ -269,7 +257,7 @@ cmd_test() {
     local port=8000
     local response
 
-    response=$(curl -sf "http://127.0.0.1:$port/v1/models" 2>/dev/null || echo "FAILED")
+    response=$(curl -sf "http://127.0.0.1:$port/mp/health" 2>/dev/null || echo "FAILED")
     if [[ "$response" == "FAILED" ]]; then
         log_error "无法连接到 model-proxy (port $port)"
         return 1

@@ -27,22 +27,30 @@ from src.api.routes_pkg import (
 )
 from src.api.routes_pkg.deps import _deps, init_routes, map_dispatch_error, record_failure  # noqa: F401
 
-router = APIRouter()
+# v1 路由：保持在根路径，符合 OpenAI/Anthropic 协议标准
+v1_router = APIRouter()
+v1_router.include_router(chat_completions.router)
+v1_router.include_router(models.router)
+v1_router.include_router(anthropic_messages.router)
+v1_router.include_router(images.router)
+v1_router.include_router(videos.router)
+v1_router.include_router(audio.router)
 
-router.include_router(health.router)
-router.include_router(chat_completions.router)
-router.include_router(models.router)
-router.include_router(config.router)
-router.include_router(history.router)
-router.include_router(chat_sessions.router)
-router.include_router(logs.router)
-router.include_router(testing.router)
-router.include_router(cursor.router)
-router.include_router(anthropic_messages.router)
-router.include_router(images.router)
-router.include_router(videos.router)
-router.include_router(audio.router)
-router.include_router(rapid_mlx.router)
+# 管理路由：统一在 /mp 前缀下，简化反向代理配置
+mp_router = APIRouter(prefix="/mp")
+mp_router.include_router(health.router)
+mp_router.include_router(config.router)
+mp_router.include_router(history.router)
+mp_router.include_router(chat_sessions.router)
+mp_router.include_router(logs.router)
+mp_router.include_router(testing.router)
+mp_router.include_router(cursor.router)
+mp_router.include_router(rapid_mlx.router)
+
+# 兼容旧接口：保留 router 变量供 main.py 使用
+router = APIRouter()
+router.include_router(v1_router)
+router.include_router(mp_router)
 
 # 向后兼容导出（internal_tools.py 等直接 import 这些）
 StructuredTestRequest = testing.StructuredTestRequest

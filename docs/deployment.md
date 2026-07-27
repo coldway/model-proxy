@@ -221,6 +221,11 @@ https://{$SERVER_IP} {
         reverse_proxy model-proxy:8000
     }
 
+    # 各服务 favicon 由 Caddy 统一返回 204（或放置通用图标）
+    handle /favicon.ico {
+        respond 204
+    }
+
     # 兜底
     handle {
         reverse_proxy personal-site:80

@@ -60,6 +60,36 @@ def init_routes(config_manager, dispatcher, rate_limiter, history=None, catalog=
     )
 
 
+def resolve_provider_for_model(model: str):
+    """根据 model ID 从 catalog 中查找所属 provider，再从 dispatcher 取 Provider 实例。
+    返回 (provider_id, provider_instance)。找不到时抛 HTTPException。
+    """
+    catalog = _deps.catalog
+    dispatcher = _deps.dispatcher
+    if not catalog or not dispatcher:
+        raise HTTPException(status_code=503, detail="服务未就绪")
+
+    for prov_id, prov_data in catalog.get_all_providers().items():
+        for m in prov_data.get("models", []):
+            if m.get("id") == model:
+                provider = dispatcher.get_provider(prov_id)
+                if provider is None:
+                    raise HTTPException(status_code=404, detail=f"厂商 {prov_id} 未注册（缺少 API Key？）")
+                return prov_id, provider
+    raise HTTPException(status_code=404, detail=f"模型 {model} 未在任何厂商目录中找到")
+
+
+def resolve_provider_by_id(provider_id: str):
+    """根据 provider_id 直接获取 Provider 实例。找不到时抛 HTTPException。"""
+    dispatcher = _deps.dispatcher
+    if not dispatcher:
+        raise HTTPException(status_code=503, detail="服务未就绪")
+    provider = dispatcher.get_provider(provider_id)
+    if provider is None:
+        raise HTTPException(status_code=404, detail=f"厂商 {provider_id} 未注册")
+    return provider
+
+
 def record_failure(start_time: float, error: str, provider: str = "unknown", model: str = "unknown") -> None:
     if _deps.history:
         latency = (time.time() - start_time) * 1000

@@ -52,7 +52,9 @@ _DEFAULT_COST_MAP: dict[str, ModelCost] = {
 
 
 class CostTracker:
-    """成本追踪器：记录每次调用的 token 消耗并计算费用"""
+    """成本追踪器：记录每次调用的 token 消耗并计算费用，支持最近 3 个月趋势"""
+
+    _MAX_HISTORY_MONTHS = 3
 
     def __init__(self, budget_limit_usd: float = 0.0):
         self._lock = threading.Lock()
@@ -60,6 +62,7 @@ class CostTracker:
         self._budget_limit = budget_limit_usd
         self._current_month = self._get_month()
         self._usage = MonthlyUsage(month=self._current_month)
+        self._history_months: list[dict[str, Any]] = []
         self._dirty = False
         self._load()
         self._load_budget()
@@ -78,6 +81,7 @@ class CostTracker:
                 self._usage.total_input_tokens = data.get("total_input_tokens", 0)
                 self._usage.total_output_tokens = data.get("total_output_tokens", 0)
                 self._usage.by_model = data.get("by_model", {})
+            self._history_months = data.get("history_months", [])
         except Exception as e:
             logger.warning("加载成本追踪数据失败: %s", e)
 
@@ -105,6 +109,13 @@ class CostTracker:
         with self._lock:
             current_month = self._get_month()
             if current_month != self._current_month:
+                self._history_months.append({
+                    "month": self._usage.month,
+                    "total_cost_usd": round(self._usage.total_cost_usd, 6),
+                    "total_input_tokens": self._usage.total_input_tokens,
+                    "total_output_tokens": self._usage.total_output_tokens,
+                })
+                self._history_months = self._history_months[-self._MAX_HISTORY_MONTHS:]
                 self._flush_unlocked()
                 self._current_month = current_month
                 self._usage = MonthlyUsage(month=current_month)
@@ -139,7 +150,7 @@ class CostTracker:
             return max(0.0, self._budget_limit - self._usage.total_cost_usd)
 
     def get_stats(self) -> dict[str, Any]:
-        """获取当月统计"""
+        """获取当月统计 + 历史趋势"""
         with self._lock:
             return {
                 "month": self._usage.month,
@@ -152,6 +163,7 @@ class CostTracker:
                     k: {**v, "cost_usd": round(v["cost_usd"], 6)}
                     for k, v in self._usage.by_model.items()
                 },
+                "history_months": list(self._history_months),
             }
 
     def get_model_cost(self, model: str) -> ModelCost:
@@ -178,6 +190,7 @@ class CostTracker:
                 "total_input_tokens": self._usage.total_input_tokens,
                 "total_output_tokens": self._usage.total_output_tokens,
                 "by_model": self._usage.by_model,
+                "history_months": self._history_months,
             }
             _COST_FILE.write_text(
                 yaml.dump(data, allow_unicode=True, default_flow_style=False),

@@ -1,11 +1,11 @@
 # Model Proxy - 免费大模型推理代理
 
-灵活选择免费大模型进行推理的代理服务。支持 10 家模型厂商、自动调度与失败切换、内嵌 Web 管理面板，兼容 OpenAI SDK 格式。
+灵活选择免费大模型进行推理的代理服务。支持 13 家模型厂商、自动调度与失败切换、内嵌 Web 管理面板，兼容 OpenAI SDK 格式。
 
 ## 功能概览
 
 - **统一推理接口**：兼容 OpenAI `/v1/chat/completions` 格式，支持自主选择模型或由系统自动调度
-- **10 家免费厂商**：Google AI Studio、Groq、GitHub Models、Cursor CLI、Cerebras、SambaNova、OpenRouter、Cloudflare、HuggingFace、Mistral AI
+- **13 家免费厂商**：Google AI Studio、Groq、GitHub Models、Cursor CLI、Cerebras、SambaNova、OpenRouter、Cloudflare、HuggingFace、Mistral AI、NVIDIA NIM、Cohere、阿里百炼 (DashScope)
 - **智能调度**：基于厂商优先级 + 模型优先级 + 滑动窗口限速的多级调度，超限/失败自动切换
 - **流式输出**：所有厂商均支持 SSE 流式响应，兼容 OpenAI SDK `stream=True`
 - **Web 管理面板**：内嵌单页 UI，无需额外前端构建，提供使用量监控、模型管理、API Key 配置、问答聊天等功能
@@ -26,7 +26,10 @@
 | **Mistral AI** | 官方平台免费层 | Codestral 代码模型免费 |
 | **Cloudflare** | Workers AI 每日万次 neurons | ~10,000 neurons/天 |
 | **HuggingFace** | 数千个开源模型免费推理 | 有速率限制但免费 |
-| **Cursor CLI** | 通过 Cursor IDE 登录调用 | 取决于 Cursor 订阅 |
+| **Cursor CLI** | **完整代码 Agent**：plan（只读规划）/ ask（只读问答）/ agent（完整编码）三种模式，支持工作区管理、会话恢复、Git Worktree 隔离 | 取决于 Cursor 订阅，[查看完整功能](CURSOR_PLAN_MODE_INTEGRATION.md) |
+| **NVIDIA NIM** | 123+ 模型免费推理（Llama/Qwen/DeepSeek） | 有速率限制但免费 |
+| **Cohere** | Command 系列模型 | 20 RPM / 1000 请求/月 |
+| **阿里百炼 (DashScope)** | 通义千问全系列（Qwen3/VL/Long） | 按量计费，新用户有免费额度 |
 
 > 所有厂商均**无新用户限制**，注册即可使用。详细模型列表见 `conf/providers_catalog.yaml`。
 
@@ -92,6 +95,9 @@ pip install -r requirements.txt
 
 # 复制示例配置并填入 API Key
 cp conf/config.yaml.example conf/config.yaml   # Windows: copy conf\config.yaml.example conf\config.yaml
+
+# 安装 pre-commit 密钥扫描 hook（防止误提交 API Key）
+ln -sf ../../scripts/pre-commit-secrets-scan.sh .git/hooks/pre-commit
 
 # 启动服务（支持热重载）
 python main.py
@@ -174,6 +180,35 @@ providers:
 ## API 使用
 
 所有接口兼容 OpenAI SDK 格式。
+
+### Cursor Agent CLI 特性
+
+Cursor provider 支持三种执行模式和扩展参数：
+
+```python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://127.0.0.1:8000/v1", api_key="unused")
+
+# Plan 模式：只分析不修改代码
+response = client.chat.completions.create(
+    model="cursor-agent",
+    messages=[{"role": "user", "content": "分析这个项目的架构"}],
+    extra_body={
+        "mode": "plan",       # plan/ask/agent (默认 agent)
+        "force": False,       # --force 参数
+        "sandbox": "enabled"  # enabled/disabled
+    }
+)
+```
+
+| 参数 | 说明 | 值 |
+|------|------|---|
+| `mode` | 执行模式 | `plan`(只读规划)、`ask`(只读问答)、`agent`(默认,全权限) |
+| `force` | 强制执行命令 | `true`/`false`(plan/ask 模式下无效) |
+| `sandbox` | 沙箱模式 | `"enabled"`/`"disabled"` |
+
+详见[Cursor Plan 模式使用指南](docs/cursor-plan-mode.md)。
 
 ### 推理请求
 
@@ -264,6 +299,69 @@ for chunk in stream:
 | **厂商模型弹窗** | 查看/启用/停用模型，调整优先级，搜索目录模型，拉取厂商远程模型，手动添加自定义模型 |
 | **接入指南** | 每个厂商卡片 `?` 图标，点击查看接入说明 |
 | **问答聊天** | 内置聊天界面，支持选择模型或使用 auto 模式直接对话 |
+
+## Cursor CLI 高级功能
+
+**Cursor CLI** 作为专业代码 Agent，提供最完整的代码编辑能力，支持：
+
+### 三种执行模式
+
+| 模式 | 权限 | 适用场景 |
+|------|------|---------|
+| **agent** | 完整编码权限，可修改代码 | 实际开发、功能实现、代码重构 |
+| **plan** | 只读模式，只分析不修改 | 技术方案设计、架构评审 |
+| **ask** | 只读模式，快速问答 | 代码解释、快速咨询 |
+
+### 高级能力
+
+- **工作区管理**：指定项目路径（`workspace_path`），支持多项目切换
+- **会话恢复**：通过会话 ID 恢复上下文（`cursor_session_id`），或快速继续最近会话（`cursor_continue`）
+- **Git Worktree**：在隔离的 Git worktree 中运行（`worktree_name`），避免主分支污染
+- **MCP 自动批准**：自动化场景跳过 MCP 服务器确认（`approve_mcps`）
+
+### 使用示例
+
+**基础用法（Plan 模式）**：
+```bash
+curl -X POST http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "auto",
+    "messages": [{"role": "user", "content": "分析 README.md 的结构"}],
+    "mode": "plan"
+  }'
+```
+
+**高级用法（会话管理 + Worktree）**：
+```bash
+# 1. 创建会话
+SESSION_ID=$(curl -X POST http://localhost:8000/api/cursor/sessions/create | jq -r '.session_id')
+
+# 2. 在隔离环境中使用会话
+curl -X POST http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"model\": \"auto\",
+    \"messages\": [{\"role\": \"user\", \"content\": \"实现新功能\"}],
+    \"mode\": \"agent\",
+    \"cursor_session_id\": \"$SESSION_ID\",
+    \"worktree_name\": \"feature-branch\",
+    \"worktree_base\": \"main\",
+    \"approve_mcps\": true
+  }"
+```
+
+### Web UI 支持
+
+Chat 页面自动显示 Cursor 模式选择器（选择 Cursor 模型或 `auto` 时）：
+- **基础控件**：模式按钮、Force、Sandbox
+- **高级选项**（点击"高级 ▼"展开）：工作区、会话管理、Git Worktree、MCP 选项
+
+### 完整文档
+
+- [Cursor Agent CLI 完整集成指南](CURSOR_PLAN_MODE_INTEGRATION.md) - API 参考、使用场景、最佳实践
+- [Web UI 使用文档](docs/ui.md) - Cursor 模式选择器详解
+- [前端集成示例](docs/cursor-advanced-examples.md) - JavaScript/React/Vue 示例代码
 
 ## 运行测试
 
@@ -391,6 +489,25 @@ model-proxy/
 - UI 面板仅监听 localhost，不对外暴露
 - 请求历史只记录元数据（延迟、Token 数、成功/失败），不记录消息内容
 - 禁止在代码或日志中明文输出 API Key
+- 日志输出中 API Key 自动脱敏（`sk-xxxx***`、`gsk_xxxx***` 等）
+
+### Pre-commit 密钥扫描 Hook
+
+项目内置了 pre-commit hook，提交前自动扫描暂存区文件是否包含疑似 API Key（Google / Groq / GitHub / HuggingFace / AWS / GitLab / Slack / OpenAI 等 8 种模式）。检测到时阻止提交。
+
+**安装（克隆仓库后执行一次）：**
+
+```bash
+ln -sf ../../scripts/pre-commit-secrets-scan.sh .git/hooks/pre-commit
+```
+
+**Windows (PowerShell)：**
+
+```powershell
+Copy-Item scripts\pre-commit-secrets-scan.sh .git\hooks\pre-commit
+```
+
+安装后每次 `git commit` 时自动扫描。若确认为误报，可使用 `git commit --no-verify` 跳过。
 
 ## License
 

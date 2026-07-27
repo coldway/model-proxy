@@ -20,6 +20,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
+from src import LogTag
 from src.api.routes_pkg.deps import _deps, record_failure
 from src.api.thinking import strip_thinking as _strip_thinking
 from src.models.schemas import ChatCompletionRequest, ChatMessage
@@ -48,13 +49,14 @@ class PipelineResult:
 class ChatPipeline:
     """统一的会话处理管道，消除 send/stream 两路代码的重复"""
 
-    MAX_TOOL_ROUNDS = 3
+    DEFAULT_MAX_TOOL_ROUNDS = 3
 
-    def __init__(self, session, request: ChatCompletionRequest, trace_id: str, memory_mgr):
+    def __init__(self, session, request: ChatCompletionRequest, trace_id: str, memory_mgr, *, max_tool_rounds: int = 0):
         self.session = session
         self.request = request
         self.trace_id = trace_id
         self.memory_mgr = memory_mgr
+        self.max_tool_rounds = max_tool_rounds or self.DEFAULT_MAX_TOOL_ROUNDS
         self._long_term_ctx = ""
         self._start_time = 0.0
 
@@ -108,6 +110,16 @@ class ChatPipeline:
             max_tokens=self.request.max_tokens,
             stream=stream,
             tools=tools if include_tools else None,
+            mode=self.request.mode,
+            force=self.request.force,
+            sandbox=self.request.sandbox,
+            workspace_path=self.request.workspace_path,
+            cursor_session_id=self.request.cursor_session_id,
+            cursor_continue=self.request.cursor_continue,
+            worktree_name=self.request.worktree_name,
+            worktree_base=self.request.worktree_base,
+            skip_worktree_setup=self.request.skip_worktree_setup,
+            approve_mcps=self.request.approve_mcps,
         )
 
     async def run_tool_loop(self, tools) -> PipelineResult:
@@ -123,13 +135,14 @@ class ChatPipeline:
 
         compact_mgr = AutoCompactManager(context_window=self.session._max_context_tokens)
 
-        for round_idx in range(self.MAX_TOOL_ROUNDS + 1):
+        for round_idx in range(self.max_tool_rounds + 1):
             context_messages = self.session.get_context_messages()
-            if compact_mgr.monitor.estimate_utilization(context_messages) >= 0.55:
+            utilization = compact_mgr.monitor.estimate_utilization(context_messages)
+            if utilization >= 0.55:
                 context_messages = await compact_mgr.maybe_compact(context_messages)
 
             ctx_request = self.build_context_request(
-                stream=False, include_tools=(round_idx < self.MAX_TOOL_ROUNDS), tools=tools, compact_mgr=None,
+                stream=False, include_tools=(round_idx < self.max_tool_rounds), tools=tools, compact_mgr=None,
             )
 
             provider_name, model_name, result = await _deps.dispatcher.dispatch(ctx_request, enabled_models, trace_id=self.trace_id)
@@ -138,12 +151,12 @@ class ChatPipeline:
             if not msg:
                 return PipelineResult(reply="⚠️ 模型返回空响应，请重试", provider_name=provider_name, model_name=model_name)
 
-            if msg.tool_calls and round_idx < self.MAX_TOOL_ROUNDS:
+            if msg.tool_calls and round_idx < self.max_tool_rounds:
                 tc_data = [{"id": tc.id, "type": tc.type, "function": {"name": tc.function.name, "arguments": tc.function.arguments}} for tc in msg.tool_calls]
                 self.session.add_message("assistant", msg.content or "", tool_calls=tc_data)
 
                 for tc in msg.tool_calls:
-                    logger.info("[会话] trace=%s 调用工具: %s(%s)", self.trace_id, tc.function.name, tc.function.arguments[:100])
+                    logger.info(f"{LogTag.SESSION} trace=%s 调用工具: %s(%s)", self.trace_id, tc.function.name, tc.function.arguments[:100])
                     tool_result = await execute_tool(tc.function.name, tc.function.arguments)
                     tool_calls_log.append({"tool": tc.function.name, "result_len": len(tool_result)})
                     self.session.add_message("tool", tool_result, tool_call_id=tc.id, name=tc.function.name)
@@ -188,7 +201,7 @@ class ChatPipeline:
         rolled = self.session.rollback()
         record_failure(self._start_time or time.time(), str(e))
         await asyncio.to_thread(_deps.session_mgr.save)
-        logger.warning("[会话] trace=%s session=%s 失败（回滚 %d 条）: %s", self.trace_id, self.session.id, rolled, e)
+        logger.warning(f"{LogTag.SESSION} trace=%s session=%s 失败（回滚 %d 条）: %s", self.trace_id, self.session.id, rolled, e)
 
         if isinstance(e, RateLimitExceeded):
             return 429, "请求过于频繁，请稍后重试"

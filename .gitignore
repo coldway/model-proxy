@@ -7,9 +7,15 @@ env/
 conf/config.yaml
 conf/config.yml
 conf/model_capabilities.yaml
+conf/*.secret.*
 config.yaml
 config.yml
 .env
+.env.*
+*.pem
+*.key
+*_secret*
+credentials.json
 
 # Python
 __pycache__/
@@ -51,3 +57,4 @@ ui/.next/
 *.db
 *.sqlite3
 data/
+.cursor/

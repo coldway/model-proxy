@@ -6,15 +6,38 @@ from __future__ import annotations
 import asyncio
 import hmac
 import logging
+import os
 import sys
 import uuid
 from contextlib import asynccontextmanager
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 
+
+def _load_env(path: str = ".env") -> None:
+    """加载 .env 文件中的环境变量（不覆盖已有值）"""
+    env_path = Path(path)
+    if not env_path.exists():
+        return
+    for line in env_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+_load_env()
+
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from starlette.middleware.cors import CORSMiddleware
 
 from src.api.routes import init_routes, router
@@ -29,10 +52,13 @@ from src.providers.google import GoogleProvider
 from src.providers.groq import GroqProvider
 from src.providers.huggingface import HuggingFaceProvider
 from src.providers.ollama import OllamaProvider
+from src.providers.rapid_mlx import RapidMLXProvider
 from src.providers.openai_compat import create_openai_provider
 from src.scheduler.dispatcher import Dispatcher
 from src.scheduler.history import RequestHistory
 from src.scheduler.rate_limiter import RateLimiter
+from src.providers.utils import configure_timeouts
+from src.services.rapid_mlx_manager import RapidMLXManager
 
 from src.api.log_buffer import install as install_log_buffer, preload_from_file as preload_logs
 
@@ -78,6 +104,16 @@ def create_app() -> FastAPI:
     log_level = getattr(logging, settings.log_level.upper(), logging.INFO)
     logging.getLogger().setLevel(log_level)
 
+    configure_timeouts(
+        read_timeout=float(settings.http_read_timeout),
+        connect_timeout=float(settings.http_connect_timeout),
+    )
+    logger.info(
+        "HTTP 超时配置: connect=%ds, read=%ds",
+        settings.http_connect_timeout,
+        settings.http_read_timeout,
+    )
+
     rate_limiter = RateLimiter()
     history = RequestHistory(
         persist=True,
@@ -94,20 +130,28 @@ def create_app() -> FastAPI:
     )
 
     # 注册各厂商 Provider（根据 API Key 是否存在决定是否注册）
-    provider_factories = {
+    # 独立适配器（有专门 Python 实现的厂商）
+    provider_factories: dict[str, Any] = {
         "google": lambda key: GoogleProvider(key),
         "groq": lambda key: GroqProvider(key),
         "github": lambda key: GitHubProvider(key),
         "cloudflare": lambda key: CloudflareProvider(key),
         "huggingface": lambda key: HuggingFaceProvider(key),
-        "cerebras": lambda key: create_openai_provider("cerebras", key),
-        "sambanova": lambda key: create_openai_provider("sambanova", key),
-        "openrouter": lambda key: create_openai_provider("openrouter", key),
-        "mistral": lambda key: create_openai_provider("mistral", key),
         "ollama": lambda key: OllamaProvider(key),
+        "rapid_mlx": lambda key: RapidMLXProvider(key),
     }
 
-    _NO_KEY_PROVIDERS = {"ollama"}
+    # 自动发现 catalog 中 type=openai_compat 的厂商，无需手动逐个注册
+    for prov_id, prov_cfg in catalog.get_providers_sorted():
+        if prov_cfg.get("type") == "openai_compat" and prov_id not in provider_factories:
+            base_url = prov_cfg.get("base_url")
+            if base_url:
+                _pid = prov_id  # 闭包变量捕获
+                provider_factories[_pid] = lambda key, pid=_pid: create_openai_provider(pid, key)
+            else:
+                logger.warning("厂商 %s 声明 type=openai_compat 但缺少 base_url，跳过", prov_id)
+
+    _NO_KEY_PROVIDERS = {"ollama", "rapid_mlx"}
 
     for name, factory in provider_factories.items():
         api_key = config_manager.get_api_key(name)
@@ -125,10 +169,19 @@ def create_app() -> FastAPI:
 
     capability_tester = CapabilityTester(capability_cache)
 
+    # 初始化 Rapid-MLX 多实例管理器
+    rapid_mlx_mgr = RapidMLXManager()
+
     init_routes(
         config_manager, dispatcher, rate_limiter,
         history, catalog, provider_factories, capability_tester,
     )
+
+    # 注入 manager 到 API 路由
+    from src.api.routes_pkg.rapid_mlx import set_manager as set_rmlx_route_manager
+    from src.api.routes_pkg.audio import set_audio_manager
+    set_rmlx_route_manager(rapid_mlx_mgr)
+    set_audio_manager(rapid_mlx_mgr)
 
     _PERIODIC_FLUSH_INTERVAL = 60
 
@@ -138,7 +191,7 @@ def create_app() -> FastAPI:
             rate_limiter.flush()
             history.flush()
             catalog.flush()
-            dispatcher.payload_tracker.flush()
+            dispatcher._payload_tracker.flush()
             from src.api.routes import _deps
             if _deps.cost_tracker:
                 _deps.cost_tracker.flush()
@@ -181,6 +234,35 @@ def create_app() -> FastAPI:
 
             asyncio.create_task(_ollama_background_discover())
 
+        rapid_mlx_prov = dispatcher.get_provider("rapid_mlx")
+        if isinstance(rapid_mlx_prov, RapidMLXProvider):
+            rapid_mlx_prov.set_breaker(dispatcher._breaker)
+            rapid_mlx_prov.set_manager(rapid_mlx_mgr)
+
+            async def _rapid_mlx_background_init():
+                try:
+                    # 发现外部已运行的实例
+                    discovered = await rapid_mlx_mgr.discover_external()
+                    if discovered:
+                        logger.info("发现 %d 个外部 Rapid-MLX 实例", len(discovered))
+
+                    # 启动所有配置为 auto_start 的实例
+                    started = await rapid_mlx_mgr.start_all_enabled()
+                    if started:
+                        logger.info("自动启动 %d 个 Rapid-MLX 实例", len(started))
+
+                    # 模型发现 → 注册到 catalog
+                    added = await rapid_mlx_prov.discover_and_register(catalog)
+                    if added:
+                        logger.info("Rapid-MLX 启动发现 %d 个本地模型", len(added))
+                except Exception as exc:
+                    logger.warning("Rapid-MLX 初始化失败: %s", exc)
+
+            asyncio.create_task(_rapid_mlx_background_init())
+
+            # 启动周期性健康检查
+            await rapid_mlx_mgr.start_health_loop()
+
         yield
         flush_task.cancel()
         cache_purge_task.cancel()
@@ -193,23 +275,52 @@ def create_app() -> FastAPI:
         except asyncio.CancelledError:
             pass
         logger.info("正在优雅关闭…")
+        await rapid_mlx_mgr.close()
         rate_limiter.flush()
         history.flush()
         catalog.flush()
-        dispatcher.payload_tracker.close()
+        dispatcher._payload_tracker.close()
         dispatcher.flush_session_bindings()
+        try:
+            from src.scheduler.memory_pkg._impl import _memory_manager
+            if _memory_manager is not None:
+                _memory_manager.close()
+        except Exception as exc:
+            logger.warning("关闭 MemoryManager 异常: %s", exc)
         await dispatcher.close_providers()
         logger.info("所有资源已释放")
 
     admin_token = settings.admin_token.strip()
     api_token = settings.api_token.strip()
-    OPEN_PATHS = frozenset({"/", "/ui", "/health", "/ready"})
+    api_keys_cfg = settings.api_keys
+    OPEN_PATHS = frozenset({"/", "/ui", "/health", "/ready", "/docs", "/redoc", "/openapi.json", "/favicon.ico"})
+
+    # 构建有效 Key 集合: {key_value: ApiKeyConfig}
+    from src.models.schemas import ApiKeyConfig
+    _valid_api_keys: dict[str, ApiKeyConfig] = {}
+    for kc in api_keys_cfg:
+        if kc.enabled and kc.key.strip():
+            _valid_api_keys[kc.key.strip()] = kc
+    if api_token:
+        _valid_api_keys.setdefault(api_token, ApiKeyConfig(key=api_token, name="default"))
+
+    _auth_enabled = bool(admin_token or _valid_api_keys)
 
     app = FastAPI(
         title="Model Proxy",
-        description="免费大模型推理代理服务",
+        description="免费大模型推理代理服务。支持 OpenAI 和 Anthropic 两种协议接入，13+ 家厂商自动调度。",
         version="0.3.0",
         lifespan=lifespan,
+        openapi_tags=[
+            {"name": "chat", "description": "OpenAI 兼容的聊天补全接口（/v1/chat/completions）"},
+            {"name": "anthropic", "description": "Anthropic Messages API 兼容层（/v1/messages）"},
+            {"name": "models", "description": "模型列表、厂商信息与用量统计"},
+            {"name": "images", "description": "图像生成接口"},
+            {"name": "videos", "description": "视频生成接口（异步任务）"},
+            {"name": "config", "description": "配置管理（API Key、厂商启停、模型优先级）"},
+            {"name": "history", "description": "请求历史记录与统计"},
+            {"name": "system", "description": "健康探针与系统状态"},
+        ],
     )
 
     _cors_origins = settings.cors_origins.strip()
@@ -241,7 +352,15 @@ def create_app() -> FastAPI:
         response.headers["X-Trace-Id"] = trace_id
         return response
 
-    if admin_token or api_token:
+    if _auth_enabled:
+        from collections import deque
+        import time as _time
+
+        _consumer_requests: dict[str, deque] = {}
+        _global_rpm = settings.per_consumer_rpm
+        _consumer_gc_last = _time.time()
+        _CONSUMER_GC_INTERVAL = 300
+
         def _extract_bearer(auth_header: str) -> str:
             if auth_header.lower().startswith("bearer "):
                 return auth_header[7:].strip()
@@ -252,29 +371,96 @@ def create_app() -> FastAPI:
                 return False
             return hmac.compare_digest(given.encode(), expected.encode())
 
+        def _find_api_key(bearer: str) -> ApiKeyConfig | None:
+            """在多 Key 集合中查找匹配的 Key 配置"""
+            if not bearer:
+                return None
+            for key_val, cfg in _valid_api_keys.items():
+                if hmac.compare_digest(bearer.encode(), key_val.encode()):
+                    return cfg
+            return None
+
+        def _check_consumer_rate(bearer: str, key_cfg: ApiKeyConfig | None) -> bool:
+            """Per-consumer RPM 限流检查（滑动窗口），支持 Key 级别独立限额"""
+            nonlocal _consumer_gc_last
+            # admin_token 不限流
+            if admin_token and _token_match(bearer, admin_token):
+                return True
+            # 确定此 Key 的 RPM 限制
+            rpm_limit = 0
+            if key_cfg and key_cfg.rpm > 0:
+                rpm_limit = key_cfg.rpm
+            elif _global_rpm > 0:
+                rpm_limit = _global_rpm
+            if rpm_limit <= 0:
+                return True
+
+            now = _time.time()
+            if now - _consumer_gc_last > _CONSUMER_GC_INTERVAL:
+                _consumer_gc_last = now
+                stale = [k for k, dq in _consumer_requests.items() if not dq or dq[-1] < now - 120]
+                for k in stale:
+                    del _consumer_requests[k]
+
+            if bearer not in _consumer_requests:
+                _consumer_requests[bearer] = deque()
+            dq = _consumer_requests[bearer]
+            while dq and dq[0] < now - 60:
+                dq.popleft()
+            if len(dq) >= rpm_limit:
+                return False
+            dq.append(now)
+            return True
+
         @app.middleware("http")
         async def auth_middleware(request: Request, call_next):
             path = request.url.path
             if path in OPEN_PATHS:
                 return await call_next(request)
+
             bearer = _extract_bearer(request.headers.get("Authorization", ""))
+
             if path.startswith("/v1/"):
-                expected = api_token or admin_token
-                if expected and not _token_match(bearer, expected):
-                    return JSONResponse(status_code=401, content={"detail": "未授权：需要有效的 API 令牌"})
+                if _valid_api_keys:
+                    key_cfg = _find_api_key(bearer)
+                    if key_cfg is None:
+                        return JSONResponse(
+                            status_code=401,
+                            content={"error": {"message": "Invalid API key", "type": "auth_error"}},
+                        )
+                    if not _check_consumer_rate(bearer, key_cfg):
+                        rpm = key_cfg.rpm if key_cfg.rpm > 0 else _global_rpm
+                        return JSONResponse(
+                            status_code=429,
+                            content={"error": {"message": f"Rate limit: {rpm} requests/min exceeded", "type": "rate_limit_error"}},
+                        )
                 return await call_next(request)
-            expected = admin_token or api_token
+
+            # 管理接口
+            expected = admin_token or (api_token if api_token else "")
             if expected and not _token_match(bearer, expected):
-                return JSONResponse(status_code=401, content={"detail": "未授权：需要有效的管理令牌"})
+                key_cfg = _find_api_key(bearer)
+                if key_cfg is None:
+                    return JSONResponse(status_code=401, content={"detail": "未授权：需要管理令牌"})
             return await call_next(request)
+
         _auth_parts = []
         if admin_token:
-            _auth_parts.append("管理面板 /api/*")
-        if api_token:
-            _auth_parts.append("OpenAI API /v1/*")
+            _auth_parts.append("管理面板认证")
+        if _valid_api_keys:
+            _auth_parts.append(f"API Keys: {len(_valid_api_keys)} 个")
+        if _global_rpm > 0:
+            _auth_parts.append(f"全局 RPM={_global_rpm}")
         logger.info("认证已启用: %s", " + ".join(_auth_parts))
+        for kv, cfg in _valid_api_keys.items():
+            label = cfg.name or kv[:8] + "..."
+            rpm_info = f"rpm={cfg.rpm}" if cfg.rpm > 0 else "rpm=全局"
+            logger.info("  Key [%s]: %s", label, rpm_info)
 
     app.include_router(router)
+
+    _static_dir = Path(__file__).parent / "src" / "api" / "static"
+    app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
 
     @app.get("/ui", response_class=HTMLResponse)
     async def ui_panel():
@@ -284,8 +470,17 @@ def create_app() -> FastAPI:
     async def root():
         return '<meta http-equiv="refresh" content="0;url=/ui">'
 
+    @app.get("/favicon.ico", include_in_schema=False)
+    async def favicon():
+        from fastapi.responses import Response
+        # 1x1 transparent PNG
+        PIXEL = b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n\xb4\x00\x00\x00\x00IEND\xaeB`\x82'
+        return Response(content=PIXEL, media_type="image/png")
+
     logger.info("Model Proxy 启动于 http://%s:%s", settings.host, settings.port)
     logger.info("UI 面板: http://%s:%s/ui", settings.host, settings.port)
+    logger.info("Swagger API 文档: http://%s:%s/docs", settings.host, settings.port)
+    logger.info("ReDoc API 文档: http://%s:%s/redoc", settings.host, settings.port)
 
     return app
 

@@ -58,7 +58,7 @@ class OllamaProvider(BaseProvider):
         self._base_url = (raw if raw.startswith("http") else _DEFAULT_BASE_URL).rstrip("/")
         from src.providers.utils import create_http_client
         self._client = create_http_client(
-            timeout=httpx.Timeout(_REQUEST_TIMEOUT, connect=_CONNECT_TIMEOUT),
+            timeout=_REQUEST_TIMEOUT, connect_timeout=_CONNECT_TIMEOUT,
         )
         self._tags_cache: list[dict[str, Any]] | None = None
         self._tags_cache_time: float = 0

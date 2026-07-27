@@ -30,7 +30,7 @@ class ModelConfig(BaseModel):
     priority: int = 1
     rate_limit: RateLimit | None = None
     tool_calling: bool = False
-    timeout: int = Field(default=60, description="请求超时时间（秒），延迟高的模型可设置更长")
+    timeout: int = Field(default=0, description="请求超时时间（秒），0 表示使用 settings.default_model_timeout")
 
 
 class ProviderConfig(BaseModel):
@@ -40,6 +40,14 @@ class ProviderConfig(BaseModel):
     models: list[ModelConfig] = Field(default_factory=list)
 
 
+class ApiKeyConfig(BaseModel):
+    """单个 API Key 的配置"""
+    key: str = Field(description="API Key 值")
+    name: str = Field(default="", description="Key 的标识名（用于日志和统计）")
+    rpm: int = Field(default=0, description="该 Key 的每分钟请求上限，0=使用全局 per_consumer_rpm")
+    enabled: bool = Field(default=True, description="是否启用此 Key")
+
+
 class AppSettings(BaseModel):
     host: str = "127.0.0.1"
     port: int = 8000
@@ -47,7 +55,11 @@ class AppSettings(BaseModel):
     auto_switch: bool = True
     log_level: str = "info"
     admin_token: str = Field(default="", description="管理面板认证令牌，为空则不启用认证")
-    api_token: str = Field(default="", description="OpenAI 兼容 API (/v1/*) 认证令牌，为空则不启用；客户端通过 api_key 传入")
+    api_token: str = Field(default="", description="OpenAI 兼容 API (/v1/*) 认证令牌（单 key 模式），为空则不启用")
+    api_keys: list[ApiKeyConfig] = Field(
+        default_factory=list,
+        description="多 API Key 配置列表。配置后 api_token 仍有效（作为额外的默认 Key）",
+    )
     route_cache_ttl: int = Field(default=600, description="路由缓存有效期（秒）")
     breaker_threshold: int = Field(default=3, description="连续失败 N 次触发厂商熔断")
     breaker_cooldown: int = Field(default=300, description="熔断冷却时间（秒）")
@@ -65,6 +77,22 @@ class AppSettings(BaseModel):
     session_bind_ttl: int = Field(
         default=3600,
         description="会话模型绑定的 TTL（秒），过期后绑定自动失效",
+    )
+    per_consumer_rpm: int = Field(
+        default=0,
+        description="单个 API consumer（按 Bearer token 区分）的每分钟请求数上限，0=不限制",
+    )
+    default_model_timeout: int = Field(
+        default=600,
+        description="模型请求默认超时（秒），模型级 timeout 未配置时使用此值；httpx 客户端超时取此值+60s",
+    )
+    http_connect_timeout: int = Field(
+        default=15,
+        description="httpx 连接超时（秒），连接不上时快速 failover 到下一个 provider",
+    )
+    http_read_timeout: int = Field(
+        default=600,
+        description="httpx 读写超时（秒），LLM 生成可能耗时较长",
     )
 
 
@@ -148,7 +176,63 @@ class ChatCompletionRequest(BaseModel):
     )
     session_id: str | None = Field(
         default=None,
-        description="会话标识：首次请求成功后自动绑定模型，后续携带相同 session_id 的请求将路由到同一模型",
+        description="会话标识：首次请求成功后自动绑定模型,后续携带相同 session_id 的请求将路由到同一模型",
+    )
+
+    model_type: str | None = Field(
+        default=None,
+        description="模型类型路由（可选显式覆盖）：image（图像生成）、video（视频生成），不传时根据 model 名称自动检测。"
+                    "若 model 名含 image/imagen/dall-e/flux 自动走图像生成；"
+                    "含 video/runway/kling/pika/sora 自动走视频生成；其余走文字模型。"
+                    "显式传入 model_type 优先于自动检测。",
+    )
+    mode: str | None = Field(
+        default=None,
+        description="执行模式（仅 Cursor provider）：plan（规划模式，只读）、ask（问答模式，只读）、agent（默认，全权限）",
+    )
+    force: bool = Field(
+        default=False,
+        description="强制执行命令（仅 Cursor provider，plan/ask 模式下无效）：允许修改文件无需确认",
+    )
+    sandbox: str | None = Field(
+        default=None,
+        description="沙箱模式（仅 Cursor provider）：enabled（启用沙箱）、disabled（禁用沙箱）",
+    )
+
+    # 工作区相关
+    workspace_path: str | None = Field(
+        default=None,
+        description="工作区目录路径（仅 Cursor provider）：覆盖默认 cwd，支持多项目场景",
+    )
+
+    # 会话管理相关
+    cursor_session_id: str | None = Field(
+        default=None,
+        description="Cursor 原生会话 ID（仅 Cursor provider）：用于 --resume 恢复指定会话",
+    )
+    cursor_continue: bool = Field(
+        default=False,
+        description="继续上次会话（仅 Cursor provider）：使用 --continue 快速恢复最近会话",
+    )
+
+    # Git Worktree 相关
+    worktree_name: str | None = Field(
+        default=None,
+        description="Git worktree 名称（仅 Cursor provider）：在隔离的 git worktree 中运行（-w/--worktree）",
+    )
+    worktree_base: str | None = Field(
+        default=None,
+        description="Worktree 基准分支（仅 Cursor provider）：指定 worktree 的基准分支（--worktree-base）",
+    )
+    skip_worktree_setup: bool = Field(
+        default=False,
+        description="跳过 worktree 设置脚本（仅 Cursor provider）：跳过 .cursor/worktrees.json 中的设置脚本（--skip-worktree-setup）",
+    )
+
+    # MCP 相关
+    approve_mcps: bool = Field(
+        default=False,
+        description="自动批准 MCP 服务器（仅 Cursor provider）：跳过 MCP 确认，适合自动化场景（--approve-mcps）",
     )
 
 
@@ -180,7 +264,7 @@ class ChatCompletionResponse(BaseModel):
     created: int
     model: str
     choices: list[Choice]
-    usage: UsageInfo = Field(default_factory=UsageInfo)
+    usage: UsageInfo | None = Field(default=None, description="Token 用量统计（仅上游支持时返回）")
     proxy_info: ProxyInfo | None = Field(default=None, description="model-proxy 路由元数据")
 
 
@@ -265,3 +349,55 @@ class ModelDetail(BaseModel):
 class ProviderModelsResponse(BaseModel):
     provider: str
     models: list[ModelDetail]
+
+
+# --- 图像生成 ---
+
+class ImageGenerationRequest(BaseModel):
+    model: str = Field(description="图像模型 ID，如 agnes-image-2.0-flash")
+    prompt: str = Field(description="图像描述或编辑指令")
+    n: int = Field(default=1, ge=1, le=10, description="生成数量")
+    size: str = Field(default="1024x1024", description="图像尺寸，如 1024x1024, 1024x768")
+    seed: int | None = Field(default=None, description="随机种子，用于复现")
+    response_format: str = Field(default="url", description="返回格式: url 或 b64_json")
+    image: list[str] | None = Field(default=None, description="输入图片数组（图生图/多图合成），支持 URL 或 Data URI Base64")
+    return_base64: bool | None = Field(default=None, description="文生图需要 Base64 时设为 true")
+    extra_body: dict[str, Any] | None = Field(default=None, description="Agnes 扩展参数，如 {response_format, image}")
+
+
+class ImageGenerationResponse(BaseModel):
+    created: int
+    data: list[dict[str, Any]] = Field(description="图像列表，每项含 url 或 b64_json")
+    proxy_info: ProxyInfo | None = None
+
+
+# --- 视频生成 ---
+
+class VideoGenerationRequest(BaseModel):
+    model: str = Field(description="视频模型 ID，如 agnes-video-v2.0")
+    prompt: str = Field(description="视频描述")
+    width: int = Field(default=1152, description="视频宽度（像素）")
+    height: int = Field(default=768, description="视频高度（像素）")
+    num_frames: int = Field(default=121, description="总帧数（需满足 8n+1 且 <= 441）")
+    frame_rate: int = Field(default=24, description="帧率")
+    image: str | None = Field(default=None, description="参考图片 URL（图生视频模式）")
+    image_url: str | None = Field(default=None, description="参考图片 URL（兼容旧字段，同 image）")
+    mode: str | None = Field(default=None, description="生成模式：ti2vid / keyframes")
+    seed: int | None = Field(default=None, description="随机种子，用于复现")
+    negative_prompt: str | None = Field(default=None, description="反向提示词")
+    num_inference_steps: int | None = Field(default=None, description="推理步数")
+    extra_body: dict[str, Any] | None = Field(default=None, description="Agnes 扩展参数，如 {image: [...], mode: 'keyframes'}")
+
+
+class VideoCreateResponse(BaseModel):
+    id: str = Field(description="异步任务 ID")
+    status: str = Field(description="任务状态: queued, processing, completed, failed")
+    proxy_info: ProxyInfo | None = None
+
+
+class VideoStatusResponse(BaseModel):
+    id: str = Field(description="任务 ID")
+    status: str = Field(description="任务状态")
+    video_url: str | None = Field(default=None, description="完成后的视频下载 URL")
+    error: str | None = Field(default=None, description="失败原因")
+    proxy_info: ProxyInfo | None = None

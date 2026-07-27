@@ -51,12 +51,33 @@ class TurnUsage:
     timestamp: float = field(default_factory=time.time)
 
 
+MODEL_CONTEXT_WINDOWS: dict[str, int] = {
+    "gemini-2.5-pro": 1_048_576,
+    "gemini-2.5-flash": 1_048_576,
+    "gemini-2.0-flash": 1_048_576,
+    "llama-3.3-70b-versatile": 128_000,
+    "llama-3.1-8b-instant": 128_000,
+    "qwen-long": 10_000_000,
+    "qwen-max": 32_768,
+    "qwen-plus": 131_072,
+    "qwen-turbo": 131_072,
+    "qwen3-235b-a22b": 131_072,
+    "command-a-03-2025": 256_000,
+}
+
+
 class ContextMonitor:
     """上下文监控器 — 追踪 Token 使用率，判断何时需要压缩"""
 
     def __init__(self, model_context_window: int = 128_000):
         self.context_window = model_context_window
         self.history: list[TurnUsage] = []
+
+    def adapt_to_model(self, model_name: str) -> None:
+        """根据模型名动态调整上下文窗口大小"""
+        window = MODEL_CONTEXT_WINDOWS.get(model_name)
+        if window and window != self.context_window:
+            self.context_window = window
 
     def record_from_response(self, usage_dict: dict[str, int]) -> TurnUsage:
         """从 API 响应的 usage 字段记录"""
@@ -453,19 +474,69 @@ def get_archive(session_id: str) -> "FullContextArchive":
 
 
 class FullContextArchive:
-    """全量上下文归档 — JSONL 逐轮追加"""
+    """全量上下文归档 — SQLite FTS5 全文检索
+
+    相比旧版 JSONL O(N) 扫描，使用 FTS5 后 search 为 O(log N) 级别。
+    自动迁移旧格式 JSONL 文件到 SQLite。
+    """
 
     def __init__(self, session_id: str):
+        import sqlite3
         self._dir = ARCHIVE_DIR / session_id
         self._dir.mkdir(parents=True, exist_ok=True)
-        self._file = self._dir / "turns.jsonl"
-        self._turn_count = 0
-        self._load_count()
+        self._db_path = self._dir / "archive.db"
+        self._conn = sqlite3.connect(str(self._db_path), check_same_thread=False)
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._init_schema()
+        self._migrate_jsonl()
+        self._turn_count = self._conn.execute("SELECT COUNT(*) FROM turns").fetchone()[0]
 
-    def _load_count(self) -> None:
-        if self._file.exists():
-            with open(self._file, "r", encoding="utf-8") as f:
-                self._turn_count = sum(1 for _ in f)
+    def _init_schema(self) -> None:
+        self._conn.executescript("""
+            CREATE TABLE IF NOT EXISTS turns (
+                turn_id INTEGER PRIMARY KEY,
+                timestamp REAL,
+                user_msg TEXT,
+                assistant_msg TEXT,
+                tool_names TEXT,
+                file_paths TEXT,
+                key_entities TEXT,
+                token_count INTEGER
+            );
+            CREATE VIRTUAL TABLE IF NOT EXISTS turns_fts USING fts5(
+                user_msg, assistant_msg, content='turns', content_rowid='turn_id'
+            );
+            CREATE TRIGGER IF NOT EXISTS turns_ai AFTER INSERT ON turns BEGIN
+                INSERT INTO turns_fts(rowid, user_msg, assistant_msg) VALUES (new.turn_id, new.user_msg, new.assistant_msg);
+            END;
+        """)
+
+    def _migrate_jsonl(self) -> None:
+        """自动迁移旧 JSONL 格式到 SQLite（仅首次执行）"""
+        jsonl_file = self._dir / "turns.jsonl"
+        if not jsonl_file.exists():
+            return
+        existing = self._conn.execute("SELECT COUNT(*) FROM turns").fetchone()[0]
+        if existing > 0:
+            jsonl_file.unlink(missing_ok=True)
+            return
+        try:
+            with open(jsonl_file, "r", encoding="utf-8") as f:
+                for line in f:
+                    data = json.loads(line)
+                    self._conn.execute(
+                        "INSERT INTO turns (turn_id, timestamp, user_msg, assistant_msg, tool_names, file_paths, key_entities, token_count) VALUES (?,?,?,?,?,?,?,?)",
+                        (data["turn_id"], data["timestamp"], data["user_msg"], data["assistant_msg"],
+                         json.dumps(data.get("tool_names", []), ensure_ascii=False),
+                         json.dumps(data.get("file_paths", []), ensure_ascii=False),
+                         json.dumps(data.get("key_entities", []), ensure_ascii=False),
+                         data.get("token_count", 0)),
+                    )
+            self._conn.commit()
+            jsonl_file.unlink(missing_ok=True)
+            logger.info("已将 JSONL 归档迁移到 SQLite FTS: %s", self._dir.name)
+        except Exception as e:
+            logger.warning("JSONL 迁移失败: %s", e)
 
     def archive_turn(
         self,
@@ -475,66 +546,58 @@ class FullContextArchive:
         file_paths: list[str] | None = None,
     ) -> int:
         """归档一轮对话，返回 turn_id"""
-        turn = ArchivedTurn(
-            turn_id=self._turn_count,
-            timestamp=time.time(),
-            user_msg=user_msg[:2000],
-            assistant_msg=assistant_msg[:2000],
-            tool_names=tool_names or [],
-            file_paths=file_paths or [],
-            key_entities=self._extract_entities(user_msg + " " + assistant_msg),
-            token_count=(len(user_msg) + len(assistant_msg)) // CHARS_PER_TOKEN,
+        turn_id = self._turn_count
+        entities = self._extract_entities(user_msg + " " + assistant_msg)
+        self._conn.execute(
+            "INSERT INTO turns (turn_id, timestamp, user_msg, assistant_msg, tool_names, file_paths, key_entities, token_count) VALUES (?,?,?,?,?,?,?,?)",
+            (turn_id, time.time(), user_msg[:2000], assistant_msg[:2000],
+             json.dumps(tool_names or [], ensure_ascii=False),
+             json.dumps(file_paths or [], ensure_ascii=False),
+             json.dumps(entities, ensure_ascii=False),
+             (len(user_msg) + len(assistant_msg)) // CHARS_PER_TOKEN),
         )
-        with open(self._file, "a", encoding="utf-8") as f:
-            f.write(json.dumps(asdict(turn), ensure_ascii=False) + "\n")
+        self._conn.commit()
         self._turn_count += 1
-        return turn.turn_id
+        return turn_id
 
     def search(self, query: str, limit: int = 5) -> list[ArchivedTurn]:
-        """子串 + token 混合检索归档"""
-        if not self._file.exists():
+        """FTS5 全文检索归档（对中文使用 LIKE 兜底）"""
+        if self._turn_count == 0:
             return []
-
-        query_lower = query.lower()
-        query_tokens = set(re.findall(r"[\w\u4e00-\u9fff]+", query_lower))
-        scored: list[tuple[float, ArchivedTurn]] = []
-
-        with open(self._file, "r", encoding="utf-8") as f:
-            for line in f:
-                data = json.loads(line)
-                turn = ArchivedTurn(**data)
-                text = (turn.user_msg + " " + turn.assistant_msg).lower()
-
-                score = 0.0
-                if query_lower in text:
-                    score += 1.0
-                else:
-                    text_tokens = set(re.findall(r"[\w\u4e00-\u9fff]+", text))
-                    overlap = len(query_tokens & text_tokens)
-                    if overlap > 0:
-                        score += overlap / max(len(query_tokens), 1)
-                    for qt in query_tokens:
-                        if len(qt) >= 2 and qt in text:
-                            score += 0.3
-
-                if score > 0:
-                    scored.append((score, turn))
-
-        scored.sort(key=lambda x: x[0], reverse=True)
-        return [turn for _, turn in scored[:limit]]
+        try:
+            rows = self._conn.execute(
+                "SELECT t.* FROM turns t JOIN turns_fts f ON t.turn_id = f.rowid WHERE turns_fts MATCH ? ORDER BY rank LIMIT ?",
+                (query, limit),
+            ).fetchall()
+        except Exception:
+            rows = self._conn.execute(
+                "SELECT * FROM turns WHERE user_msg LIKE ? OR assistant_msg LIKE ? ORDER BY turn_id DESC LIMIT ?",
+                (f"%{query}%", f"%{query}%", limit),
+            ).fetchall()
+        return [self._row_to_turn(r) for r in rows]
 
     def get_total_turns(self) -> int:
         return self._turn_count
 
     def get_recent(self, n: int = 3) -> list[ArchivedTurn]:
         """获取最近 N 轮"""
-        if not self._file.exists():
-            return []
-        turns: list[ArchivedTurn] = []
-        with open(self._file, "r", encoding="utf-8") as f:
-            for line in f:
-                turns.append(ArchivedTurn(**json.loads(line)))
-        return turns[-n:]
+        rows = self._conn.execute(
+            "SELECT * FROM turns ORDER BY turn_id DESC LIMIT ?", (n,)
+        ).fetchall()
+        return [self._row_to_turn(r) for r in reversed(rows)]
+
+    @staticmethod
+    def _row_to_turn(row) -> ArchivedTurn:
+        return ArchivedTurn(
+            turn_id=row[0],
+            timestamp=row[1],
+            user_msg=row[2],
+            assistant_msg=row[3],
+            tool_names=json.loads(row[4]) if row[4] else [],
+            file_paths=json.loads(row[5]) if row[5] else [],
+            key_entities=json.loads(row[6]) if row[6] else [],
+            token_count=row[7] or 0,
+        )
 
     @staticmethod
     def _extract_entities(text: str) -> list[str]:

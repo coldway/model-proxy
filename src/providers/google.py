@@ -36,7 +36,7 @@ class GoogleProvider(BaseProvider):
     def __init__(self, api_key: str):
         super().__init__(api_key)
         from src.providers.utils import create_http_client
-        self._client = create_http_client(timeout=120.0)
+        self._client = create_http_client()
 
     def _auth_headers(self) -> dict:
         """使用 Header 传递 API Key（避免 Key 泄露到 URL 日志）"""
@@ -81,11 +81,17 @@ class GoogleProvider(BaseProvider):
             declarations.append(decl)
         return {"functionDeclarations": declarations}
 
+    # Google API 不支持的 JSON Schema 字段
+    _UNSUPPORTED_SCHEMA_KEYS = frozenset({
+        "title", "default", "$schema", "additionalProperties",
+        "exclusiveMinimum", "exclusiveMaximum", "minimum", "maximum",
+    })
+
     def _clean_json_schema(self, schema: dict) -> dict:
-        """清理 JSON Schema 使其兼容 Google API（移除 title 等不支持的字段）"""
+        """清理 JSON Schema 使其兼容 Google API（移除不支持的字段）"""
         cleaned = {}
         for k, v in schema.items():
-            if k in ("title", "default"):
+            if k in self._UNSUPPORTED_SCHEMA_KEYS:
                 continue
             if isinstance(v, dict):
                 cleaned[k] = self._clean_json_schema(v)
@@ -126,7 +132,7 @@ class GoogleProvider(BaseProvider):
                 prompt_tokens=data.get("usageMetadata", {}).get("promptTokenCount", 0),
                 completion_tokens=data.get("usageMetadata", {}).get("candidatesTokenCount", 0),
                 total_tokens=data.get("usageMetadata", {}).get("totalTokenCount", 0),
-            ),
+            ) if data.get("usageMetadata") else None,
         )
 
     async def stream_chat_completion(
@@ -140,7 +146,7 @@ class GoogleProvider(BaseProvider):
         ) as resp:
             if resp.status_code != 200:
                 await resp.aread()
-                logger.error("Google 流式请求失败 (%s): %s", resp.status_code, resp.text[:200])
+                logger.error("Google 流式请求失败 (%s): %s", resp.status_code, resp.text)
                 raise httpx.HTTPStatusError(
                     f"Google API {resp.status_code}",
                     request=resp.request,
@@ -155,9 +161,36 @@ class GoogleProvider(BaseProvider):
                     if not candidates:
                         continue
                     parts = candidates[0].get("content", {}).get("parts", [])
-                    text = "".join(p.get("text", "") for p in parts)
-                    if text:
-                        yield {"content": text}
+                    texts = []
+                    tool_calls = []
+                    for p in parts:
+                        if "text" in p:
+                            texts.append(p["text"])
+                        elif "functionCall" in p:
+                            fc = p["functionCall"]
+                            tool_calls.append(ToolCall(
+                                id=f"call_{uuid.uuid4().hex[:12]}",
+                                type="function",
+                                function=FunctionCall(
+                                    name=fc["name"],
+                                    arguments=json.dumps(fc.get("args", {}), ensure_ascii=False),
+                                ),
+                            ))
+                    if texts:
+                        yield {"content": "".join(texts)}
+                    if tool_calls:
+                        for i, tc in enumerate(tool_calls):
+                            yield {
+                                "tool_calls": [{
+                                    "index": i,
+                                    "id": tc.id,
+                                    "function": {
+                                        "name": tc.function.name,
+                                        "arguments": tc.function.arguments,
+                                    },
+                                }],
+                                "finish_reason": "tool_calls",
+                            }
                 except (json.JSONDecodeError, IndexError, KeyError):
                     continue
 

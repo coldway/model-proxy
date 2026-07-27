@@ -64,117 +64,119 @@ google/deep-research-pro-preview-12-2025:
   tool_calling: false
   vision: false
 google/gemini-2.0-flash:
-  available: false
-  chinese: false
-  error: rate_limited (429)
-  json_mode: false
-  latency_ms: 0
+  provider: google
   model: gemini-2.0-flash
-  multi_turn_tc: false
-  provider: google
-  reasoning: false
-  streaming: false
-  tested_at: '2026-05-13 17:38:32'
+  available: false
   tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
   vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: rate_limited (429)
+  tested_at: '2026-06-10 11:22:22'
 google/gemini-2.0-flash-001:
-  available: false
-  chinese: false
-  error: rate_limited (429)
-  json_mode: false
-  latency_ms: 0
+  provider: google
   model: gemini-2.0-flash-001
-  multi_turn_tc: false
-  provider: google
-  reasoning: false
-  streaming: false
-  tested_at: '2026-05-13 17:38:34'
+  available: false
   tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
   vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: rate_limited (429)
+  tested_at: '2026-06-10 11:18:34'
 google/gemini-2.0-flash-lite:
-  available: false
-  chinese: false
-  error: rate_limited (429)
-  json_mode: false
-  latency_ms: 0
+  provider: google
   model: gemini-2.0-flash-lite
-  multi_turn_tc: false
-  provider: google
-  reasoning: false
-  streaming: false
-  tested_at: '2026-05-13 17:38:38'
+  available: false
   tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
   vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: rate_limited (429)
+  tested_at: '2026-06-10 11:22:23'
 google/gemini-2.0-flash-lite-001:
-  available: false
-  chinese: false
-  error: rate_limited (429)
-  json_mode: false
-  latency_ms: 0
+  provider: google
   model: gemini-2.0-flash-lite-001
-  multi_turn_tc: false
-  provider: google
-  reasoning: false
-  streaming: false
-  tested_at: '2026-05-13 17:38:36'
+  available: false
   tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
   vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: rate_limited (429)
+  tested_at: '2026-06-10 11:18:36'
 google/gemini-2.5-computer-use-preview-10-2025:
-  available: false
-  chinese: false
-  error: rate_limited (429)
-  json_mode: false
-  latency_ms: 0
+  provider: google
   model: gemini-2.5-computer-use-preview-10-2025
-  multi_turn_tc: false
-  provider: google
-  reasoning: false
-  streaming: false
-  tested_at: '2026-05-13 17:43:56'
-  tool_calling: false
-  vision: false
-google/gemini-2.5-flash:
   available: false
-  chinese: false
-  error: rate_limited (429)
-  json_mode: false
-  latency_ms: 0
-  model: gemini-2.5-flash
-  multi_turn_tc: false
-  provider: google
-  reasoning: false
-  streaming: false
-  tested_at: '2026-05-13 17:38:28'
   tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
   vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: rate_limited (429)
+  tested_at: '2026-06-10 11:19:24'
 google/gemini-2.5-flash-image:
-  available: false
-  chinese: false
-  error: rate_limited (429)
-  json_mode: false
-  latency_ms: 0
+  provider: google
   model: gemini-2.5-flash-image
-  multi_turn_tc: false
-  provider: google
-  reasoning: false
-  streaming: false
-  tested_at: '2026-05-13 17:43:35'
+  available: false
   tool_calling: false
-  vision: false
-google/gemini-2.5-flash-lite:
-  available: true
-  chinese: false
-  error: null
-  json_mode: false
-  latency_ms: 2211
-  model: gemini-2.5-flash-lite
+  tc_method: null
   multi_turn_tc: false
-  provider: google
-  reasoning: false
-  streaming: false
-  tested_at: '2026-05-17 02:27:55'
-  tool_calling: true
+  chinese: false
   vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: rate_limited (429)
+  tested_at: '2026-06-10 11:18:44'
+google/gemini-2.5-flash-lite:
+  provider: google
+  model: gemini-2.5-flash-lite
+  available: true
+  tool_calling: true
+  tc_method: native
+  multi_turn_tc: true
+  chinese: true
+  vision: true
+  json_mode: true
+  streaming: true
+  reasoning: true
+  latency_ms: 1190
+  error: null
+  probe_response: 'get_current_time({"city": "北京"})'
+  mt_response: 北京现在是2026年05月13日16点00分00秒。
+  chinese_response: 和弦是三个或更多音符同时发声的组合。
+  vision_response: Red
+  json_sample: "{\n  \"instruments\": [\n    {\n      \"name\": \"吉他\",\n      \"\
+    type\": \"弦乐器\"\n    },\n    {\n"
+  stream_chunks: 2
+  stream_ttfb_ms: 989
+  reasoning_response: 开一个开关，等一会儿，再关掉。开另一个开关。进房间，摸灯泡温度，判断。
+  tested_at: '2026-06-10 11:22:20'
 google/gemini-2.5-flash-preview-tts:
   available: true
   chinese: false
@@ -190,89 +192,102 @@ google/gemini-2.5-flash-preview-tts:
   tool_calling: false
   vision: false
 google/gemini-2.5-pro:
-  available: false
-  chinese: false
-  error: rate_limited (429)
-  json_mode: false
-  latency_ms: 0
+  provider: google
   model: gemini-2.5-pro
-  multi_turn_tc: false
-  provider: google
-  reasoning: false
-  streaming: false
-  tested_at: '2026-05-13 17:38:30'
-  tool_calling: false
-  vision: false
-google/gemini-2.5-pro-preview-tts:
   available: false
-  chinese: false
-  error: rate_limited (429)
-  json_mode: false
-  latency_ms: 0
-  model: gemini-2.5-pro-preview-tts
-  multi_turn_tc: false
-  provider: google
-  reasoning: false
-  streaming: false
-  tested_at: '2026-05-13 17:38:43'
   tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
   vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: rate_limited (429)
+  tested_at: '2026-06-10 11:22:21'
+google/gemini-2.5-pro-preview-tts:
+  provider: google
+  model: gemini-2.5-pro-preview-tts
+  available: false
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: rate_limited (429)
+  tested_at: '2026-06-10 11:18:40'
 google/gemini-3-flash-preview:
   provider: google
   model: gemini-3-flash-preview
-  available: false
-  tool_calling: false
-  multi_turn_tc: false
-  chinese: false
+  available: true
+  tool_calling: true
+  tc_method: native
+  multi_turn_tc: true
+  chinese: true
   vision: false
   json_mode: false
   streaming: false
   reasoning: false
-  latency_ms: 0
-  error: ''
-  tested_at: '2026-05-17 21:07:30'
+  latency_ms: 1659
+  error: null
+  probe_response: 'get_current_time({"city": "北京"})'
+  mt_response: 北京现在是 2026年5月13日 16:00:00。
+  chinese_response: 三个或
+  vision_response: empty
+  json_sample: "{\n  \"instruments\": ["
+  stream_error: Google API 429
+  reasoning_response: 开一灯五
+  tested_at: '2026-06-10 11:22:23'
 google/gemini-3-pro-image-preview:
-  available: false
-  chinese: false
-  error: rate_limited (429)
-  json_mode: false
-  latency_ms: 0
+  provider: google
   model: gemini-3-pro-image-preview
-  multi_turn_tc: false
-  provider: google
-  reasoning: false
-  streaming: false
-  tested_at: '2026-05-13 17:43:46'
+  available: false
   tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
   vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: rate_limited (429)
+  tested_at: '2026-06-10 11:18:53'
 google/gemini-3-pro-preview:
-  available: false
-  chinese: false
-  error: rate_limited (429)
-  json_mode: false
-  latency_ms: 0
+  provider: google
   model: gemini-3-pro-preview
-  multi_turn_tc: false
-  provider: google
-  reasoning: false
-  streaming: false
-  tested_at: '2026-05-13 17:43:37'
-  tool_calling: false
-  vision: false
-google/gemini-3.1-flash-image-preview:
   available: false
-  chinese: false
-  error: rate_limited (429)
-  json_mode: false
-  latency_ms: 0
-  model: gemini-3.1-flash-image-preview
-  multi_turn_tc: false
-  provider: google
-  reasoning: false
-  streaming: false
-  tested_at: '2026-05-13 17:43:50'
   tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
   vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: rate_limited (429)
+  tested_at: '2026-06-10 11:18:47'
+google/gemini-3.1-flash-image-preview:
+  provider: google
+  model: gemini-3.1-flash-image-preview
+  available: false
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: rate_limited (429)
+  tested_at: '2026-06-10 11:19:00'
 google/gemini-3.1-flash-lite:
   provider: google
   model: gemini-3.1-flash-lite
@@ -334,78 +349,92 @@ google/gemini-3.1-flash-tts-preview:
   tool_calling: false
   vision: false
 google/gemini-3.1-pro-preview:
-  available: false
-  chinese: false
-  error: rate_limited (429)
-  json_mode: false
-  latency_ms: 0
+  provider: google
   model: gemini-3.1-pro-preview
-  multi_turn_tc: false
-  provider: google
-  reasoning: false
-  streaming: false
-  tested_at: '2026-05-13 17:43:41'
-  tool_calling: false
-  vision: false
-google/gemini-3.1-pro-preview-customtools:
   available: false
-  chinese: false
-  error: rate_limited (429)
-  json_mode: false
-  latency_ms: 0
-  model: gemini-3.1-pro-preview-customtools
-  multi_turn_tc: false
-  provider: google
-  reasoning: false
-  streaming: false
-  tested_at: '2026-05-13 17:43:43'
   tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
   vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: rate_limited (429)
+  tested_at: '2026-06-10 11:18:49'
+google/gemini-3.1-pro-preview-customtools:
+  provider: google
+  model: gemini-3.1-pro-preview-customtools
+  available: false
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: rate_limited (429)
+  tested_at: '2026-06-10 11:18:51'
 google/gemini-flash-latest:
   provider: google
   model: gemini-flash-latest
   available: true
   tool_calling: true
-  multi_turn_tc: false
+  tc_method: native
+  multi_turn_tc: true
   chinese: false
   vision: false
   json_mode: false
   streaming: false
   reasoning: false
-  latency_ms: 4125
+  latency_ms: 1728
   error: null
   probe_response: 'get_current_time({"city": "北京"})'
-  mt_issue: 'error: Client error ''429 Too Many Requests'' for url ''https://genera'
-  stream_error: Google API 429
-  tested_at: '2026-05-17 04:07:21'
+  mt_response: 北京现在是 2026年5月13日 下午 4:00。
+  stream_error: Google API 503
+  tested_at: '2026-06-10 11:22:39'
 google/gemini-flash-lite-latest:
-  available: true
-  chinese: false
-  error: null
-  json_mode: false
-  latency_ms: 4215
+  provider: google
   model: gemini-flash-lite-latest
-  multi_turn_tc: false
-  provider: google
-  reasoning: false
-  streaming: false
-  tested_at: '2026-05-17 02:27:55'
+  available: true
   tool_calling: true
-  vision: false
+  tc_method: native
+  multi_turn_tc: true
+  chinese: true
+  vision: true
+  json_mode: true
+  streaming: true
+  reasoning: true
+  latency_ms: 888
+  error: null
+  probe_response: 'get_current_time({"city": "北京"})'
+  mt_response: 北京现在是 2026 年 5 月 13 日，下午 4 点整。
+  chinese_response: 三个或以上不同音高的音，按一定音程关系结合。
+  vision_response: Red
+  json_sample: "{\n  \"instruments\": [\n    {\n      \"name\": \"钢琴\",\n      \"\
+    type\": \"键盘乐器\"\n    },\n    {"
+  stream_chunks: 3
+  stream_ttfb_ms: 1002
+  reasoning_response: 开启两盏灯，过会儿关掉一盏，进屋摸灯泡温度。
+  tested_at: '2026-06-10 11:22:21'
 google/gemini-pro-latest:
-  available: false
-  chinese: false
-  error: rate_limited (429)
-  json_mode: false
-  latency_ms: 0
-  model: gemini-pro-latest
-  multi_turn_tc: false
   provider: google
-  reasoning: false
-  streaming: false
-  tested_at: '2026-05-13 17:43:30'
+  model: gemini-pro-latest
+  available: false
   tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
   vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: rate_limited (429)
+  tested_at: '2026-06-10 11:18:42'
 google/gemini-robotics-er-1.5-preview:
   available: false
   chinese: false
@@ -493,47 +522,50 @@ google/gemma-4-31b-it:
     \   Constraint: Only on"
   tested_at: '2026-05-21 13:29:17'
 google/lyria-3-clip-preview:
-  available: false
-  chinese: false
-  error: rate_limited (429)
-  json_mode: false
-  latency_ms: 0
+  provider: google
   model: lyria-3-clip-preview
-  multi_turn_tc: false
-  provider: google
-  reasoning: false
-  streaming: false
-  tested_at: '2026-05-13 17:43:52'
+  available: false
   tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
   vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: rate_limited (429)
+  tested_at: '2026-06-10 11:19:19'
 google/lyria-3-pro-preview:
-  available: false
-  chinese: false
-  error: rate_limited (429)
-  json_mode: false
-  latency_ms: 0
+  provider: google
   model: lyria-3-pro-preview
-  multi_turn_tc: false
-  provider: google
-  reasoning: false
-  streaming: false
-  tested_at: '2026-05-13 17:43:54'
-  tool_calling: false
-  vision: false
-google/nano-banana-pro-preview:
   available: false
-  chinese: false
-  error: rate_limited (429)
-  json_mode: false
-  latency_ms: 0
-  model: nano-banana-pro-preview
-  multi_turn_tc: false
-  provider: google
-  reasoning: false
-  streaming: false
-  tested_at: '2026-05-13 17:43:48'
   tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
   vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: rate_limited (429)
+  tested_at: '2026-06-10 11:19:21'
+google/nano-banana-pro-preview:
+  provider: google
+  model: nano-banana-pro-preview
+  available: false
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: rate_limited (429)
+  tested_at: '2026-06-10 11:18:57'
 groq/allam-2-7b:
   available: true
   chinese: false
@@ -824,11 +856,62 @@ groq/whisper-large-v3-turbo:
   tested_at: '2026-05-13 17:32:52'
   tool_calling: false
   vision: false
-cursor/cursor-agent:
+cursor/auto:
   provider: cursor
-  model: cursor-agent
+  model: auto
+  available: true
+  tool_calling: true
+  tc_method: native
+  multi_turn_tc: true
+  chinese: true
+  vision: true
+  json_mode: true
+  streaming: false
+  reasoning: true
+  latency_ms: 33338
+  error: null
+  probe_response: 'get_current_time({"city": "北京"})'
+  mt_response: 北京现在是 2026-05-13 16:00:00 CST
+  chinese_response: 三个及以上音同时发声的组合。
+  vision_response: Unknown
+  json_sample: '{"instruments":[{"name":"钢琴","type":"键盘乐器"},{"name":"小提琴","type":"弦乐器"},{"name":'
+  stream_chunks: 0
+  stream_ttfb_ms: 0
+  reasoning_response: 先开一会儿关掉，再开另一盏，进屋看亮灭和余温。
+  tested_at: '2026-05-26 16:43:38'
+cursor/composer-2.5:
+  provider: cursor
+  model: composer-2.5
+  available: true
+  tool_calling: true
+  tc_method: native
+  multi_turn_tc: true
+  chinese: true
+  vision: true
+  json_mode: true
+  streaming: false
+  reasoning: true
+  latency_ms: 39147
+  error: null
+  probe_response: 'get_current_time({"city": "北京"})'
+  mt_response: 北京现在是 2026年5月13日 16:00:00（CST，中国标准时间）。
+  chinese_response: 三个及以上不同音高同时发声的组合。
+  vision_response: '我这边看不到你提到的图片——当前消息里没有附带图像，工作区里也没有找到相关图片文件。
+
+
+    请重新发送那张图片，我才能用一个'
+  json_sample: '{"instruments": [{"name": "钢琴", "type": "键盘"}, {"name": "小提琴", "type":
+    "弦乐"}, {"'
+  stream_chunks: 0
+  stream_ttfb_ms: 0
+  reasoning_response: 先开一盏数分钟关掉，再开另一盏进房：亮、热、冷对应三开关。
+  tested_at: '2026-05-26 16:45:28'
+dashscope/qwentype-api-dingtalk:
+  provider: dashscope
+  model: qwentype-api-dingtalk
   available: false
   tool_calling: false
+  tc_method: null
   multi_turn_tc: false
   chinese: false
   vision: false
@@ -836,5 +919,4334 @@ cursor/cursor-agent:
   streaming: false
   reasoning: false
   latency_ms: 0
-  error: ''
-  tested_at: '2026-05-21 00:38:52'
+  error: 'Server error ''500 Internal Server Error'' for url ''https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions''
+
+    Fo'
+  tested_at: '2026-06-08 18:38:21'
+dashscope/qwen3.7-plus-2026-05-26:
+  provider: dashscope
+  model: qwen3.7-plus-2026-05-26
+  available: true
+  tool_calling: true
+  tc_method: native
+  multi_turn_tc: true
+  chinese: true
+  vision: true
+  json_mode: true
+  streaming: true
+  reasoning: true
+  latency_ms: 2055
+  error: null
+  probe_response: 'get_current_time({"city": "北京"})'
+  mt_response: 北京现在是 **2026年5月13日 下午4:00（16:00）**。
+  chinese_response: 三个或以上音按音程关系同时发声。
+  vision_response: Red
+  json_sample: "{\n  \"instruments\": [\n    {\n      \"name\": \"钢琴\",\n      \"\
+    type\": \"键盘乐器\"\n    },\n    {"
+  stream_chunks: 5
+  stream_ttfb_ms: 911
+  reasoning_response: 开1几分钟后关，开2进房。亮是2，热是1，冷是3。
+  tested_at: '2026-06-08 18:38:52'
+dashscope/qwen3.7-plus:
+  provider: dashscope
+  model: qwen3.7-plus
+  available: true
+  tool_calling: true
+  tc_method: native
+  multi_turn_tc: true
+  chinese: false
+  vision: true
+  json_mode: true
+  streaming: true
+  reasoning: true
+  latency_ms: 1913
+  error: null
+  probe_response: 'get_current_time({"city": "北京"})'
+  mt_response: 北京现在是 **2026年5月13日 下午4:00（16:00）**。
+  vision_response: Red
+  json_sample: "{\n  \"instruments\": [\n    {\n      \"name\": \"钢琴\",\n      \"\
+    type\": \"键盘乐器\"\n    },\n    {"
+  stream_chunks: 5
+  stream_ttfb_ms: 846
+  reasoning_response: 开甲几分钟后关，开乙进房。亮、热、冷灯对应乙、甲、丙。
+  tested_at: '2026-06-08 18:41:00'
+dashscope/qwen3.7-max-2026-05-17:
+  provider: dashscope
+  model: qwen3.7-max-2026-05-17
+  available: true
+  tool_calling: true
+  tc_method: native
+  multi_turn_tc: true
+  chinese: true
+  vision: false
+  json_mode: true
+  streaming: true
+  reasoning: true
+  latency_ms: 1119
+  error: null
+  probe_response: 'get_current_time({"city": "北京"})'
+  mt_response: 北京现在是 **2026年5月13日 下午4:00（16:00）**。
+  chinese_response: 三个或以上不同音高按音程关系同时发声。
+  vision_error: not_supported
+  json_sample: "{\n  \"instruments\": [\n    {\n      \"name\": \"钢琴\",\n      \"\
+    type\": \"键盘乐器\"\n    },\n    {"
+  stream_chunks: 5
+  stream_ttfb_ms: 821
+  reasoning_response: 开A片刻后关，开B进房。亮的是B，热的是A，冷灭的是C。
+  tested_at: '2026-06-08 18:41:11'
+dashscope/qwen3.7-max-preview:
+  provider: dashscope
+  model: qwen3.7-max-preview
+  available: true
+  tool_calling: true
+  tc_method: native
+  multi_turn_tc: true
+  chinese: true
+  vision: false
+  json_mode: true
+  streaming: true
+  reasoning: true
+  latency_ms: 881
+  error: null
+  probe_response: 'get_current_time({"city": "北京"})'
+  mt_response: 北京现在是2026年5月13日下午4点（16:00）。
+  chinese_response: 三个或以上不同音高的音同时发声。
+  vision_error: not_supported
+  json_sample: "{\n  \"instruments\": [\n    {\"name\": \"钢琴\", \"type\": \"键盘乐器\"\
+    },\n    {\"name\": \"小提琴\", \"ty"
+  stream_chunks: 5
+  stream_ttfb_ms: 815
+  reasoning_response: 开A十分钟后关A开B。进房：亮为B，热为A，冷为C。
+  tested_at: '2026-06-08 18:41:44'
+dashscope/ZHIPU/GLM-5:
+  provider: dashscope
+  model: ZHIPU/GLM-5
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 18:41:50'
+dashscope/qwen3.7-max-2026-05-20:
+  provider: dashscope
+  model: qwen3.7-max-2026-05-20
+  available: true
+  tool_calling: true
+  tc_method: native
+  multi_turn_tc: true
+  chinese: true
+  vision: false
+  json_mode: true
+  streaming: true
+  reasoning: true
+  latency_ms: 1490
+  error: null
+  probe_response: 'get_current_time({"city": "北京"})'
+  mt_response: 北京现在的时间是2026年5月13日下午4点（16:00）。
+  chinese_response: 三个及以上音按音程关系纵向结合。
+  vision_error: not_supported
+  json_sample: "{\n  \"instruments\": [\n    {\n      \"name\": \"钢琴\",\n      \"\
+    type\": \"键盘乐器\"\n    },\n    {"
+  stream_chunks: 5
+  stream_ttfb_ms: 806
+  reasoning_response: 开A片刻后关，开B进屋。亮为B，热为A，冷为C。
+  tested_at: '2026-06-08 18:42:17'
+dashscope/qwen3.7-max:
+  provider: dashscope
+  model: qwen3.7-max
+  available: true
+  tool_calling: true
+  tc_method: native
+  multi_turn_tc: true
+  chinese: true
+  vision: false
+  json_mode: true
+  streaming: true
+  reasoning: true
+  latency_ms: 1237
+  error: null
+  probe_response: 'get_current_time({"city": "北京"})'
+  mt_response: 北京现在的时间是2026年5月13日下午4点（16:00）。
+  chinese_response: 三个或以上不同音高同时发声的组合。
+  vision_error: not_supported
+  json_sample: "{\n  \"instruments\": [\n    {\"name\": \"钢琴\", \"type\": \"键盘乐器\"\
+    },\n    {\"name\": \"小提琴\", \"ty"
+  stream_chunks: 5
+  stream_ttfb_ms: 1035
+  reasoning_response: 开甲片刻后关，开乙进屋。亮为乙，热为甲，冷为丙。
+  tested_at: '2026-06-08 18:42:49'
+dashscope/qwen3.5-livetranslate-flash-realtime-2026-05-19:
+  provider: dashscope
+  model: qwen3.5-livetranslate-flash-realtime-2026-05-19
+  available: false
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: 'Server error ''500 Internal Server Error'' for url ''https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions''
+
+    Fo'
+  tested_at: '2026-06-08 18:42:51'
+dashscope/qwen3.5-livetranslate-flash-realtime:
+  provider: dashscope
+  model: qwen3.5-livetranslate-flash-realtime
+  available: false
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: 'Server error ''500 Internal Server Error'' for url ''https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions''
+
+    Fo'
+  tested_at: '2026-06-08 18:42:53'
+dashscope/ZHIPU/GLM-5.1:
+  provider: dashscope
+  model: ZHIPU/GLM-5.1
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 18:43:00'
+dashscope/kimi/kimi-k2.6:
+  provider: dashscope
+  model: kimi/kimi-k2.6
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 18:43:06'
+dashscope/deepseek-v4-flash:
+  provider: dashscope
+  model: deepseek-v4-flash
+  available: true
+  tool_calling: true
+  tc_method: native
+  multi_turn_tc: true
+  chinese: true
+  vision: true
+  json_mode: true
+  streaming: true
+  reasoning: true
+  latency_ms: 1451
+  error: null
+  probe_response: 'get_current_time({"city": "北京"})'
+  mt_response: 北京当前时间是 **2026年5月13日 下午4:00**（北京时间，CST，UTC+8）。
+  chinese_response: 多个不同音同时发声。
+  vision_response: None
+  json_sample: '{"instruments": [{"name": "Piano", "type": "Keyboard"}, {"name": "Guitar",
+    "type'
+  stream_chunks: 5
+  stream_ttfb_ms: 793
+  reasoning_response: 先开一个开关，等会儿关掉，再开另一个，进房间看温度。
+  tested_at: '2026-06-08 18:43:15'
+dashscope/deepseek-v4-pro:
+  provider: dashscope
+  model: deepseek-v4-pro
+  available: true
+  tool_calling: true
+  tc_method: native
+  multi_turn_tc: true
+  chinese: true
+  vision: true
+  json_mode: true
+  streaming: true
+  reasoning: true
+  latency_ms: 2193
+  error: null
+  probe_response: 'get_current_time({"city": "北京"})'
+  mt_response: 北京现在是 **2026年5月13日 下午4点整**（北京时间 CST）。
+  chinese_response: 三个以上音按音程叠置同时发响。
+  vision_response: Unknown
+  json_sample: '{"instruments": [{"name": "Piano", "type": "Keyboard"}, {"name": "Guitar",
+    "type'
+  stream_chunks: 5
+  stream_ttfb_ms: 1245
+  reasoning_response: 先开一灯片刻后关掉，开另一灯。进屋摸：热灭为第一，亮为第二，冷为第三。
+  tested_at: '2026-06-08 18:44:07'
+dashscope/qwen-image-2.0-pro-2026-04-22:
+  provider: dashscope
+  model: qwen-image-2.0-pro-2026-04-22
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  stream_error: Client error '429 Too Many Requests' for url 'https://dashsc
+  tested_at: '2026-06-08 18:44:12'
+dashscope/qwen3.5-plus-2026-04-20:
+  provider: dashscope
+  model: qwen3.5-plus-2026-04-20
+  available: true
+  tool_calling: true
+  tc_method: native
+  multi_turn_tc: true
+  chinese: true
+  vision: true
+  json_mode: true
+  streaming: true
+  reasoning: true
+  latency_ms: 6775
+  error: null
+  probe_response: 'get_current_time({"city": "北京"})'
+  mt_response: 北京现在是 2026年5月13日 16:00:00。
+  chinese_response: 三个或以上音同时发声的组合。
+  vision_response: Red
+  json_sample: '{"instruments": [{"name": "钢琴", "type": "键盘乐器"}, {"name": "小提琴", "type":
+    "弦乐器"},'
+  stream_chunks: 5
+  stream_ttfb_ms: 358
+  reasoning_response: 开1等几分钟关，开2进屋。亮为2，灭热为1，灭冷为3。
+  tested_at: '2026-06-08 18:44:59'
+dashscope/qwen3.6-27b:
+  provider: dashscope
+  model: qwen3.6-27b
+  available: true
+  tool_calling: true
+  tc_method: native
+  multi_turn_tc: true
+  chinese: true
+  vision: true
+  json_mode: true
+  streaming: true
+  reasoning: true
+  latency_ms: 1189
+  error: null
+  probe_response: 'get_current_time({"city": "北京"})'
+  mt_response: 北京现在是2026年5月13日 16:00。
+  chinese_response: 三个或以上音符同时发声的组合。
+  vision_response: Red
+  json_sample: "{\n  \"instruments\": [\n    {\"name\": \"钢琴\", \"type\": \"键盘乐器\"\
+    },\n    {\"name\": \"吉他\", \"typ"
+  stream_chunks: 5
+  stream_ttfb_ms: 244
+  reasoning_response: 开1等几分钟关，开2进屋。亮是2，热是1，冷是3。
+  tested_at: '2026-06-08 18:45:34'
+dashscope/kimi-k2.6:
+  provider: dashscope
+  model: kimi-k2.6
+  available: true
+  tool_calling: true
+  tc_method: native
+  multi_turn_tc: true
+  chinese: true
+  vision: true
+  json_mode: true
+  streaming: true
+  reasoning: true
+  latency_ms: 879
+  error: null
+  probe_response: 'get_current_time({"city": "北京"})'
+  mt_response: 北京现在是 **2026年5月13日 16:00**（下午4点）。
+  chinese_response: 多个音按三度关系叠置。
+  vision_response: Red.
+  json_sample: '{"instruments": [{"name": "钢琴", "type": "键盘乐器"}, {"name": "小提琴", "type":
+    "弦乐器"},'
+  stream_chunks: 5
+  stream_ttfb_ms: 580
+  reasoning_response: 开两个开关，一段时间后关一个，进房看：亮、热、凉对应三灯。
+  tested_at: '2026-06-08 18:45:41'
+dashscope/qwen3.6-max-preview:
+  provider: dashscope
+  model: qwen3.6-max-preview
+  available: true
+  tool_calling: true
+  tc_method: native
+  multi_turn_tc: true
+  chinese: true
+  vision: true
+  json_mode: true
+  streaming: true
+  reasoning: true
+  latency_ms: 8638
+  error: null
+  probe_response: 'get_current_time({"city": "北京"})'
+  mt_response: 北京现在是2026年5月13日 16:00:00。
+  chinese_response: 三个及以上乐音同时发声的组合。
+  vision_response: "</think>`\n   - This looks like a system prompt or a placehol"
+  json_sample: "{\n  \"instruments\": [\n    {\"name\": \"钢琴\", \"type\": \"键盘乐器\"\
+    },\n    {\"name\": \"小提琴\", \"ty"
+  stream_chunks: 5
+  stream_ttfb_ms: 1342
+  reasoning_response: 开1数分后关，开2进屋。亮为2，热为1，冷为3。
+  tested_at: '2026-06-08 18:46:57'
+dashscope/qwen3.6-35b-a3b:
+  provider: dashscope
+  model: qwen3.6-35b-a3b
+  available: true
+  tool_calling: true
+  tc_method: native
+  multi_turn_tc: true
+  chinese: true
+  vision: true
+  json_mode: true
+  streaming: true
+  reasoning: true
+  latency_ms: 3125
+  error: null
+  probe_response: 'get_current_time({"city": "北京"})'
+  mt_response: 现在是北京时间2026年5月13日16点00分。
+  chinese_response: 三个或以上不同音高的音同时发声的组合。
+  vision_response: Red
+  json_sample: "{\n  \"instruments\": [\n    {\"name\": \"Piano\", \"type\": \"Keyboard\"\
+    },\n    {\"name\": \"Vi"
+  stream_chunks: 5
+  stream_ttfb_ms: 569
+  reasoning_response: 开1后关，开2，进屋：亮为2，烫为1，灭冷为3。
+  tested_at: '2026-06-08 18:47:21'
+dashscope/qwen3.6-flash-2026-04-16:
+  provider: dashscope
+  model: qwen3.6-flash-2026-04-16
+  available: true
+  tool_calling: true
+  tc_method: native
+  multi_turn_tc: true
+  chinese: true
+  vision: true
+  json_mode: true
+  streaming: true
+  reasoning: true
+  latency_ms: 2237
+  error: null
+  probe_response: 'get_current_time({"city": "北京"})'
+  mt_response: 北京现在是2026年5月13日16:00:00。
+  chinese_response: 三个或以上音符同时发声组成的音响。
+  vision_response: Red
+  json_sample: "{\n  \"instruments\": [\n    {\"name\": \"Piano\", \"type\": \"Keyboard\"\
+    },\n    {\"name\": \"Vi"
+  stream_chunks: 5
+  stream_ttfb_ms: 491
+  reasoning_response: 开一号久后关，开二号，进屋：亮对二，烫灭对一，冷灭对三。
+  tested_at: '2026-06-08 18:47:46'
+dashscope/qwen3.6-flash:
+  provider: dashscope
+  model: qwen3.6-flash
+  available: true
+  tool_calling: true
+  tc_method: native
+  multi_turn_tc: true
+  chinese: true
+  vision: true
+  json_mode: true
+  streaming: true
+  reasoning: true
+  latency_ms: 2509
+  error: null
+  probe_response: 'get_current_time({"city": "北京"})'
+  mt_response: 现在是北京时间2026年5月13日16点00分。
+  chinese_response: 三个或更多音高同时发声的组合。
+  vision_response: Red
+  json_sample: "{\n  \"instruments\": [\n    {\"name\": \"Piano\", \"type\": \"Keyboard\"\
+    },\n    {\"name\": \"Vi"
+  stream_chunks: 5
+  stream_ttfb_ms: 453
+  reasoning_response: 开1久后关，开2，进屋：亮为2，烫为1，凉为3。
+  tested_at: '2026-06-08 18:48:07'
+dashscope/glm-5.1:
+  provider: dashscope
+  model: glm-5.1
+  available: true
+  tool_calling: true
+  tc_method: native
+  multi_turn_tc: true
+  chinese: true
+  vision: true
+  json_mode: true
+  streaming: true
+  reasoning: true
+  latency_ms: 2170
+  error: null
+  probe_response: 'get_current_time({"city": "北京"})'
+  mt_response: 北京现在的时间是 **2026年5月13日 16:00:00**（北京时间，CST）。
+  chinese_response: 三个及以上不同音同时发声的组合。
+  vision_response: Unknown
+  json_sample: "{\n  \"instruments\": [\n    {\n      \"name\": \"Piano\",\n     \
+    \ \"type\": \"Keyboard\"\n    }"
+  stream_chunks: 5
+  stream_ttfb_ms: 1790
+  reasoning_response: 开1号几分钟，关1开2进屋。亮灯是2，热暗灯是1，冷暗灯是3。
+  tested_at: '2026-06-08 18:48:32'
+dashscope/vanchin/deepseek-v3.1-terminus:
+  provider: dashscope
+  model: vanchin/deepseek-v3.1-terminus
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 18:48:38'
+dashscope/vanchin/deepseek-v3:
+  provider: dashscope
+  model: vanchin/deepseek-v3
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 18:48:44'
+dashscope/vanchin/deepseek-r1:
+  provider: dashscope
+  model: vanchin/deepseek-r1
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 18:48:50'
+dashscope/vanchin/deepseek-ocr:
+  provider: dashscope
+  model: vanchin/deepseek-ocr
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 18:48:56'
+dashscope/vanchin/deepseek-v3.2-think:
+  provider: dashscope
+  model: vanchin/deepseek-v3.2-think
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 18:49:03'
+dashscope/qwen3.5-omni-plus-realtime-2026-03-15:
+  provider: dashscope
+  model: qwen3.5-omni-plus-realtime-2026-03-15
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_chunks: 0
+  stream_ttfb_ms: 0
+  tested_at: '2026-06-08 18:49:08'
+dashscope/qwen3.5-omni-plus-realtime:
+  provider: dashscope
+  model: qwen3.5-omni-plus-realtime
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_chunks: 0
+  stream_ttfb_ms: 0
+  tested_at: '2026-06-08 18:49:14'
+dashscope/qwen3.5-omni-plus-2026-03-15:
+  provider: dashscope
+  model: qwen3.5-omni-plus-2026-03-15
+  available: true
+  tool_calling: true
+  tc_method: native
+  multi_turn_tc: true
+  chinese: true
+  vision: true
+  json_mode: true
+  streaming: true
+  reasoning: true
+  latency_ms: 1974
+  error: null
+  probe_response: 'get_current_time({"city": "北京"})'
+  mt_response: 北京现在是2026年5月13日 16:00:00。
+  chinese_response: 三个或以上不同音高的音同时发声。
+  vision_response: ' Red'
+  json_sample: '{"instruments": [{"name": "钢琴", "type": "键盘乐器"}, {"name": "小提琴", "type":
+    "弦乐器"},'
+  stream_chunks: 5
+  stream_ttfb_ms: 348
+  reasoning_response: 开一盏久后关，再开一盏。进屋：亮、热灭、冷灭对应三开关。
+  tested_at: '2026-06-08 18:49:23'
+dashscope/qwen3.5-omni-plus:
+  provider: dashscope
+  model: qwen3.5-omni-plus
+  available: true
+  tool_calling: true
+  tc_method: native
+  multi_turn_tc: true
+  chinese: true
+  vision: true
+  json_mode: true
+  streaming: true
+  reasoning: true
+  latency_ms: 1602
+  error: null
+  probe_response: 'get_current_time({"city": "北京"})'
+  mt_response: 北京现在是2026年5月13日16:00:00。
+  chinese_response: 三个或以上不同音高的音同时发声。
+  vision_response: ' Red'
+  json_sample: '{"instruments": [{"name": "钢琴", "type": "键盘乐器"}, {"name": "小提琴", "type":
+    "弦乐器"},'
+  stream_chunks: 5
+  stream_ttfb_ms: 710
+  reasoning_response: 开一盏久后关，再开另一盏。进房看亮灯、摸热灭灯、冷灭灯对应。
+  tested_at: '2026-06-08 18:49:33'
+dashscope/qwen3.5-omni-flash-realtime-2026-03-15:
+  provider: dashscope
+  model: qwen3.5-omni-flash-realtime-2026-03-15
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_chunks: 0
+  stream_ttfb_ms: 0
+  tested_at: '2026-06-08 18:49:39'
+dashscope/qwen3.5-omni-flash-realtime:
+  provider: dashscope
+  model: qwen3.5-omni-flash-realtime
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_chunks: 0
+  stream_ttfb_ms: 0
+  tested_at: '2026-06-08 18:49:45'
+dashscope/qwen3.5-omni-flash-2026-03-15:
+  provider: dashscope
+  model: qwen3.5-omni-flash-2026-03-15
+  available: true
+  tool_calling: true
+  tc_method: native
+  multi_turn_tc: true
+  chinese: true
+  vision: true
+  json_mode: true
+  streaming: true
+  reasoning: true
+  latency_ms: 864
+  error: null
+  probe_response: 'get_current_time({"city": "北京"})'
+  mt_response: 北京现在是2026年5月13日星期三下午4点。
+  chinese_response: 三个或以上音按三度叠置构成的和声。
+  vision_response: ' Red'
+  json_sample: '{"instruments": [{"name": "钢琴", "type": "键盘乐器"}, {"name": "小提琴", "type":
+    "弦乐器"},'
+  stream_chunks: 4
+  stream_ttfb_ms: 191
+  reasoning_response: 先开两盏灯几分钟，关一盏进屋。亮的是原开关，热的是第二，冷的是第三。
+  tested_at: '2026-06-08 18:49:51'
+dashscope/qwen3.5-omni-flash:
+  provider: dashscope
+  model: qwen3.5-omni-flash
+  available: true
+  tool_calling: true
+  tc_method: native
+  multi_turn_tc: true
+  chinese: true
+  vision: true
+  json_mode: true
+  streaming: true
+  reasoning: true
+  latency_ms: 336
+  error: null
+  probe_response: 'get_current_time({"city": "北京"})'
+  mt_response: 北京现在是2026年5月13日星期三下午4点。
+  chinese_response: 三个或以上音按三度叠置构成的和声组合。
+  vision_response: ' Red'
+  json_sample: '{"instruments": [{"name": "钢琴", "type": "键盘乐器"}, {"name": "小提琴", "type":
+    "弦乐器"},'
+  stream_chunks: 5
+  stream_ttfb_ms: 292
+  reasoning_response: 先开两盏灯，进屋后亮着对应一盏，摸不热但灭的对应一盏，最后熄灭且热的对应最后一盏。
+  tested_at: '2026-06-08 18:49:56'
+dashscope/qwen3.6-plus-2026-04-02:
+  provider: dashscope
+  model: qwen3.6-plus-2026-04-02
+  available: true
+  tool_calling: true
+  tc_method: native
+  multi_turn_tc: true
+  chinese: true
+  vision: true
+  json_mode: true
+  streaming: true
+  reasoning: true
+  latency_ms: 5603
+  error: null
+  probe_response: 'get_current_time({"city": "北京"})'
+  mt_response: 北京现在是2026年5月13日 16:00:00。
+  chinese_response: 和弦是三个或以上音同时发声的组合。
+  vision_response: Red
+  json_sample: '{"instruments": [{"name": "钢琴", "type": "键盘乐器"}, {"name": "小提琴", "type":
+    "弦乐器"},'
+  stream_chunks: 5
+  stream_ttfb_ms: 697
+  reasoning_response: 开1等几分钟关，开2进屋。亮为2，灭热为1，灭冷为3。
+  tested_at: '2026-06-08 18:50:49'
+dashscope/qwen3.6-plus:
+  provider: dashscope
+  model: qwen3.6-plus
+  available: true
+  tool_calling: true
+  tc_method: native
+  multi_turn_tc: true
+  chinese: true
+  vision: true
+  json_mode: true
+  streaming: true
+  reasoning: true
+  latency_ms: 7348
+  error: null
+  probe_response: 'get_current_time({"city": "北京"})'
+  mt_response: 北京现在是2026年5月13日 16:00:00。
+  chinese_response: 三个及以上不同音高的音同时发声。
+  vision_response: Red
+  json_sample: '{"instruments": [{"name": "钢琴", "type": "键盘乐器"}, {"name": "小提琴", "type":
+    "弦乐器"},'
+  stream_chunks: 5
+  stream_ttfb_ms: 549
+  reasoning_response: 开1等热后关，开2进屋。亮是2，热是1，冷是3。
+  tested_at: '2026-06-08 18:51:31'
+dashscope/wan2.7-image-pro:
+  provider: dashscope
+  model: wan2.7-image-pro
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_chunks: 0
+  stream_ttfb_ms: 0
+  tested_at: '2026-06-08 18:51:37'
+dashscope/wan2.7-image:
+  provider: dashscope
+  model: wan2.7-image
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_chunks: 0
+  stream_ttfb_ms: 0
+  tested_at: '2026-06-08 18:51:42'
+dashscope/MiniMax/MiniMax-M2.7:
+  provider: dashscope
+  model: MiniMax/MiniMax-M2.7
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 18:51:49'
+dashscope/MiniMax/speech-2.8-hd:
+  provider: dashscope
+  model: MiniMax/speech-2.8-hd
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_chunks: 0
+  stream_ttfb_ms: 0
+  tested_at: '2026-06-08 18:52:02'
+dashscope/MiniMax/speech-2.8-turbo:
+  provider: dashscope
+  model: MiniMax/speech-2.8-turbo
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_chunks: 0
+  stream_ttfb_ms: 0
+  tested_at: '2026-06-08 18:52:15'
+dashscope/MiniMax/speech-02-turbo:
+  provider: dashscope
+  model: MiniMax/speech-02-turbo
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_chunks: 0
+  stream_ttfb_ms: 0
+  tested_at: '2026-06-08 18:52:28'
+dashscope/MiniMax/speech-02-hd:
+  provider: dashscope
+  model: MiniMax/speech-02-hd
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_chunks: 0
+  stream_ttfb_ms: 0
+  tested_at: '2026-06-08 18:52:41'
+dashscope/qwen-deep-research-2025-12-15:
+  provider: dashscope
+  model: qwen-deep-research-2025-12-15
+  available: false
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: '''role'''
+  tested_at: '2026-06-08 18:52:46'
+dashscope/qwen-image-2.0-2026-03-03:
+  provider: dashscope
+  model: qwen-image-2.0-2026-03-03
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  stream_chunks: 0
+  stream_ttfb_ms: 0
+  tested_at: '2026-06-08 18:52:52'
+dashscope/qwen-image-2.0-pro:
+  provider: dashscope
+  model: qwen-image-2.0-pro
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  stream_error: Client error '429 Too Many Requests' for url 'https://dashsc
+  tested_at: '2026-06-08 18:52:56'
+dashscope/qwen-image-2.0-pro-2026-03-03:
+  provider: dashscope
+  model: qwen-image-2.0-pro-2026-03-03
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  stream_error: Client error '429 Too Many Requests' for url 'https://dashsc
+  tested_at: '2026-06-08 18:53:01'
+dashscope/qwen-image-2.0:
+  provider: dashscope
+  model: qwen-image-2.0
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  stream_chunks: 0
+  stream_ttfb_ms: 0
+  tested_at: '2026-06-08 18:53:07'
+dashscope/qwen3-asr-flash-2026-02-10:
+  provider: dashscope
+  model: qwen3-asr-flash-2026-02-10
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_chunks: 0
+  stream_ttfb_ms: 0
+  tested_at: '2026-06-08 18:53:13'
+dashscope/glm-5:
+  provider: dashscope
+  model: glm-5
+  available: true
+  tool_calling: true
+  tc_method: native
+  multi_turn_tc: true
+  chinese: true
+  vision: true
+  json_mode: true
+  streaming: true
+  reasoning: true
+  latency_ms: 4043
+  error: null
+  probe_response: 'get_current_time({"city": "北京"})'
+  mt_response: 北京现在的时间是2026年5月13日16:00:00（中国标准时间）。
+  chinese_response: 三个或以上的音同时发声。
+  vision_response: 'I cannot see the image you are referring to. Please provide '
+  json_sample: "{\n  \"instruments\": [\n    {\n      \"name\": \"Piano\",\n     \
+    \ \"type\": \"Keyboard\"\n    }"
+  stream_chunks: 5
+  stream_ttfb_ms: 4184
+  reasoning_response: 开开关1许久关掉，开开关2进屋。亮灯2，热灯1，凉灯3。
+  tested_at: '2026-06-08 18:53:45'
+dashscope/qwen-flash-character-2026-02-26:
+  provider: dashscope
+  model: qwen-flash-character-2026-02-26
+  available: true
+  tool_calling: true
+  tc_method: native
+  multi_turn_tc: false
+  chinese: true
+  vision: false
+  json_mode: true
+  streaming: true
+  reasoning: true
+  latency_ms: 1195
+  error: null
+  probe_response: 'get_current_time({"city": "北京"})'
+  mt_issue: 'error: Client error ''400 Bad Request'' for url ''https://dashscope.al'
+  chinese_response: 和弦是由三个或以上不同音高音符同时发声组成的音乐结构。
+  vision_error: not_supported
+  json_sample: '{"instruments": [{"name": "钢琴", "type": "键盘乐器"}, {"name": "小提琴", "type":
+    "弦乐器"},'
+  stream_chunks: 5
+  stream_ttfb_ms: 409
+  reasoning_response: 打开第一个开关10分钟，关掉后立即开第二个，迅速进屋。亮着的灯对应第二个开关，摸起来热的对应第一个，剩下的第三个。
+  tested_at: '2026-06-08 18:53:52'
+dashscope/MiniMax-M2.5:
+  provider: dashscope
+  model: MiniMax-M2.5
+  available: true
+  tool_calling: true
+  tc_method: native
+  multi_turn_tc: true
+  chinese: true
+  vision: true
+  json_mode: true
+  streaming: true
+  reasoning: true
+  latency_ms: 6028
+  error: null
+  probe_response: 'get_current_time({"city": "北京"})'
+  mt_response: 现在北京的时间是 **2026年5月13日 16:00:00**（北京时间）。
+  chinese_response: 和弦是同时弹出的多个音的组合。
+  vision_response: 'I’m sorry, but I can’t see the image. Could you describe it '
+  json_sample: '{"instruments": [{"name": "钢琴", "type": "键盘乐器"}, {"name": "吉他", "type":
+    "弦乐器"}, '
+  stream_chunks: 5
+  stream_ttfb_ms: 421
+  reasoning_response: 开1灯几分钟，关；开2灯，进门：亮灯2，热灯1，冷灯3。
+  tested_at: '2026-06-08 18:54:22'
+dashscope/qwen3.5-flash-2026-02-23:
+  provider: dashscope
+  model: qwen3.5-flash-2026-02-23
+  available: true
+  tool_calling: true
+  tc_method: native
+  multi_turn_tc: true
+  chinese: true
+  vision: true
+  json_mode: true
+  streaming: true
+  reasoning: true
+  latency_ms: 769
+  error: null
+  probe_response: 'get_current_time({"city": "北京"})'
+  mt_response: 北京现在是2026年5月13日 16:00:00。
+  chinese_response: 三个或更多音符同时发声构成的和声。
+  vision_response: Red
+  json_sample: "{\n  \"instruments\": [\n    {\n      \"name\": \"钢琴\",\n      \"\
+    type\": \"键盘乐器\"\n    },\n    {"
+  stream_chunks: 5
+  stream_ttfb_ms: 788
+  reasoning_response: 开一稍久后关，开二。进屋：亮是二，热灭是一，冷灭是三。
+  tested_at: '2026-06-08 18:55:01'
+dashscope/qwen3.5-flash:
+  provider: dashscope
+  model: qwen3.5-flash
+  available: true
+  tool_calling: true
+  tc_method: native
+  multi_turn_tc: true
+  chinese: true
+  vision: true
+  json_mode: true
+  streaming: true
+  reasoning: true
+  latency_ms: 688
+  error: null
+  probe_response: 'get_current_time({"city": "北京"})'
+  mt_response: 北京现在是 2026年5月13日 16:00:00。
+  chinese_response: 三个或更多音符同时发声的音乐组合。
+  vision_response: Red
+  json_sample: "{\n  \"instruments\": [\n    {\n      \"name\": \"钢琴\",\n      \"\
+    type\": \"键盘乐器\"\n    },\n    {"
+  stream_chunks: 5
+  stream_ttfb_ms: 493
+  reasoning_response: 开一号一会后关，再开二号。进屋：亮二，热一，冷三。
+  tested_at: '2026-06-08 18:55:48'
+dashscope/qwen3.5-122b-a10b:
+  provider: dashscope
+  model: qwen3.5-122b-a10b
+  available: true
+  tool_calling: true
+  tc_method: native
+  multi_turn_tc: true
+  chinese: true
+  vision: true
+  json_mode: true
+  streaming: true
+  reasoning: true
+  latency_ms: 890
+  error: null
+  probe_response: 'get_current_time({"city": "北京"})'
+  mt_response: 北京现在是2026年5月13日 16:00:00（下午4点）。
+  chinese_response: 三个或更多音按一定关系同时发声。
+  vision_response: ' Red'
+  json_sample: "{\n  \"instruments\": [\n    {\n      \"name\": \"钢琴\",\n      \"\
+    type\": \"键盘乐器\"\n    },\n    {"
+  stream_chunks: 5
+  stream_ttfb_ms: 663
+  reasoning_response: 开一号一会关，开二号，进屋。亮是二，热是一，灭且凉是三。
+  tested_at: '2026-06-08 18:56:39'
+dashscope/qwen3.5-35b-a3b:
+  provider: dashscope
+  model: qwen3.5-35b-a3b
+  available: true
+  tool_calling: true
+  tc_method: native
+  multi_turn_tc: true
+  chinese: true
+  vision: true
+  json_mode: true
+  streaming: true
+  reasoning: false
+  latency_ms: 826
+  error: null
+  probe_response: 'get_current_time({"city": "北京"})'
+  mt_response: 北京现在是2026年5月13日 16:00:00 CST。
+  chinese_response: 三个或更多音符同时发声的和声组合。
+  vision_response: Red
+  json_sample: "{\n  \"instruments\": [\n    {\n      \"name\": \"钢琴\",\n      \"\
+    type\": \"键盘乐器\"\n    },\n    {"
+  stream_chunks: 5
+  stream_ttfb_ms: 648
+  tested_at: '2026-06-08 18:58:44'
+dashscope/qwen3.5-27b:
+  provider: dashscope
+  model: qwen3.5-27b
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 18:58:49'
+dashscope/qwen3-coder-next:
+  provider: dashscope
+  model: qwen3-coder-next
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 18:58:54'
+dashscope/qwen3.5-397b-a17b:
+  provider: dashscope
+  model: qwen3.5-397b-a17b
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 18:58:58'
+dashscope/qwen3.5-plus-2026-02-15:
+  provider: dashscope
+  model: qwen3.5-plus-2026-02-15
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 18:59:02'
+dashscope/qwen3.5-plus:
+  provider: dashscope
+  model: qwen3.5-plus
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 18:59:07'
+dashscope/qwen3-asr-flash-realtime-2026-02-10:
+  provider: dashscope
+  model: qwen3-asr-flash-realtime-2026-02-10
+  available: false
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: 'Server error ''500 Internal Server Error'' for url ''https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions''
+
+    Fo'
+  tested_at: '2026-06-08 18:59:09'
+dashscope/MiniMax/MiniMax-M2.1:
+  provider: dashscope
+  model: MiniMax/MiniMax-M2.1
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 18:59:13'
+dashscope/MiniMax/MiniMax-M2.5:
+  provider: dashscope
+  model: MiniMax/MiniMax-M2.5
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 18:59:18'
+dashscope/kimi/kimi-k2.5:
+  provider: dashscope
+  model: kimi/kimi-k2.5
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 18:59:22'
+dashscope/qwen3-tts-vd-2026-01-26:
+  provider: dashscope
+  model: qwen3-tts-vd-2026-01-26
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  stream_chunks: 0
+  stream_ttfb_ms: 0
+  tested_at: '2026-06-08 18:59:28'
+dashscope/qwen3-tts-instruct-flash-2026-01-26:
+  provider: dashscope
+  model: qwen3-tts-instruct-flash-2026-01-26
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  stream_error: Client error '429 Too Many Requests' for url 'https://dashsc
+  tested_at: '2026-06-08 18:59:33'
+dashscope/qwen3-tts-instruct-flash:
+  provider: dashscope
+  model: qwen3-tts-instruct-flash
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  stream_chunks: 0
+  stream_ttfb_ms: 0
+  tested_at: '2026-06-08 18:59:39'
+dashscope/qwen3-tts-vc-2026-01-22:
+  provider: dashscope
+  model: qwen3-tts-vc-2026-01-22
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  stream_error: Client error '429 Too Many Requests' for url 'https://dashsc
+  tested_at: '2026-06-08 18:59:45'
+dashscope/glm-4.7:
+  provider: dashscope
+  model: glm-4.7
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 18:59:50'
+dashscope/qwen3-max:
+  provider: dashscope
+  model: qwen3-max
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 18:59:54'
+dashscope/qwen3-tts-instruct-flash-realtime-2026-01-22:
+  provider: dashscope
+  model: qwen3-tts-instruct-flash-realtime-2026-01-22
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  stream_error: Server error '500 Internal Server Error' for url 'https://da
+  tested_at: '2026-06-08 18:59:59'
+dashscope/qwen3-tts-instruct-flash-realtime:
+  provider: dashscope
+  model: qwen3-tts-instruct-flash-realtime
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '429 Too Many Requests' for url 'https://dashsc
+  tested_at: '2026-06-08 19:00:05'
+dashscope/qwen3-tts-vd-realtime-2026-01-15:
+  provider: dashscope
+  model: qwen3-tts-vd-realtime-2026-01-15
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  stream_error: Client error '429 Too Many Requests' for url 'https://dashsc
+  tested_at: '2026-06-08 19:00:09'
+dashscope/kimi-k2.5:
+  provider: dashscope
+  model: kimi-k2.5
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:00:14'
+dashscope/tongyi-xiaomi-analysis-flash:
+  provider: dashscope
+  model: tongyi-xiaomi-analysis-flash
+  available: true
+  tool_calling: true
+  tc_method: native
+  multi_turn_tc: false
+  chinese: true
+  vision: true
+  json_mode: true
+  streaming: true
+  reasoning: true
+  latency_ms: 487
+  error: null
+  probe_response: 'get_current_time({"city": "北京"})'
+  mt_issue: 'error: Client error ''400 Bad Request'' for url ''https://dashscope.al'
+  chinese_response: 和弦是由根音按三度叠置形成的三音或更多音组。
+  vision_response: I can't view or analyze images directly. Could you please de
+  json_sample: '{"instruments": [{"name": "小提琴", "type": "弦乐器"}, {"name": "萨克斯", "type":
+    "木管乐器"}'
+  stream_chunks: 5
+  stream_ttfb_ms: 201
+  reasoning_response: "进屋后摸灯泡温度：热为接通，冷分温热两组，再用打开/关闭观察光亮确定。  \n但需更精炼：进屋摸灯泡温度，热者为已开，再试开关看亮灭定对应。\
+    \  \n再简：进屋摸灯泡"
+  tested_at: '2026-06-08 19:00:20'
+dashscope/tongyi-xiaomi-analysis-pro:
+  provider: dashscope
+  model: tongyi-xiaomi-analysis-pro
+  available: true
+  tool_calling: true
+  tc_method: native
+  multi_turn_tc: false
+  chinese: true
+  vision: true
+  json_mode: true
+  streaming: true
+  reasoning: true
+  latency_ms: 595
+  error: null
+  probe_response: 'get_current_time({"city": "北京"})'
+  mt_issue: 'error: Client error ''400 Bad Request'' for url ''https://dashscope.al'
+  chinese_response: 和弦是三个或以上音按一定关系同时发声。
+  vision_response: Blue
+  json_sample: '{"instruments": [{"name": "钢琴", "type": "键盘乐器"}, {"name": "小提琴", "type":
+    "弦乐器"},'
+  stream_chunks: 5
+  stream_ttfb_ms: 531
+  reasoning_response: 先开一盏等5分钟关，再开另一盏进屋，亮者对应，摸热者对应，冷者对应。
+  tested_at: '2026-06-08 19:00:27'
+dashscope/siliconflow/deepseek-v3.2:
+  provider: dashscope
+  model: siliconflow/deepseek-v3.2
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:00:31'
+dashscope/siliconflow/deepseek-v3.1-terminus:
+  provider: dashscope
+  model: siliconflow/deepseek-v3.1-terminus
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:00:36'
+dashscope/siliconflow/deepseek-v3-0324:
+  provider: dashscope
+  model: siliconflow/deepseek-v3-0324
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:00:40'
+dashscope/siliconflow/deepseek-r1-0528:
+  provider: dashscope
+  model: siliconflow/deepseek-r1-0528
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:00:44'
+dashscope/MiniMax-M2.1:
+  provider: dashscope
+  model: MiniMax-M2.1
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:00:49'
+dashscope/qwen3-vl-flash-2026-01-22:
+  provider: dashscope
+  model: qwen3-vl-flash-2026-01-22
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '429 Too Many Requests' for url 'https://dashsc
+  tested_at: '2026-06-08 19:00:53'
+dashscope/qwen3-max-2026-01-23:
+  provider: dashscope
+  model: qwen3-max-2026-01-23
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:00:57'
+dashscope/qwen3-tts-vc-realtime-2026-01-15:
+  provider: dashscope
+  model: qwen3-tts-vc-realtime-2026-01-15
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  stream_error: Client error '429 Too Many Requests' for url 'https://dashsc
+  tested_at: '2026-06-08 19:01:02'
+dashscope/qwen-image-edit-max-2026-01-16:
+  provider: dashscope
+  model: qwen-image-edit-max-2026-01-16
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  stream_error: Client error '429 Too Many Requests' for url 'https://dashsc
+  tested_at: '2026-06-08 19:01:06'
+dashscope/qwen-image-edit-max:
+  provider: dashscope
+  model: qwen-image-edit-max
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  stream_error: Client error '429 Too Many Requests' for url 'https://dashsc
+  tested_at: '2026-06-08 19:01:10'
+dashscope/qwen-image-plus-2026-01-09:
+  provider: dashscope
+  model: qwen-image-plus-2026-01-09
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:01:15'
+dashscope/qwen-flash-character:
+  provider: dashscope
+  model: qwen-flash-character
+  available: true
+  tool_calling: true
+  tc_method: native
+  multi_turn_tc: false
+  chinese: true
+  vision: false
+  json_mode: true
+  streaming: true
+  reasoning: true
+  latency_ms: 1391
+  error: null
+  probe_response: 'get_current_time({"city": "北京"})'
+  mt_issue: 'error: Client error ''400 Bad Request'' for url ''https://dashscope.al'
+  chinese_response: 三个或以上音按三度叠置形成的音组。
+  vision_error: not_supported
+  json_sample: '{"instruments": [{"name": "钢琴", "type": "键盘乐器"}, {"name": "吉他", "type":
+    "弹拨乐器"},'
+  stream_chunks: 5
+  stream_ttfb_ms: 329
+  reasoning_response: 先开两盏灯，过一会儿关掉其中一盏，进屋根据亮暗和温度就能判断了。
+  tested_at: '2026-06-08 19:01:21'
+dashscope/qwen-image-max-2025-12-30:
+  provider: dashscope
+  model: qwen-image-max-2025-12-30
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  stream_error: Client error '429 Too Many Requests' for url 'https://dashsc
+  tested_at: '2026-06-08 19:01:26'
+dashscope/qwen-image-max:
+  provider: dashscope
+  model: qwen-image-max
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  stream_error: Client error '429 Too Many Requests' for url 'https://dashsc
+  tested_at: '2026-06-08 19:01:30'
+dashscope/qwen-flash:
+  provider: dashscope
+  model: qwen-flash
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:01:34'
+dashscope/z-image-turbo:
+  provider: dashscope
+  model: z-image-turbo
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  stream_error: Client error '429 Too Many Requests' for url 'https://dashsc
+  tested_at: '2026-06-08 19:01:38'
+dashscope/qwen3-vl-plus-2025-12-19:
+  provider: dashscope
+  model: qwen3-vl-plus-2025-12-19
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:01:43'
+dashscope/qwen3-tts-vd-realtime-2025-12-16:
+  provider: dashscope
+  model: qwen3-tts-vd-realtime-2025-12-16
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:01:47'
+dashscope/qwen-image-edit-plus-2025-12-15:
+  provider: dashscope
+  model: qwen-image-edit-plus-2025-12-15
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  stream_error: Client error '429 Too Many Requests' for url 'https://dashsc
+  tested_at: '2026-06-08 19:01:51'
+dashscope/deepseek-v3.2:
+  provider: dashscope
+  model: deepseek-v3.2
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:01:56'
+dashscope/qwen3-omni-flash-2025-12-01:
+  provider: dashscope
+  model: qwen3-omni-flash-2025-12-01
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:02:00'
+dashscope/qwen3-omni-flash-realtime-2025-12-01:
+  provider: dashscope
+  model: qwen3-omni-flash-realtime-2025-12-01
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:02:04'
+dashscope/qwen3-livetranslate-flash-2025-12-01:
+  provider: dashscope
+  model: qwen3-livetranslate-flash-2025-12-01
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:02:09'
+dashscope/qwen3-livetranslate-flash:
+  provider: dashscope
+  model: qwen3-livetranslate-flash
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:02:13'
+dashscope/qwen-plus-2025-12-01:
+  provider: dashscope
+  model: qwen-plus-2025-12-01
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:02:17'
+dashscope/qwen3-tts-vc-realtime-2025-11-27:
+  provider: dashscope
+  model: qwen3-tts-vc-realtime-2025-11-27
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:02:22'
+dashscope/qwen3-tts-flash-2025-11-27:
+  provider: dashscope
+  model: qwen3-tts-flash-2025-11-27
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:02:26'
+dashscope/qwen3-tts-flash-realtime-2025-11-27:
+  provider: dashscope
+  model: qwen3-tts-flash-realtime-2025-11-27
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  stream_error: Client error '429 Too Many Requests' for url 'https://dashsc
+  tested_at: '2026-06-08 19:02:30'
+dashscope/qwen-plus-2025-11-05:
+  provider: dashscope
+  model: qwen-plus-2025-11-05
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:02:34'
+dashscope/qwen-mt-lite:
+  provider: dashscope
+  model: qwen-mt-lite
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:02:39'
+dashscope/qwen-vl-ocr-2025-11-20:
+  provider: dashscope
+  model: qwen-vl-ocr-2025-11-20
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:02:43'
+dashscope/kimi-k2-thinking:
+  provider: dashscope
+  model: kimi-k2-thinking
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:02:47'
+dashscope/qwen-mt-flash:
+  provider: dashscope
+  model: qwen-mt-flash
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:02:52'
+dashscope/gui-plus:
+  provider: dashscope
+  model: gui-plus
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:02:56'
+dashscope/qwen-image-edit-plus-2025-10-30:
+  provider: dashscope
+  model: qwen-image-edit-plus-2025-10-30
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  stream_error: Client error '429 Too Many Requests' for url 'https://dashsc
+  tested_at: '2026-06-08 19:03:00'
+dashscope/qwen-image-edit-plus:
+  provider: dashscope
+  model: qwen-image-edit-plus
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:03:05'
+dashscope/qwen-deep-search-planning:
+  provider: dashscope
+  model: qwen-deep-search-planning
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:03:09'
+dashscope/qwen3-asr-flash-realtime-2025-10-27:
+  provider: dashscope
+  model: qwen3-asr-flash-realtime-2025-10-27
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:03:13'
+dashscope/qwen3-asr-flash-realtime:
+  provider: dashscope
+  model: qwen3-asr-flash-realtime
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:03:17'
+dashscope/qwen3-vl-flash:
+  provider: dashscope
+  model: qwen3-vl-flash
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:03:22'
+dashscope/qwen3-vl-flash-2025-10-15:
+  provider: dashscope
+  model: qwen3-vl-flash-2025-10-15
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:03:26'
+dashscope/qwen3-tts-flash:
+  provider: dashscope
+  model: qwen3-tts-flash
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:03:30'
+dashscope/qwen3-tts-flash-2025-09-18:
+  provider: dashscope
+  model: qwen3-tts-flash-2025-09-18
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:03:34'
+dashscope/qwen3-tts-flash-realtime-2025-09-18:
+  provider: dashscope
+  model: qwen3-tts-flash-realtime-2025-09-18
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:03:39'
+dashscope/qwen3-tts-flash-realtime:
+  provider: dashscope
+  model: qwen3-tts-flash-realtime
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  stream_error: Client error '429 Too Many Requests' for url 'https://dashsc
+  tested_at: '2026-06-08 19:03:43'
+dashscope/qwen3-omni-flash-realtime:
+  provider: dashscope
+  model: qwen3-omni-flash-realtime
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:03:47'
+dashscope/qwen3-omni-flash:
+  provider: dashscope
+  model: qwen3-omni-flash
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:03:52'
+dashscope/qwen3-omni-flash-2025-09-15:
+  provider: dashscope
+  model: qwen3-omni-flash-2025-09-15
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:03:56'
+dashscope/qwen3-omni-flash-realtime-2025-09-15:
+  provider: dashscope
+  model: qwen3-omni-flash-realtime-2025-09-15
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:04:00'
+dashscope/qwen3-s2s-flash-realtime-2025-09-22:
+  provider: dashscope
+  model: qwen3-s2s-flash-realtime-2025-09-22
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:04:05'
+dashscope/qwen3-livetranslate-flash-realtime:
+  provider: dashscope
+  model: qwen3-livetranslate-flash-realtime
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:04:09'
+dashscope/qwen3-livetranslate-flash-realtime-2025-09-22:
+  provider: dashscope
+  model: qwen3-livetranslate-flash-realtime-2025-09-22
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:04:13'
+dashscope/qwen-turbo-2024-11-01:
+  provider: dashscope
+  model: qwen-turbo-2024-11-01
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  stream_error: Client error '429 Too Many Requests' for url 'https://dashsc
+  tested_at: '2026-06-08 19:04:18'
+dashscope/qwen-plus-2025-01-25:
+  provider: dashscope
+  model: qwen-plus-2025-01-25
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  stream_error: Client error '429 Too Many Requests' for url 'https://dashsc
+  tested_at: '2026-06-08 19:04:22'
+dashscope/qwq-plus:
+  provider: dashscope
+  model: qwq-plus
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:04:26'
+dashscope/qvq-max:
+  provider: dashscope
+  model: qvq-max
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:04:31'
+dashscope/qwen-omni-turbo:
+  provider: dashscope
+  model: qwen-omni-turbo
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:04:35'
+dashscope/qwen-plus-2025-04-28:
+  provider: dashscope
+  model: qwen-plus-2025-04-28
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  stream_error: Client error '429 Too Many Requests' for url 'https://dashsc
+  tested_at: '2026-06-08 19:04:39'
+dashscope/qwen3-235b-a22b-instruct-2507:
+  provider: dashscope
+  model: qwen3-235b-a22b-instruct-2507
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:04:44'
+dashscope/qwen3-235b-a22b-thinking-2507:
+  provider: dashscope
+  model: qwen3-235b-a22b-thinking-2507
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:04:48'
+dashscope/qwen3-30b-a3b-thinking-2507:
+  provider: dashscope
+  model: qwen3-30b-a3b-thinking-2507
+  available: false
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: 'Server error ''500 Internal Server Error'' for url ''https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions''
+
+    Fo'
+  tested_at: '2026-06-08 19:04:50'
+dashscope/qwen3-30b-a3b-instruct-2507:
+  provider: dashscope
+  model: qwen3-30b-a3b-instruct-2507
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:04:55'
+dashscope/qwen3-coder-flash:
+  provider: dashscope
+  model: qwen3-coder-flash
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:04:59'
+dashscope/qwen3-coder-plus-2025-09-23:
+  provider: dashscope
+  model: qwen3-coder-plus-2025-09-23
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  stream_error: Client error '429 Too Many Requests' for url 'https://dashsc
+  tested_at: '2026-06-08 19:05:03'
+dashscope/qwen3-max-2025-09-23:
+  provider: dashscope
+  model: qwen3-max-2025-09-23
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:05:07'
+dashscope/qwen3-vl-plus:
+  provider: dashscope
+  model: qwen3-vl-plus
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:05:12'
+dashscope/qwen3-vl-plus-2025-09-23:
+  provider: dashscope
+  model: qwen3-vl-plus-2025-09-23
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  stream_error: Client error '429 Too Many Requests' for url 'https://dashsc
+  tested_at: '2026-06-08 19:05:16'
+dashscope/qwen-plus-2025-09-11:
+  provider: dashscope
+  model: qwen-plus-2025-09-11
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  stream_error: Client error '429 Too Many Requests' for url 'https://dashsc
+  tested_at: '2026-06-08 19:05:20'
+dashscope/qwen3-next-80b-a3b-thinking:
+  provider: dashscope
+  model: qwen3-next-80b-a3b-thinking
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:05:25'
+dashscope/qwen3-next-80b-a3b-instruct:
+  provider: dashscope
+  model: qwen3-next-80b-a3b-instruct
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:05:29'
+dashscope/qwen3-max-preview:
+  provider: dashscope
+  model: qwen3-max-preview
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:05:33'
+dashscope/deepseek-v3.1:
+  provider: dashscope
+  model: deepseek-v3.1
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:05:38'
+dashscope/qwen3-coder-plus:
+  provider: dashscope
+  model: qwen3-coder-plus
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:05:42'
+dashscope/qwen3-coder-plus-2025-07-22:
+  provider: dashscope
+  model: qwen3-coder-plus-2025-07-22
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:05:46'
+dashscope/qwen-plus-2025-07-14:
+  provider: dashscope
+  model: qwen-plus-2025-07-14
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:05:51'
+dashscope/qwen3-coder-480b-a35b-instruct:
+  provider: dashscope
+  model: qwen3-coder-480b-a35b-instruct
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:05:55'
+dashscope/qwen-mt-turbo:
+  provider: dashscope
+  model: qwen-mt-turbo
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:05:59'
+dashscope/qwen-mt-plus:
+  provider: dashscope
+  model: qwen-mt-plus
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:06:04'
+dashscope/qwen-tts-2025-05-22:
+  provider: dashscope
+  model: qwen-tts-2025-05-22
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:06:08'
+dashscope/qvq-plus:
+  provider: dashscope
+  model: qvq-plus
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  stream_error: Client error '429 Too Many Requests' for url 'https://dashsc
+  tested_at: '2026-06-08 19:06:12'
+dashscope/qwen3-32b:
+  provider: dashscope
+  model: qwen3-32b
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:06:17'
+dashscope/qwen3-30b-a3b:
+  provider: dashscope
+  model: qwen3-30b-a3b
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:06:21'
+dashscope/qwen3-235b-a22b:
+  provider: dashscope
+  model: qwen3-235b-a22b
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:06:25'
+dashscope/qwen3-14b:
+  provider: dashscope
+  model: qwen3-14b
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:06:30'
+dashscope/qwen3-8b:
+  provider: dashscope
+  model: qwen3-8b
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:06:35'
+dashscope/deepseek-v3:
+  provider: dashscope
+  model: deepseek-v3
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:06:39'
+dashscope/deepseek-r1-distill-llama-70b:
+  provider: dashscope
+  model: deepseek-r1-distill-llama-70b
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:06:43'
+dashscope/deepseek-r1-distill-qwen-32b:
+  provider: dashscope
+  model: deepseek-r1-distill-qwen-32b
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:06:47'
+dashscope/deepseek-r1-distill-qwen-14b:
+  provider: dashscope
+  model: deepseek-r1-distill-qwen-14b
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:06:52'
+dashscope/deepseek-r1-distill-llama-8b:
+  provider: dashscope
+  model: deepseek-r1-distill-llama-8b
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:06:56'
+dashscope/deepseek-r1-distill-qwen-1.5b:
+  provider: dashscope
+  model: deepseek-r1-distill-qwen-1.5b
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:07:00'
+dashscope/deepseek-r1-distill-qwen-7b:
+  provider: dashscope
+  model: deepseek-r1-distill-qwen-7b
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:07:05'
+dashscope/deepseek-r1:
+  provider: dashscope
+  model: deepseek-r1
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:07:09'
+dashscope/qwen1.5-7b-chat:
+  provider: dashscope
+  model: qwen1.5-7b-chat
+  available: false
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: 'Client error ''404 Not Found'' for url ''https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions''
+
+    For more infor'
+  tested_at: '2026-06-08 19:07:11'
+dashscope/qwen-vl-ocr-latest:
+  provider: dashscope
+  model: qwen-vl-ocr-latest
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:07:15'
+dashscope/qwen-vl-ocr:
+  provider: dashscope
+  model: qwen-vl-ocr
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:07:20'
+dashscope/qwen-coder-plus-1106:
+  provider: dashscope
+  model: qwen-coder-plus-1106
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:07:24'
+dashscope/qwen-coder-plus:
+  provider: dashscope
+  model: qwen-coder-plus
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:07:28'
+dashscope/qwen2.5-1.5b-instruct:
+  provider: dashscope
+  model: qwen2.5-1.5b-instruct
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:07:33'
+dashscope/qwen2.5-math-1.5b-instruct:
+  provider: dashscope
+  model: qwen2.5-math-1.5b-instruct
+  available: false
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: 'Client error ''404 Not Found'' for url ''https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions''
+
+    For more infor'
+  tested_at: '2026-06-08 19:07:35'
+dashscope/qwen-math-plus:
+  provider: dashscope
+  model: qwen-math-plus
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:07:39'
+dashscope/qwen-plus-latest:
+  provider: dashscope
+  model: qwen-plus-latest
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:07:44'
+dashscope/qwen-math-turbo:
+  provider: dashscope
+  model: qwen-math-turbo
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:07:48'
+dashscope/qwen-math-plus-latest:
+  provider: dashscope
+  model: qwen-math-plus-latest
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:07:52'
+dashscope/qwen-math-plus-0919:
+  provider: dashscope
+  model: qwen-math-plus-0919
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  stream_error: Client error '429 Too Many Requests' for url 'https://dashsc
+  tested_at: '2026-06-08 19:07:57'
+dashscope/qwen-coder-turbo:
+  provider: dashscope
+  model: qwen-coder-turbo
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:08:01'
+dashscope/qwen2.5-0.5b-instruct:
+  provider: dashscope
+  model: qwen2.5-0.5b-instruct
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:08:05'
+dashscope/qwen-turbo-0919:
+  provider: dashscope
+  model: qwen-turbo-0919
+  available: false
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: 'Client error ''404 Not Found'' for url ''https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions''
+
+    For more infor'
+  tested_at: '2026-06-08 19:08:07'
+dashscope/qwen2-1.5b-instruct:
+  provider: dashscope
+  model: qwen2-1.5b-instruct
+  available: false
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: 'Client error ''404 Not Found'' for url ''https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions''
+
+    For more infor'
+  tested_at: '2026-06-08 19:08:09'
+dashscope/qwen2-7b-instruct:
+  provider: dashscope
+  model: qwen2-7b-instruct
+  available: false
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: 'Client error ''404 Not Found'' for url ''https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions''
+
+    For more infor'
+  tested_at: '2026-06-08 19:08:12'
+dashscope/qwen2-57b-a14b-instruct:
+  provider: dashscope
+  model: qwen2-57b-a14b-instruct
+  available: false
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: 'Client error ''404 Not Found'' for url ''https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions''
+
+    For more infor'
+  tested_at: '2026-06-08 19:08:14'
+dashscope/qwen2-0.5b-instruct:
+  provider: dashscope
+  model: qwen2-0.5b-instruct
+  available: false
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: 'Client error ''404 Not Found'' for url ''https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions''
+
+    For more infor'
+  tested_at: '2026-06-08 19:08:16'
+dashscope/qwen-long:
+  provider: dashscope
+  model: qwen-long
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:08:20'
+dashscope/qwen-vl-max:
+  provider: dashscope
+  model: qwen-vl-max
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:08:24'
+dashscope/qwen-vl-plus:
+  provider: dashscope
+  model: qwen-vl-plus
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:08:28'
+dashscope/qwen1.5-110b-chat:
+  provider: dashscope
+  model: qwen1.5-110b-chat
+  available: false
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: 'Client error ''404 Not Found'' for url ''https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions''
+
+    For more infor'
+  tested_at: '2026-06-08 19:08:31'
+dashscope/codeqwen1.5-7b-chat:
+  provider: dashscope
+  model: codeqwen1.5-7b-chat
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:08:35'
+dashscope/qwen-72b-chat:
+  provider: dashscope
+  model: qwen-72b-chat
+  available: false
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: 'Client error ''404 Not Found'' for url ''https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions''
+
+    For more infor'
+  tested_at: '2026-06-08 19:08:37'
+dashscope/qwen-7b-chat:
+  provider: dashscope
+  model: qwen-7b-chat
+  available: false
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: 'Client error ''404 Not Found'' for url ''https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions''
+
+    For more infor'
+  tested_at: '2026-06-08 19:08:39'
+dashscope/qwen-14b-chat:
+  provider: dashscope
+  model: qwen-14b-chat
+  available: false
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: 'Client error ''404 Not Found'' for url ''https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions''
+
+    For more infor'
+  tested_at: '2026-06-08 19:08:41'
+dashscope/qwen-1.8b-chat:
+  provider: dashscope
+  model: qwen-1.8b-chat
+  available: false
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: 'Client error ''404 Not Found'' for url ''https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions''
+
+    For more infor'
+  tested_at: '2026-06-08 19:08:43'
+dashscope/qwen-1.8b-longcontext-chat:
+  provider: dashscope
+  model: qwen-1.8b-longcontext-chat
+  available: false
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: 'Client error ''404 Not Found'' for url ''https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions''
+
+    For more infor'
+  tested_at: '2026-06-08 19:08:45'
+dashscope/qwen1.5-0.5b-chat:
+  provider: dashscope
+  model: qwen1.5-0.5b-chat
+  available: false
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: 'Client error ''404 Not Found'' for url ''https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions''
+
+    For more infor'
+  tested_at: '2026-06-08 19:08:47'
+dashscope/qwen1.5-14b-chat:
+  provider: dashscope
+  model: qwen1.5-14b-chat
+  available: false
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: 'Client error ''404 Not Found'' for url ''https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions''
+
+    For more infor'
+  tested_at: '2026-06-08 19:08:49'
+dashscope/qwen1.5-1.8b-chat:
+  provider: dashscope
+  model: qwen1.5-1.8b-chat
+  available: false
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: 'Client error ''404 Not Found'' for url ''https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions''
+
+    For more infor'
+  tested_at: '2026-06-08 19:08:51'
+dashscope/qwen1.5-32b-chat:
+  provider: dashscope
+  model: qwen1.5-32b-chat
+  available: false
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: 'Client error ''404 Not Found'' for url ''https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions''
+
+    For more infor'
+  tested_at: '2026-06-08 19:08:53'
+dashscope/qwen1.5-72b-chat:
+  provider: dashscope
+  model: qwen1.5-72b-chat
+  available: false
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: 'Client error ''404 Not Found'' for url ''https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions''
+
+    For more infor'
+  tested_at: '2026-06-08 19:08:55'
+dashscope/qwen-max-longcontext:
+  provider: dashscope
+  model: qwen-max-longcontext
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:09:00'
+dashscope/qwen-max-1201:
+  provider: dashscope
+  model: qwen-max-1201
+  available: false
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: rate_limited (429)
+  tested_at: '2026-06-08 19:09:02'
+dashscope/qwen-turbo:
+  provider: dashscope
+  model: qwen-turbo
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:09:06'
+dashscope/qwen-max:
+  provider: dashscope
+  model: qwen-max
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:09:10'
+dashscope/qwen-max-0107:
+  provider: dashscope
+  model: qwen-max-0107
+  available: false
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: 'Client error ''404 Not Found'' for url ''https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions''
+
+    For more infor'
+  tested_at: '2026-06-08 19:09:12'
+dashscope/qwen-plus:
+  provider: dashscope
+  model: qwen-plus
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://dashscope.aliyuncs.com/compatibl'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://dashscope.aliyuncs.com/compatibl
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://dashscope.al
+  tested_at: '2026-06-08 19:09:17'
+github/meta-llama-3.1-70b-instruct:
+  provider: github
+  model: meta-llama-3.1-70b-instruct
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://models.inference.ai.azure.com/ch'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://models.inference.ai.azure.com/ch
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://models.infer
+  tested_at: '2026-06-10 11:12:11'
+google/gemini-2.5-flash:
+  provider: google
+  model: gemini-2.5-flash
+  available: true
+  tool_calling: true
+  tc_method: native
+  multi_turn_tc: true
+  chinese: true
+  vision: true
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 1567
+  error: null
+  probe_response: 'get_current_time({"city": "北京"})'
+  mt_response: 北京现在时间是2026年5月13日16:00:00 CST。
+  chinese_response: 多个
+  vision_response: Red
+  json_sample: "{\n  \"instruments\": [\n    {\n      \"name\": \"Guitar\",\n    \
+    \  \"type\": \"String\"\n    },"
+  stream_chunks: 0
+  stream_ttfb_ms: 0
+  reasoning_response: 开1号开10
+  tested_at: '2026-06-10 11:22:30'
+google/gemini-3-pro-image:
+  provider: google
+  model: gemini-3-pro-image
+  available: false
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: rate_limited (429)
+  tested_at: '2026-06-10 11:18:55'
+google/gemini-3.1-flash-image:
+  provider: google
+  model: gemini-3.1-flash-image
+  available: false
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: rate_limited (429)
+  tested_at: '2026-06-10 11:19:02'
+google/gemini-3.5-flash:
+  provider: google
+  model: gemini-3.5-flash
+  available: true
+  tool_calling: true
+  tc_method: native
+  multi_turn_tc: true
+  chinese: true
+  vision: false
+  json_mode: false
+  streaming: true
+  reasoning: false
+  latency_ms: 1955
+  error: null
+  probe_response: 'get_current_time({"city": "北京"})'
+  mt_response: 北京现在是 2026年5月13日 下午 4:00。
+  chinese_response: 三个或以上
+  json_sample: "{\n  \"instruments"
+  stream_chunks: 2
+  stream_ttfb_ms: 4326
+  reasoning_response: 打开开关A
+  tested_at: '2026-06-10 11:19:17'
+google/antigravity-preview-05-2026:
+  provider: google
+  model: antigravity-preview-05-2026
+  available: false
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: rate_limited (429)
+  tested_at: '2026-06-10 11:19:26'
+spark/xopqwen36v35b:
+  provider: spark
+  model: xopqwen36v35b
+  available: true
+  tool_calling: true
+  tc_method: native
+  multi_turn_tc: true
+  chinese: true
+  vision: true
+  json_mode: true
+  streaming: true
+  reasoning: false
+  latency_ms: 2898
+  error: null
+  probe_response: 'get_current_time({"city": "北京"})'
+  mt_response: 北京现在是2026年5月13日16:00:00（CST）。
+  chinese_response: 三个或三个以上音按三度关系叠置。
+  vision_response: ' Red'
+  json_sample: "{\n  \"instruments\": [\n    {\n      \"name\": \"钢琴\",\n      \"\
+    type\": \"键盘乐器\"\n    },\n    {"
+  stream_chunks: 5
+  stream_ttfb_ms: 9149
+  tested_at: '2026-06-12 15:47:58'
+spark/xopqwen35v35b:
+  provider: spark
+  model: xopqwen35v35b
+  available: true
+  tool_calling: true
+  tc_method: native
+  multi_turn_tc: true
+  chinese: true
+  vision: true
+  json_mode: true
+  streaming: true
+  reasoning: true
+  latency_ms: 1089
+  error: null
+  probe_response: 'get_current_time({"city": "北京"})'
+  mt_response: 北京现在是 2026年5月13日 16:00:00。
+  chinese_response: 三个或更多音符同时发声的组合。
+  vision_response: ' Red'
+  json_sample: '{"instruments": [{"name": "钢琴", "type": "键盘乐器"}, {"name": "小提琴", "type":
+    "弦乐器"},'
+  stream_chunks: 5
+  stream_ttfb_ms: 377
+  reasoning_response: 先开一开关久后关，开另一开关，进屋：亮灯、热灯、灭灯对应三开关。
+  tested_at: '2026-06-12 15:33:09'
+agnes/agnes-2.0-flash:
+  provider: agnes
+  model: agnes-2.0-flash
+  available: true
+  tool_calling: true
+  tc_method: native
+  multi_turn_tc: true
+  chinese: true
+  vision: true
+  json_mode: true
+  streaming: true
+  reasoning: true
+  latency_ms: 7819
+  error: unavailable (503)
+  probe_response: 'get_current_time({"city": "北京"})'
+  mt_response: 北京现在是 2026年5月13日 16:00:00。
+  chinese_response: 同时响起的三个或更多音高。
+  vision_response: Red
+  json_sample: "{\n  \"instruments\": [\n    {\n      \"name\": \"钢琴\",\n      \"\
+    type\": \"键盘乐器\"\n    },\n    {"
+  stream_chunks: 4
+  stream_ttfb_ms: 7584
+  reasoning_response: 开一灯久后关，开二灯亮，摸三灯热。
+  tested_at: '2026-07-14 12:55:13'
+agnes/agnes-image-2.1-flash:
+  provider: agnes
+  model: agnes-image-2.1-flash
+  available: false
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: 'Client error ''404 Not Found'' for url ''https://apihub.agnes-ai.com/v1/chat/completions''
+
+    For more information check: https'
+  tested_at: '2026-07-02 11:57:12'
+agnes/agnes-video-v2.0:
+  provider: agnes
+  model: agnes-video-v2.0
+  available: false
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: 'Client error ''404 Not Found'' for url ''https://apihub.agnes-ai.com/v1/chat/completions''
+
+    For more information check: https'
+  tested_at: '2026-07-02 10:11:47'
+agnes/agnes-image-2.0-flash:
+  provider: agnes
+  model: agnes-image-2.0-flash
+  available: false
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: 'Client error ''404 Not Found'' for url ''https://apihub.agnes-ai.com/v1/chat/completions''
+
+    For more information check: https'
+  tested_at: '2026-07-02 10:13:44'
+rapid_mlx/mlx-community/Kokoro-82M-bf16:
+  available: false
+  error: unavailable (503)
+  tested_at: '2026-07-27 11:29:21'

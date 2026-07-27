@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.get("/api/logs")
+@router.get("/api/logs", summary="获取日志")
 async def get_logs(after: int = 0, limit: int = 200):
     """获取最近的日志条目（支持增量拉取）"""
     handler = _get_log_buffer()
@@ -31,7 +31,7 @@ async def get_logs(after: int = 0, limit: int = 200):
     return {"entries": entries, "latest_seq": latest_seq}
 
 
-@router.delete("/api/logs/clear")
+@router.delete("/api/logs/clear", summary="清空日志")
 async def clear_logs():
     """清空日志缓冲"""
     handler = _get_log_buffer()
@@ -59,7 +59,7 @@ def _tail_file(path, n: int, chunk_size: int = 8192) -> list[str]:
         return buf.decode("utf-8", errors="replace").splitlines()[-n:]
 
 
-@router.get("/api/logs/history")
+@router.get("/api/logs/history", summary="查询历史日志")
 async def get_log_history(date: str = "", tail: int = 500):
     """查询历史日志文件"""
     log_dir = Path("logs")
@@ -97,14 +97,14 @@ async def get_log_history(date: str = "", tail: int = 500):
         return JSONResponse(status_code=500, content={"detail": "读取日志文件失败"})
 
 
-@router.get("/api/logs/level")
+@router.get("/api/logs/level", summary="获取日志级别")
 async def get_log_level():
     """获取当前日志级别"""
     level = logging.getLogger().level
     return {"level": logging.getLevelName(level)}
 
 
-@router.post("/api/logs/level")
+@router.post("/api/logs/level", summary="切换日志级别")
 async def set_log_level(level: str):
     """动态切换日志级别"""
     level_upper = level.upper()

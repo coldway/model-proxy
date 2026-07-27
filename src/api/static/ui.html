@@ -499,7 +499,7 @@
                             <tr><td class="intg-label">绑定模型失败</td><td>自动降级到正常路由重试其他模型，成功后更新绑定</td></tr>
                             <tr><td class="intg-label">绑定过期</td><td>1 小时后自动失效，下次请求重新路由并绑定</td></tr>
                             <tr><td class="intg-label">不传 session_id</td><td>按正常路由逻辑处理（auto / 指定模型）</td></tr>
-                            <tr><td class="intg-label">管理 API</td><td><code class="intg-code">GET /api/session-bindings</code> 查看 | <code class="intg-code">DELETE /api/session-bindings/clear</code> 重置</td></tr>
+                            <tr><td class="intg-label">管理 API</td><td><code class="intg-code">GET /mp/api/session-bindings</code> 查看 | <code class="intg-code">DELETE /mp/api/session-bindings/clear</code> 重置</td></tr>
                         </table>
                     </section>
 
@@ -525,7 +525,7 @@
                             <tr><td class="intg-label">行为</td><td>记录触发 413 的 payload 大小为该模型上限；相同/更大 payload 自动跳过该模型</td></tr>
                             <tr><td class="intg-label">收敛</td><td>更小的 payload 再次 413 → 上限自动下调；成功处理更大 payload → 自动清除限制</td></tr>
                             <tr><td class="intg-label">auto 模式</td><td>自动切换到 payload 上限更高的其他模型，对调用方透明</td></tr>
-                            <tr><td class="intg-label">管理 API</td><td><code class="intg-code">GET /api/payload-limits</code> 查看 | <code class="intg-code">DELETE /api/payload-limits/clear</code> 重置</td></tr>
+                            <tr><td class="intg-label">管理 API</td><td><code class="intg-code">GET /mp/api/payload-limits</code> 查看 | <code class="intg-code">DELETE /mp/api/payload-limits/clear</code> 重置</td></tr>
                         </table>
                         <p style="font-size:.78rem;color:var(--text-muted);margin-top:6px">
                             持久化到 <code class="intg-code">data/payload_limits.yaml</code>，服务重启后自动加载。

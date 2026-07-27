@@ -38,7 +38,7 @@ class TestAPIEndpoints:
 
     @pytest.mark.asyncio
     async def test_config_endpoint(self, client):
-        resp = await client.get("/api/config")
+        resp = await client.get("/mp/api/config")
         assert resp.status_code == 200
         data = resp.json()
         assert "providers" in data
@@ -49,7 +49,7 @@ class TestAPIEndpoints:
 
     @pytest.mark.asyncio
     async def test_discovery_endpoint(self, client):
-        resp = await client.get("/api/discovery")
+        resp = await client.get("/mp/api/discovery")
         assert resp.status_code == 200
         data = resp.json()
         assert len(data) >= 3
@@ -58,7 +58,7 @@ class TestAPIEndpoints:
 
     @pytest.mark.asyncio
     async def test_ui_panel_accessible(self, client):
-        resp = await client.get("/ui")
+        resp = await client.get("/mp/ui")
         assert resp.status_code == 200
         assert "Model Proxy" in resp.text
 
@@ -75,4 +75,4 @@ class TestAPIEndpoints:
     async def test_root_redirects_to_ui(self, client):
         resp = await client.get("/", follow_redirects=False)
         assert resp.status_code == 200
-        assert "/ui" in resp.text
+        assert "/mp/ui" in resp.text

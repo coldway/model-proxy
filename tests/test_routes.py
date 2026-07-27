@@ -24,7 +24,7 @@ def client(app):
 
 class TestHealthCheck:
     def test_health_returns_ok(self, client: TestClient):
-        resp = client.get("/health")
+        resp = client.get("/mp/health")
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "ok"
@@ -34,7 +34,7 @@ class TestRootRedirect:
     def test_root_redirects_to_ui(self, client: TestClient):
         resp = client.get("/", follow_redirects=False)
         assert resp.status_code == 200
-        assert "/ui" in resp.text
+        assert "/mp/ui" in resp.text
 
 
 class TestStripThinking:

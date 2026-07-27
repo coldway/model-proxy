@@ -40,7 +40,7 @@ class TestAdminAuth:
     async def test_ui_accessible_without_token(self, app_with_token):
         transport = ASGITransport(app=app_with_token)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
-            resp = await client.get("/ui")
+            resp = await client.get("/mp/ui")
             assert resp.status_code == 200
 
     @pytest.mark.asyncio
@@ -54,7 +54,7 @@ class TestAdminAuth:
     async def test_api_requires_token(self, app_with_token):
         transport = ASGITransport(app=app_with_token)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
-            resp = await client.get("/api/config")
+            resp = await client.get("/mp/api/config")
             assert resp.status_code == 401
 
     @pytest.mark.asyncio
@@ -62,7 +62,7 @@ class TestAdminAuth:
         transport = ASGITransport(app=app_with_token)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             resp = await client.get(
-                "/api/config",
+                "/mp/api/config",
                 headers={"Authorization": "Bearer test-secret-token"},
             )
             assert resp.status_code == 200
@@ -87,12 +87,12 @@ class TestAdminAuth:
         transport = ASGITransport(app=app_with_token)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             resp = await client.get(
-                "/api/config",
+                "/mp/api/config",
                 headers={"Authorization": "bearer test-secret-token"},
             )
             assert resp.status_code == 200
             resp = await client.get(
-                "/api/config",
+                "/mp/api/config",
                 headers={"Authorization": "BEARER test-secret-token"},
             )
             assert resp.status_code == 200

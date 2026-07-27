@@ -40,10 +40,10 @@ python main.py
 ### 架构
 
 ```
-客户端请求 → Caddy (:80) → Docker 容器 (model-proxy:8000)
-                                  ↓
-                         conf/config.yaml (volume 挂载)
-                         data/ (持久化目录)
+客户端请求 → Caddy 容器 (:443, HTTPS) ──personal_proxy 网络──→ model-proxy 容器 (:8000)
+                                                                       ↓
+                                                              conf/config.yaml (volume 挂载)
+                                                              data/ (持久化目录)
 ```
 
 ### 1. 准备服务器
@@ -52,13 +52,9 @@ python main.py
 # 安装 Docker（如未安装）
 curl -fsSL https://get.docker.com | sh
 sudo systemctl enable --now docker
-
-# 安装 Caddy（如未安装）
-sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
-sudo apt update && sudo apt install caddy
 ```
+
+> Caddy 也运行在 Docker 中（已有 `personal-caddy` 容器），无需单独安装。
 
 ### 2. 克隆代码
 
@@ -124,7 +120,7 @@ openssl rand -hex 32
 
 ### 4. Docker Compose 配置
 
-项目已包含 `docker-compose.yml`：
+项目已包含 `docker-compose.yml`，配置了 `personal_proxy` 网络使 Caddy 可通过容器名访问：
 
 ```yaml
 services:
@@ -149,9 +145,18 @@ services:
       resources:
         limits:
           memory: 512M
+    networks:
+      - proxy
+
+networks:
+  proxy:
+    external: true
+    name: personal_proxy    # 与 Caddy 容器共享此网络
 ```
 
 > **安全**: `ports` 绑定 `127.0.0.1`，确保外部无法绕过 Caddy 直连。
+> 
+> **网络**: 加入 `personal_proxy` 外部网络后，Caddy 容器可通过 `model-proxy:8000` 直接访问。
 
 ### 5. 构建并启动
 
@@ -166,14 +171,18 @@ docker compose logs -f --tail=20
 
 ### 6. 配置 Caddy 反向代理
 
-model-proxy 容器通过 `personal_proxy` Docker 网络与 Caddy 容器互通，Caddy 使用容器名 `model-proxy` 作为上游地址。
+Caddy 运行在 Docker 容器 `personal-caddy-caddy-1` 中，与 model-proxy 通过 `personal_proxy` 网络互通。
 
-在现有 Caddyfile 中**追加** model-proxy 相关路由（与 Gitea 等共存）：
+编辑 Caddy 配置文件（通常位于 `~/gitea-platform/caddy/Caddyfile`），在 `https://{$SERVER_IP}` site block 中添加 model-proxy 路由：
 
 ```
-# 在现有 Caddyfile 的 site block 内添加以下路由：
+https://{$SERVER_IP} {
+    tls internal
+    encode zstd gzip
 
-    # ─── model-proxy LLM API ───
+    # ... 其他已有路由（Gitea 等）...
+
+    # ─── model-proxy LLM API（OpenAI/Anthropic 协议）───
     handle /v1/* {
         reverse_proxy model-proxy:8000 {
             transport http {
@@ -188,7 +197,7 @@ model-proxy 容器通过 `personal_proxy` Docker 网络与 Caddy 容器互通，
         reverse_proxy model-proxy:8000
     }
 
-    # model-proxy Swagger 文档
+    # model-proxy API 文档
     handle /docs* {
         reverse_proxy model-proxy:8000
     }
@@ -207,23 +216,28 @@ model-proxy 容器通过 `personal_proxy` Docker 网络与 Caddy 容器互通，
     handle /favicon.ico {
         reverse_proxy model-proxy:8000
     }
+
+    # ... 兜底路由 ...
+}
 ```
 
-重启 Caddy 容器：
+重启 Caddy 容器使配置生效：
 
 ```bash
 docker restart personal-caddy-caddy-1
 ```
 
-> **前提**: model-proxy 的 `docker-compose.yml` 已加入 `personal_proxy` 网络（项目已包含此配置）。
-> 
-> **关键**: `flush_interval -1` 确保 SSE 流式输出不被 Caddy 缓冲。
+> **前提**: model-proxy 容器必须已加入 `personal_proxy` 网络（`docker-compose.yml` 已配置）。
+> 如果是首次启动前手动验证：`docker network connect personal_proxy model-proxy`
+>
+> **关键**: `flush_interval -1` 确保 SSE 流式输出不被 Caddy 缓冲。`read_timeout 0` 防止长生成超时。
+>
+> **HTTPS**: Caddy 使用内部 CA 签发的自签名证书，客户端需 `curl -k` 或信任 Caddy 根证书。
 
 ### 7. 防火墙
 
 ```bash
-sudo ufw allow 80/tcp     # Caddy 公网入口
-sudo ufw allow 443/tcp    # HTTPS（可选）
+sudo ufw allow 443/tcp    # Caddy HTTPS 入口
 sudo ufw allow 22/tcp     # SSH
 sudo ufw deny 8000/tcp    # 禁止直接访问容器端口
 sudo ufw enable
@@ -232,15 +246,18 @@ sudo ufw enable
 ### 8. 验证
 
 ```bash
-# 检查可用模型
-curl http://YOUR_SERVER_IP/v1/models \
+# 检查可用模型（-k 跳过自签名证书校验）
+curl -k https://YOUR_SERVER_IP/v1/models \
   -H "Authorization: Bearer your-access-api-key"
 
 # 测试推理
-curl http://YOUR_SERVER_IP/v1/chat/completions \
+curl -k https://YOUR_SERVER_IP/v1/chat/completions \
   -H "Authorization: Bearer your-access-api-key" \
   -H "Content-Type: application/json" \
   -d '{"model":"auto","messages":[{"role":"user","content":"你好"}]}'
+
+# 访问管理面板
+# 浏览器打开 https://YOUR_SERVER_IP/ui（需信任自签名证书）
 ```
 
 ---

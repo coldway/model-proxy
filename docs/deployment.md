@@ -490,3 +490,145 @@ git pull  # 或 rsync
 bash deploy.sh update
 ```
 
+---
+
+## 公网暴露安全加固
+
+当 model-proxy 需要公网可访问（供远程服务通过 OpenAI/Anthropic 协议调用）时，必须实施以下安全措施。
+
+### 1. 启用 API Key 鉴权
+
+model-proxy 支持 Bearer Token 认证。客户端请求时需携带 `Authorization: Bearer <your-api-key>` 头。
+
+在 `conf/config.yaml` 中配置访问密钥：
+
+```yaml
+settings:
+  host: "127.0.0.1"
+  port: 8000
+  api_key: "your-secret-api-key-here"  # 设置后所有请求需携带此 key
+```
+
+生成强密钥：
+
+```bash
+echo "api_key: $(openssl rand -hex 32)" >> conf/config.yaml
+```
+
+### 2. Caddy 公网访问配置（含限流）
+
+```caddyfile
+:80 {
+    # API 接口 + SSE 流式输出
+    handle /v1/* {
+        # 限流: 每 IP 每秒 10 请求
+        rate_limit {remote_host} 10r/s
+
+        reverse_proxy localhost:8000 {
+            transport http {
+                read_timeout 0
+            }
+            flush_interval -1
+        }
+    }
+
+    # Web 管理面板 - 仅内网可访问
+    @internal {
+        remote_ip 127.0.0.1 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
+    }
+    handle /ui* {
+        @external not remote_ip 127.0.0.1 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
+        respond @external "Forbidden" 403
+        reverse_proxy localhost:8000
+    }
+
+    # 健康检查（公开）
+    handle /health {
+        reverse_proxy localhost:8000
+    }
+
+    # 其他路径 - 拒绝
+    handle {
+        respond "Not Found" 404
+    }
+}
+```
+
+### 3. 防火墙配置
+
+```bash
+sudo ufw allow 80/tcp    # Caddy
+sudo ufw allow 443/tcp   # Caddy HTTPS（可选）
+sudo ufw allow 22/tcp    # SSH
+sudo ufw deny 8000/tcp   # 禁止直接访问 model-proxy 端口
+sudo ufw enable
+```
+
+### 4. 客户端使用示例
+
+外部服务（如 Novel Engine）连接公网 model-proxy：
+
+```bash
+# OpenAI 兼容协议
+curl http://YOUR_SERVER_IP/v1/chat/completions \
+  -H "Authorization: Bearer your-secret-api-key-here" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"auto","messages":[{"role":"user","content":"你好"}]}'
+
+# 查看可用模型
+curl http://YOUR_SERVER_IP/v1/models \
+  -H "Authorization: Bearer your-secret-api-key-here"
+```
+
+Novel Engine 配置：
+
+```yaml
+# novel_engine.yaml
+llm_backend:
+  active: openai_compatible
+  openai_compatible:
+    base_url: http://YOUR_SERVER_IP/v1
+    api_key: your-secret-api-key-here
+```
+
+---
+
+## Gitea 集成（CI/CD 自动部署）
+
+### 仓库设置
+
+```bash
+# 服务器上克隆 Gitea 仓库
+git clone http://YOUR_GITEA_IP:3000/your-org/model-proxy.git /opt/model-proxy
+```
+
+### Webhook 自动部署
+
+在 Gitea 仓库 Settings → Webhooks 添加：
+
+- **URL**: `http://YOUR_SERVER_IP:9000/hooks/model-proxy` (需搭配 webhook-receiver)
+- **Trigger**: Push to `main` branch
+
+或使用简易部署脚本定时拉取：
+
+```bash
+# /opt/scripts/auto-deploy-model-proxy.sh
+#!/bin/bash
+cd /opt/model-proxy
+git fetch origin main
+LOCAL=$(git rev-parse HEAD)
+REMOTE=$(git rev-parse origin/main)
+
+if [ "$LOCAL" != "$REMOTE" ]; then
+    echo "[$(date)] 检测到新提交，开始更新..."
+    git pull origin main
+    bash deploy.sh update
+    echo "[$(date)] 部署完成"
+fi
+```
+
+添加 Cron 每 5 分钟检查：
+
+```bash
+echo "*/5 * * * * root /opt/scripts/auto-deploy-model-proxy.sh >> /var/log/model-proxy-deploy.log 2>&1" | sudo tee /etc/cron.d/model-proxy-autodeploy
+```

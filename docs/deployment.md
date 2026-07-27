@@ -42,7 +42,7 @@ python main.py
 ```
 客户端请求 → Caddy 容器 (:443, HTTPS) ──personal_proxy 网络──→ model-proxy 容器 (:8000)
                                                                        ↓
-                                                              conf/config.yaml (volume 挂载)
+                                                              conf/ (可读写 volume，含 config.yaml)
                                                               data/ (持久化目录)
 ```
 
@@ -130,13 +130,13 @@ services:
     ports:
       - "127.0.0.1:8000:8000"   # 仅本机可访问，由 Caddy 代理公网流量
     volumes:
-      - ./conf/config.yaml:/app/conf/config.yaml:ro
+      - ./conf:/app/conf          # 可读写，UI 修改 API Key 后需写回
       - ./data:/app/data
     restart: unless-stopped
     environment:
       - PYTHONUNBUFFERED=1
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/v1/models"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/mp/health"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -318,7 +318,9 @@ docker image prune -f
 
 ### 配置变更
 
-修改 `conf/config.yaml` 后无需重新构建镜像（volume 挂载）：
+修改 `conf/config.yaml` 后无需重新构建镜像（conf/ 目录整体挂载，可读写）：
+
+> **注意**: UI 面板也可以直接修改 API Key 等配置（通过 `/mp/api/config/apikey`），修改会自动写回 `conf/config.yaml`。
 
 ```bash
 # 修改配置
@@ -374,7 +376,7 @@ sudo systemctl restart docker
 | 管理面板 Token | `/mp/ui` 需要 `admin_token` 认证，未登录无法操作 |
 | 端口绑定 127.0.0.1 | Docker 容器端口不暴露公网，仅 Caddy 可达 |
 | 防火墙 | UFW 只开放 80/443/22 |
-| 配置不入镜像 | `config.yaml` 通过 volume 注入，镜像不含密钥 |
+| 配置不入镜像 | `conf/` 通过 volume 挂载（可读写），镜像不含密钥 |
 | 请求历史 | `data/request_history.jsonl` 仅存元数据，不记录消息内容 |
 
 ---

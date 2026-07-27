@@ -216,17 +216,18 @@ https://{$SERVER_IP} {
         }
     }
 
-    # model-proxy 管理面板（由 admin_token 保护）
+    # model-proxy 管理面板及 AJAX API
     handle /ui* {
         reverse_proxy model-proxy:8000
     }
-
-    # model-proxy 静态资源（管理面板 JS/CSS）
     handle /static/* {
         reverse_proxy model-proxy:8000
     }
+    handle /api/* {
+        reverse_proxy model-proxy:8000
+    }
 
-    # model-proxy API 文档
+    # model-proxy API 文档与监控
     handle /docs* {
         reverse_proxy model-proxy:8000
     }
@@ -236,12 +237,15 @@ https://{$SERVER_IP} {
     handle /openapi.json {
         reverse_proxy model-proxy:8000
     }
-
-    # 健康检查
     handle /health {
         reverse_proxy model-proxy:8000
     }
-
+    handle /ready {
+        reverse_proxy model-proxy:8000
+    }
+    handle /metrics {
+        reverse_proxy model-proxy:8000
+    }
     handle /favicon.ico {
         reverse_proxy model-proxy:8000
     }

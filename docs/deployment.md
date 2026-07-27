@@ -173,14 +173,22 @@ docker compose logs -f --tail=20
 
 Caddy 运行在 Docker 容器 `personal-caddy-caddy-1` 中，与 model-proxy 通过 `personal_proxy` 网络互通。
 
-编辑 Caddy 配置文件（通常位于 `~/gitea-platform/caddy/Caddyfile`），在 `https://{$SERVER_IP}` site block 中添加 model-proxy 路由：
+编辑 Caddy 配置文件（位于 `~/gitea-platform/caddy/Caddyfile`），在 `https://{$SERVER_IP}` site block 中添加 model-proxy 路由：
 
 ```
+{
+    auto_https disable_redirects
+    default_sni {$SERVER_IP}
+}
+
 https://{$SERVER_IP} {
     tls internal
     encode zstd gzip
 
-    # ... 其他已有路由（Gitea 等）...
+    redir /gitea /gitea/ permanent
+    handle_path /gitea/* {
+        reverse_proxy gitea:3000
+    }
 
     # ─── model-proxy LLM API（OpenAI/Anthropic 协议）───
     handle /v1/* {
@@ -217,7 +225,10 @@ https://{$SERVER_IP} {
         reverse_proxy model-proxy:8000
     }
 
-    # ... 兜底路由 ...
+    # 兜底：个人站点或 404
+    handle {
+        reverse_proxy personal-site:80
+    }
 }
 ```
 

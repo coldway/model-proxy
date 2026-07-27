@@ -179,23 +179,29 @@ sudo tee /etc/caddy/Caddyfile << 'EOF'
         }
     }
 
-    # 管理面板 - 仅内网可访问
-    @internal remote_ip 127.0.0.1 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
+    # 管理面板（公网可访问，由 admin_token 保护）
     handle /ui* {
-        @external not remote_ip 127.0.0.1 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
-        respond @external "Forbidden" 403
         reverse_proxy 127.0.0.1:8000
     }
 
-    # Swagger 文档 - 仅内网
+    # Swagger 文档（公网可访问）
     handle /docs* {
-        @external_docs not remote_ip 127.0.0.1 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
-        respond @external_docs "Forbidden" 403
+        reverse_proxy 127.0.0.1:8000
+    }
+    handle /redoc* {
+        reverse_proxy 127.0.0.1:8000
+    }
+    handle /openapi.json {
         reverse_proxy 127.0.0.1:8000
     }
 
     # 健康检查（公开）
     handle /health {
+        reverse_proxy 127.0.0.1:8000
+    }
+
+    # 静态资源（favicon 等）
+    handle /favicon.ico {
         reverse_proxy 127.0.0.1:8000
     }
 
@@ -209,6 +215,8 @@ sudo systemctl restart caddy
 ```
 
 > **关键**: `flush_interval -1` 确保 SSE 流式输出不被 Caddy 缓冲。
+
+> **安全说明**: 管理面板 (`/ui`) 和 Swagger (`/docs`) 已开放公网访问。管理面板操作需要 `admin_token` 认证（在 `config.yaml` 中配置），确保使用强 Token。Swagger 为只读文档，暴露无安全风险。
 
 ### 7. 防火墙
 
@@ -318,8 +326,8 @@ sudo systemctl restart docker
 | 措施 | 说明 |
 |------|------|
 | 多 API Key 鉴权 | `config.yaml` 中 `api_keys` 列表，各 Key 独立限流，请求需 `Authorization: Bearer <key>` |
+| 管理面板 Token | `/ui*` 需要 `admin_token` 认证，未登录无法操作 |
 | 端口绑定 127.0.0.1 | Docker 容器端口不暴露公网，仅 Caddy 可达 |
-| 管理面板限内网 | `/ui*`、`/docs*` 仅内网 IP 可访问 |
 | 防火墙 | UFW 只开放 80/443/22 |
 | 配置不入镜像 | `config.yaml` 通过 volume 注入，镜像不含密钥 |
 | 请求历史 | `data/request_history.jsonl` 仅存元数据，不记录消息内容 |

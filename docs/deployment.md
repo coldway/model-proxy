@@ -63,19 +63,19 @@ sudo apt update && sudo apt install caddy
 ### 2. 克隆代码
 
 ```bash
-# 从 Gitea 克隆
-git clone http://YOUR_GITEA:3000/your-org/model-proxy.git /opt/model-proxy
-cd /opt/model-proxy
+# 从 Gitea 克隆（推荐路径）
+git clone https://YOUR_GITEA_IP/gitea/admin/model-proxy.git ~/services/model-proxy
+cd ~/services/model-proxy
 
 # 或通过 rsync 上传
 rsync -avz --exclude='__pycache__' --exclude='.venv' --exclude='data/' \
-  ./model-proxy/ user@SERVER_IP:/opt/model-proxy/
+  ./model-proxy/ user@SERVER_IP:~/services/model-proxy/
 ```
 
 ### 3. 配置
 
 ```bash
-cd /opt/model-proxy
+cd ~/services/model-proxy
 
 # 复制配置模板
 cp conf/config.yaml.example conf/config.yaml
@@ -90,9 +90,25 @@ vim conf/config.yaml
 settings:
   host: "0.0.0.0"
   port: 8000
-  api_key: "your-access-api-key"  # 公网访问时必须设置
   auto_switch: true
   log_level: "warning"
+
+  # ─── 认证配置（公网暴露时必须启用） ───
+
+  # 多 Key 模式（推荐：多用户/多服务独立限流）
+  api_keys:
+    - key: "sk-novel-engine-abc123"
+      name: "novel-engine"
+      rpm: 120
+    - key: "sk-external-client-xyz789"
+      name: "external-client"
+      rpm: 30
+
+  # 管理面板认证
+  admin_token: "adm-your-admin-token"
+
+  # 全局限流（api_keys 中未设置 rpm 的 key 使用此值）
+  per_consumer_rpm: 60
 
 providers:
   - name: google
@@ -140,7 +156,7 @@ services:
 ### 5. 构建并启动
 
 ```bash
-cd /opt/model-proxy
+cd ~/services/model-proxy
 docker compose up -d --build
 
 # 验证
@@ -225,7 +241,7 @@ curl http://YOUR_SERVER_IP/v1/chat/completions \
 ### 常用命令
 
 ```bash
-cd /opt/model-proxy
+cd ~/services/model-proxy
 
 # 查看状态
 docker compose ps
@@ -301,7 +317,7 @@ sudo systemctl restart docker
 
 | 措施 | 说明 |
 |------|------|
-| API Key 鉴权 | `config.yaml` 中 `api_key` 字段，所有请求需 `Authorization: Bearer <key>` |
+| 多 API Key 鉴权 | `config.yaml` 中 `api_keys` 列表，各 Key 独立限流，请求需 `Authorization: Bearer <key>` |
 | 端口绑定 127.0.0.1 | Docker 容器端口不暴露公网，仅 Caddy 可达 |
 | 管理面板限内网 | `/ui*`、`/docs*` 仅内网 IP 可访问 |
 | 防火墙 | UFW 只开放 80/443/22 |
@@ -320,7 +336,7 @@ llm_backend:
   active: openai_compatible
   openai_compatible:
     base_url: http://YOUR_SERVER_IP/v1      # 公网地址
-    api_key: your-access-api-key
+    api_key: sk-novel-engine-abc123          # 对应 api_keys 中配置的 key
 ```
 
 如果两者在同一台服务器，Novel Docker 容器可通过 Docker 网络直连：
@@ -330,8 +346,8 @@ llm_backend:
 services:
   novel-api:
     environment:
-      - LLM_SERVICE_URL=http://host.docker.internal:8000/v1
-      - LLM_SERVICE_TOKEN=your-access-api-key
+      - LLM_BASE_URL=http://host.docker.internal:8000/v1
+      - LLM_API_KEY=sk-novel-engine-abc123
     extra_hosts:
       - "host.docker.internal:host-gateway"
 ```
@@ -340,18 +356,48 @@ services:
 
 ## Gitea 集成（自动部署）
 
-### 仓库设置
+### Gitea Actions 自动部署
 
-```bash
-git clone http://YOUR_GITEA:3000/your-org/model-proxy.git /opt/model-proxy
+项目已包含 `.gitea/workflows/deploy.yml`，push 到 `main` 分支后自动执行部署：
+
+```yaml
+# .gitea/workflows/deploy.yml
+name: Deploy Model Proxy
+on:
+  push:
+    branches: [main]
+jobs:
+  deploy:
+    runs-on: self-hosted
+    steps:
+      - name: Pull & Deploy
+        run: |
+          cd ~/services/model-proxy
+          git fetch origin main
+          git reset --hard origin/main
+          bash deploy.sh update
+      - name: Health Check
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:8000/health > /dev/null && exit 0
+            sleep 1
+          done
+          echo "::error::健康检查失败"
+          exit 1
 ```
 
-### Webhook 自动部署
+### 前置条件
 
-配合 `deploy-receiver` 服务（详见 `storage-base/docs/自动部署系统搭建指南.md`），推送到 `main` 分支后自动执行：
+1. Gitea 已启用 Actions（`app.ini` 中 `[actions] ENABLED = true`）
+2. 服务器上已注册 Act Runner（`self-hosted` 标签）
+3. 代码已克隆到 `~/services/model-proxy`
+
+### 手动部署
 
 ```bash
-git pull origin main && docker compose up -d --build
+cd ~/services/model-proxy
+git pull origin main
+bash deploy.sh update
 ```
 
 ---

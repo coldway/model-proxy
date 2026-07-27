@@ -216,19 +216,8 @@ https://{$SERVER_IP} {
         }
     }
 
-    # ─── model-proxy: 管理面板 + API + 监控 ───
+    # ─── model-proxy: 管理面板 + API + 文档 + 监控（统一 /mp 前缀）───
     handle /mp/* {
-        reverse_proxy model-proxy:8000
-    }
-
-    # Swagger 文档（FastAPI 内置路径）
-    handle /docs* {
-        reverse_proxy model-proxy:8000
-    }
-    handle /redoc* {
-        reverse_proxy model-proxy:8000
-    }
-    handle /openapi.json {
         reverse_proxy model-proxy:8000
     }
 

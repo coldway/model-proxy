@@ -293,7 +293,7 @@ def create_app() -> FastAPI:
     admin_token = settings.admin_token.strip()
     api_token = settings.api_token.strip()
     api_keys_cfg = settings.api_keys
-    OPEN_PATHS = frozenset({"/", "/mp/ui", "/mp/health", "/mp/ready", "/docs", "/redoc", "/openapi.json", "/mp/favicon.ico"})
+    OPEN_PATHS = frozenset({"/", "/mp/ui", "/mp/health", "/mp/ready", "/mp/docs", "/mp/redoc", "/mp/openapi.json", "/mp/favicon.ico"})
 
     # 构建有效 Key 集合: {key_value: ApiKeyConfig}
     from src.models.schemas import ApiKeyConfig
@@ -311,6 +311,9 @@ def create_app() -> FastAPI:
         description="免费大模型推理代理服务。支持 OpenAI 和 Anthropic 两种协议接入，13+ 家厂商自动调度。",
         version="0.3.0",
         lifespan=lifespan,
+        docs_url="/mp/docs",
+        redoc_url="/mp/redoc",
+        openapi_url="/mp/openapi.json",
         openapi_tags=[
             {"name": "chat", "description": "OpenAI 兼容的聊天补全接口（/v1/chat/completions）"},
             {"name": "anthropic", "description": "Anthropic Messages API 兼容层（/v1/messages）"},
@@ -479,8 +482,8 @@ def create_app() -> FastAPI:
 
     logger.info("Model Proxy 启动于 http://%s:%s", settings.host, settings.port)
     logger.info("UI 面板: http://%s:%s/mp/ui", settings.host, settings.port)
-    logger.info("Swagger API 文档: http://%s:%s/docs", settings.host, settings.port)
-    logger.info("ReDoc API 文档: http://%s:%s/redoc", settings.host, settings.port)
+    logger.info("Swagger API 文档: http://%s:%s/mp/docs", settings.host, settings.port)
+    logger.info("ReDoc API 文档: http://%s:%s/mp/redoc", settings.host, settings.port)
 
     return app
 

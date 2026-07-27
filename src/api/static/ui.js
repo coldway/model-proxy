@@ -1088,7 +1088,7 @@ async function pullModelToCatalog(providerId, modelId) {
         if (!confirm(`将启动 rapid-mlx 实例: "${modelId}"\n如果模型未下载会自动从 HuggingFace 拉取。确认继续？`)) return;
         toast(`正在启动 ${modelId}...`, 'info');
         try {
-            const resp = await apiFetch('/api/rapid-mlx/instances/start', {
+            const resp = await apiFetch(API + '/api/rapid-mlx/instances/start', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ model: modelId }),
@@ -1148,7 +1148,7 @@ async function manualAddModel() {
         if (!confirm(`将启动 rapid-mlx 实例: "${modelId}"\n如果模型未下载会自动从 HuggingFace 拉取（可能需要几分钟）。\n确认继续？`)) return;
         toast(`正在启动 ${modelId}（如需下载可能较慢）...`, 'info');
         try {
-            const resp = await apiFetch('/api/rapid-mlx/instances/start', {
+            const resp = await apiFetch(API + '/api/rapid-mlx/instances/start', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ model: modelId }),
@@ -1596,7 +1596,7 @@ async function createCursorSession() {
     if (toggle) toggle.textContent = '创建中...';
     try {
         const apiKey = localStorage.getItem('apiKey') || '';
-        const res = await fetch('/api/cursor/sessions/create', {
+        const res = await fetch(API + '/api/cursor/sessions/create', {
             method: 'POST',
             headers: { 'Authorization': apiKey ? `Bearer ${apiKey}` : '' },
         });
@@ -1622,7 +1622,7 @@ async function loadCursorSessions() {
     const currentVal = sel.value;
     try {
         const apiKey = localStorage.getItem('apiKey') || '';
-        const res = await fetch('/api/cursor/sessions', {
+        const res = await fetch(API + '/api/cursor/sessions', {
             method: 'GET',
             headers: { 'Authorization': apiKey ? `Bearer ${apiKey}` : '' },
         });
@@ -2259,8 +2259,8 @@ setInterval(loadUsage, 30000);
 async function loadMemory() {
     try {
         const [statsResp, entriesResp] = await Promise.all([
-            apiFetch('/api/memory/stats'),
-            apiFetch('/api/memory/entries?limit=100')
+            apiFetch(API + '/api/memory/stats'),
+            apiFetch(API + '/api/memory/entries?limit=100')
         ]);
         const stats = await statsResp.json();
         const data = await entriesResp.json();
@@ -2300,7 +2300,7 @@ async function addMemory() {
     const content = document.getElementById('memory-add-content').value.trim();
     if (!content) { toast('请输入记忆内容', 'warning'); return; }
     try {
-        await apiFetch('/api/memory/add', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({type, content}) });
+        await apiFetch(API + '/api/memory/add', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({type, content}) });
         document.getElementById('memory-add-content').value = '';
         toast('记忆已添加', 'success');
         loadMemory();
@@ -2310,7 +2310,7 @@ async function addMemory() {
 async function deleteMemory(id) {
     if (!confirm('确定删除这条记忆？')) return;
     try {
-        await apiFetch('/api/memory/entries/' + id, { method: 'DELETE' });
+        await apiFetch(API + '/api/memory/entries/' + id, { method: 'DELETE' });
         toast('已删除', 'success');
         loadMemory();
     } catch (err) { toast('删除失败: ' + err.message, 'error'); }
@@ -2318,7 +2318,7 @@ async function deleteMemory(id) {
 
 async function exportMemory() {
     try {
-        const resp = await apiFetch('/api/memory/entries?limit=9999');
+        const resp = await apiFetch(API + '/api/memory/entries?limit=9999');
         const data = await resp.json();
         const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
         const url = URL.createObjectURL(blob);
@@ -2335,7 +2335,7 @@ async function importMemory(event) {
     try {
         const text = await file.text();
         const data = JSON.parse(text);
-        await apiFetch('/api/memory/import', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(data) });
+        await apiFetch(API + '/api/memory/import', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(data) });
         toast(`导入成功`, 'success');
         loadMemory();
     } catch (err) { toast('导入失败: ' + err.message, 'error'); }
@@ -2346,7 +2346,7 @@ async function importMemory(event) {
 
 async function loadRapidMLXInstances() {
     try {
-        const resp = await apiFetch('/api/rapid-mlx/instances');
+        const resp = await apiFetch(API + '/api/rapid-mlx/instances');
         const data = await resp.json();
         const grid = document.getElementById('rmlx-instances-grid');
         document.getElementById('rmlx-total').textContent = data.total;
@@ -2359,7 +2359,7 @@ async function loadRapidMLXInstances() {
         }
 
         // 加载 URL 映射
-        const urlResp = await apiFetch('/api/rapid-mlx/model-urls');
+        const urlResp = await apiFetch(API + '/api/rapid-mlx/model-urls');
         const urlData = await urlResp.json();
         const mapEl = document.getElementById('rmlx-url-map');
         if (urlData.mapping && Object.keys(urlData.mapping).length > 0) {
@@ -2460,7 +2460,7 @@ async function startRapidMLXInstance() {
     try {
         toast('正在启动 ' + model + '...', 'info');
         hideModal('rmlx-start');
-        const resp = await apiFetch('/api/rapid-mlx/instances/start', {
+        const resp = await apiFetch(API + '/api/rapid-mlx/instances/start', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(body),
@@ -2480,7 +2480,7 @@ async function startRapidMLXInstance() {
 async function stopRapidMLXInstance(model, port) {
     if (!confirm(`确定停止实例 ${model}@${port}？`)) return;
     try {
-        const resp = await apiFetch('/api/rapid-mlx/instances/stop', {
+        const resp = await apiFetch(API + '/api/rapid-mlx/instances/stop', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({ model, port }),
@@ -2494,7 +2494,7 @@ async function stopRapidMLXInstance(model, port) {
 async function restartRapidMLXInstance(model, port) {
     try {
         toast('正在重启 ' + model + '...', 'info');
-        const resp = await apiFetch('/api/rapid-mlx/instances/restart', {
+        const resp = await apiFetch(API + '/api/rapid-mlx/instances/restart', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({ model, port }),
@@ -2508,7 +2508,7 @@ async function restartRapidMLXInstance(model, port) {
 async function removeRapidMLXInstance(model, port) {
     if (!confirm(`确定移除实例 ${model}@${port}？（将停止并从配置中删除）`)) return;
     try {
-        const resp = await apiFetch(`/api/rapid-mlx/instances/${encodeURIComponent(model)}?port=${port}`, {
+        const resp = await apiFetch(`${API}/api/rapid-mlx/instances/${encodeURIComponent(model)}?port=${port}`, {
             method: 'DELETE',
         });
         const data = await resp.json();
@@ -2520,7 +2520,7 @@ async function removeRapidMLXInstance(model, port) {
 async function discoverRapidMLX() {
     try {
         toast('正在发现外部实例...', 'info');
-        const resp = await apiFetch('/api/rapid-mlx/discover', { method: 'POST' });
+        const resp = await apiFetch(API + '/api/rapid-mlx/discover', { method: 'POST' });
         const data = await resp.json();
         if (data.discovered > 0) {
             toast(`发现 ${data.discovered} 个外部实例`, 'success');
@@ -2541,9 +2541,9 @@ async function loadRapidMLXCatalog() {
     grid.innerHTML = '<div class="empty-state"><h4>加载中...</h4></div>';
     try {
         const [catalogResp, instancesResp, cachedResp] = await Promise.all([
-            apiFetch('/api/rapid-mlx/catalog'),
-            apiFetch('/api/rapid-mlx/instances'),
-            apiFetch('/api/rapid-mlx/cached'),
+            apiFetch(API + '/api/rapid-mlx/catalog'),
+            apiFetch(API + '/api/rapid-mlx/instances'),
+            apiFetch(API + '/api/rapid-mlx/cached'),
         ]);
         const catalogData = await catalogResp.json();
         const instancesData = await instancesResp.json();
@@ -2621,7 +2621,7 @@ async function quickStartFromCatalog(alias) {
     if (!confirm(`确定启动模型 "${alias}"？\n将自动分配端口。如果模型未下载，会先下载再启动。`)) return;
     try {
         toast(`正在启动 ${alias}...`, 'info');
-        const resp = await apiFetch('/api/rapid-mlx/instances/start', {
+        const resp = await apiFetch(API + '/api/rapid-mlx/instances/start', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ model: alias }),

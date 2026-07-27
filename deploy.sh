@@ -220,16 +220,8 @@ cmd_caddy() {
         }
     }
 
-    # 管理路由（统一 /mp 前缀）
+    # 管理路由（统一 /mp 前缀，包含文档）
     handle /mp/* {
-        reverse_proxy 127.0.0.1:8000
-    }
-
-    # API 文档
-    handle /docs* {
-        reverse_proxy 127.0.0.1:8000
-    }
-    handle /openapi.json {
         reverse_proxy 127.0.0.1:8000
     }
 
@@ -249,7 +241,7 @@ CADDYEOF
     log_info "  推理: http://${server_ip}/v1/chat/completions"
     log_info "  模型: http://${server_ip}/v1/models"
     log_info "  面板: http://${server_ip}/mp/ui"
-    log_info "  文档: http://${server_ip}/docs"
+    log_info "  文档: http://${server_ip}/mp/docs"
 }
 
 cmd_test() {

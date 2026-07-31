@@ -11,6 +11,7 @@ jobs:
       - name: Pull & Deploy
         run: |
           cd ~/services/model-proxy
+          git remote set-url origin http://personal-gitea-gitea-1:3000/admin/model-proxy.git
           git fetch origin main
           git reset --hard origin/main
           bash deploy.sh update

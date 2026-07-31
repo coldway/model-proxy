@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 
 from src.models.schemas import ChatCompletionRequest, ChatCompletionResponse
 
@@ -12,8 +12,19 @@ from src.models.schemas import ChatCompletionRequest, ChatCompletionResponse
 class BaseProvider(ABC):
     """所有厂商适配器的基类"""
 
-    def __init__(self, api_key: str):
-        self._api_key = api_key
+    def __init__(self, api_key: str | Callable[[], str]):
+        self._key_source = api_key
+
+    @property
+    def _api_key(self) -> str:
+        """每次请求时动态获取 key，支持 round-robin 轮转"""
+        if callable(self._key_source):
+            return self._key_source()
+        return self._key_source
+
+    @_api_key.setter
+    def _api_key(self, value: str | Callable[[], str]):
+        self._key_source = value
 
     async def close(self) -> None:
         """释放底层连接资源（子类有 httpx client 时应覆盖）"""

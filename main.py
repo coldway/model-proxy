@@ -154,14 +154,17 @@ def create_app() -> FastAPI:
     _NO_KEY_PROVIDERS = {"ollama", "rapid_mlx"}
 
     for name, factory in provider_factories.items():
-        api_key = config_manager.get_api_key(name)
+        api_key = config_manager.get_api_key_source(name)
+        key_val = api_key() if callable(api_key) else api_key
         if name in _NO_KEY_PROVIDERS:
             if catalog.get_provider(name) is None or catalog.is_provider_enabled(name):
                 dispatcher.register_provider(name, factory(api_key))
                 logger.info("已注册 %s 厂商（本地，无需 API Key）", name)
-        elif api_key:
+        elif key_val:
+            rotator = config_manager.get_key_rotator(name)
+            key_info = f"（{rotator.key_count} 个 Key，round-robin）" if rotator else ""
             dispatcher.register_provider(name, factory(api_key))
-            logger.info("已注册 %s 厂商", name)
+            logger.info("已注册 %s 厂商%s", name, key_info)
 
     if catalog.is_provider_enabled("cursor"):
         dispatcher.register_provider("cursor", CursorProvider())

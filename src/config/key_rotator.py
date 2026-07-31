@@ -34,7 +34,7 @@ class KeyRotator:
         return len(self._keys)
 
     def get_key(self) -> str:
-        """获取当前可用的 Key（跳过冷却中的 Key）"""
+        """获取当前可用的 Key 并自动轮转到下一个（round-robin）"""
         if not self._keys:
             return ""
         with self._lock:
@@ -43,9 +43,12 @@ class KeyRotator:
                 idx = self._index % len(self._keys)
                 cooldown_until = self._cooldowns.get(idx, 0)
                 if now >= cooldown_until:
-                    return self._keys[idx]
-                self._index += 1
+                    key = self._keys[idx]
+                    self._index = (idx + 1) % len(self._keys)
+                    return key
+                self._index = (self._index + 1) % len(self._keys)
             logger.warning("[%s] 所有 %d 个 Key 均在冷却中，返回第一个", self._provider, len(self._keys))
+            self._index = 1 % len(self._keys)
             return self._keys[0]
 
     def rotate(self) -> str:

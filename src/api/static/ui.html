@@ -212,7 +212,10 @@
             <div class="card">
                 <div class="card-header">
                     <h3>模型厂商</h3>
-                    <span style="font-size:0.8rem;color:var(--text-secondary)">点击卡片管理厂商模型</span>
+                    <div style="display:flex;align-items:center;gap:12px">
+                        <span style="font-size:0.8rem;color:var(--text-secondary)">点击卡片管理厂商模型</span>
+                        <button class="btn btn-primary btn-sm" onclick="showModal('add-provider')" style="white-space:nowrap">+ 添加厂商</button>
+                    </div>
                 </div>
                 <div id="providers-grid" class="stats-grid" style="grid-template-columns: repeat(auto-fill, minmax(270px, 1fr))">
                 </div>
@@ -760,6 +763,47 @@ GET /v1/videos/{task_id}?provider_id=agnes</pre>
             <div class="modal-footer">
                 <button class="btn btn-secondary" onclick="hideModal('priority')">取消</button>
                 <button class="btn btn-primary" onclick="savePriority()">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 添加自定义厂商弹窗 -->
+    <div class="modal-overlay" id="modal-add-provider">
+        <div class="modal" style="max-width:520px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+                <h3 style="margin:0">添加自定义厂商</h3>
+                <button class="btn btn-ghost btn-sm" onclick="hideModal('add-provider')">✕</button>
+            </div>
+            <p style="font-size:0.8rem;color:var(--text-muted);margin-bottom:16px">
+                添加任何 OpenAI 兼容的 API 服务。系统将根据模型类型自动拼接端点：<br>
+                Chat → <code>/chat/completions</code>　
+                Embedding → <code>/embeddings</code>　
+                Image → <code>/images/generations</code>　
+                Video → <code>/videos</code>
+            </p>
+            <div class="form-group">
+                <label>厂商 ID <span style="color:var(--text-muted);font-weight:normal">（小写字母/数字/下划线，2-31位）</span></label>
+                <input id="custom-prov-id" type="text" placeholder="my_provider" pattern="^[a-z][a-z0-9_-]{1,30}$">
+            </div>
+            <div class="form-group">
+                <label>显示名称</label>
+                <input id="custom-prov-name" type="text" placeholder="My Provider">
+            </div>
+            <div class="form-group">
+                <label>Base URL <span style="color:var(--text-muted);font-weight:normal">（包含 /v1 前缀）</span></label>
+                <input id="custom-prov-url" type="url" placeholder="https://api.example.com/v1">
+            </div>
+            <div class="form-group">
+                <label>API Key <span style="color:var(--text-muted);font-weight:normal">（可选，多个用换行分隔）</span></label>
+                <textarea id="custom-prov-key" rows="2" placeholder="sk-xxx..." style="resize:vertical"></textarea>
+            </div>
+            <div class="form-group">
+                <label>描述 <span style="color:var(--text-muted);font-weight:normal">（可选）</span></label>
+                <input id="custom-prov-desc" type="text" placeholder="自定义接入的推理服务">
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="hideModal('add-provider')">取消</button>
+                <button class="btn btn-primary" onclick="submitCustomProvider()">创建厂商</button>
             </div>
         </div>
     </div>

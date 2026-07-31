@@ -28,9 +28,11 @@ async def get_config():
     """获取当前配置（隐藏 API Key）"""
     result = {}
     for name, prov in _deps.config_manager.get_providers_sorted():
+        rotator = _deps.config_manager.get_key_rotator(name)
         result[name] = {
             "enabled": prov.enabled,
             "has_api_key": _deps.config_manager.has_api_key(name),
+            "key_count": rotator.key_count if rotator else (1 if _deps.config_manager.has_api_key(name) else 0),
             "priority": prov.priority,
             "models": [m.model_dump() for m in prov.models],
         }
@@ -47,23 +49,32 @@ class ApiKeyUpdateRequest(BaseModel):
     api_key: str
 
 
-@router.post("/api/config/apikey", summary="更新厂商 API Key")
+@router.post("/api/config/apikey", summary="更新厂商 API Key（支持多 Key 用换行分隔）")
 async def update_api_key(body: ApiKeyUpdateRequest):
-    """更新厂商 API Key，同时动态注册/注销厂商 Provider"""
+    """更新厂商 API Key，支持多 key（换行或逗号分隔）实现 round-robin 轮转"""
     provider = body.provider
-    api_key = body.api_key
-    _deps.config_manager.update_api_key(provider, api_key)
+    raw_keys = body.api_key
+    keys = [k.strip() for k in raw_keys.replace(",", "\n").split("\n") if k.strip()]
 
-    if api_key.strip() and provider in _deps.provider_factories:
+    if len(keys) > 1:
+        _deps.config_manager.update_api_keys(provider, keys)
+    else:
+        _deps.config_manager.update_api_key(provider, keys[0] if keys else "")
+
+    key_source = _deps.config_manager.get_api_key_source(provider) if _deps.config_manager else ""
+    key_val = key_source() if callable(key_source) else key_source
+
+    if key_val and key_val.strip() and provider in _deps.provider_factories:
         try:
-            new_provider = _deps.provider_factories[provider](api_key.strip())
+            new_provider = _deps.provider_factories[provider](key_source)
             _deps.dispatcher.register_provider(provider, new_provider)
-            logger.info("动态注册厂商 %s", provider)
-            return {"status": "ok", "message": f"{provider} API Key 已更新，厂商已自动加载"}
+            logger.info("动态注册厂商 %s（%d 个 Key）", provider, len(keys))
+            msg = f"{provider} API Key 已更新（{len(keys)} 个 Key，round-robin 轮转），厂商已加载" if len(keys) > 1 else f"{provider} API Key 已更新，厂商已自动加载"
+            return {"status": "ok", "message": msg}
         except Exception as e:
             logger.error("动态注册厂商 %s 失败: %s", provider, e, exc_info=True)
             return {"status": "ok", "message": f"{provider} API Key 已保存，但厂商加载失败，请检查 Key 是否正确"}
-    elif not api_key.strip():
+    elif not keys:
         await _deps.dispatcher.unregister_provider(provider)
         logger.info("已注销厂商 %s（API Key 已清空）", provider)
         return {"status": "ok", "message": f"{provider} API Key 已清空，厂商已卸载"}
@@ -128,6 +139,114 @@ async def add_model(provider: str, name: str, priority: int = 99, rpd: int = 0, 
     return {"status": "ok", "message": f"模型 {name} 已添加到 {provider}"}
 
 
+class CustomProviderRequest(BaseModel):
+    provider_id: str
+    name: str
+    base_url: str
+    api_key: str = ""
+    description: str = ""
+
+
+@router.post("/api/provider/custom", summary="添加自定义 OpenAI 兼容厂商")
+async def add_custom_provider(body: CustomProviderRequest):
+    """添加自定义 OpenAI 兼容厂商（前端创建新厂商入口）
+
+    系统会自动根据模型类型拼接正确的 API 端点：
+    - chat:      {base_url}/chat/completions
+    - embedding: {base_url}/embeddings
+    - image:     {base_url}/images/generations
+    - video:     {base_url}/videos
+    - audio:     通过 Rapid-MLX
+    """
+    import re
+    pid = body.provider_id.strip().lower()
+    if not re.match(r"^[a-z][a-z0-9_-]{1,30}$", pid):
+        raise HTTPException(status_code=400, detail="厂商 ID 不合法：仅允许小写字母、数字、下划线和连字符，2-31 位")
+
+    base_url = body.base_url.strip().rstrip("/")
+    if not base_url.startswith("http"):
+        raise HTTPException(status_code=400, detail="base_url 必须以 http:// 或 https:// 开头")
+
+    if _deps.catalog and _deps.catalog.get_provider(pid):
+        raise HTTPException(status_code=409, detail=f"厂商 {pid} 已存在")
+
+    provider_info = {
+        "name": body.name.strip() or pid,
+        "type": "openai_compat",
+        "base_url": base_url,
+        "enabled": True,
+        "priority": 50,
+        "description": body.description.strip() or f"自定义 OpenAI 兼容厂商 ({base_url})",
+        "models": [],
+    }
+
+    if _deps.catalog:
+        _deps.catalog.add_provider(pid, provider_info)
+
+    if body.api_key.strip():
+        keys = [k.strip() for k in body.api_key.replace(",", "\n").split("\n") if k.strip()]
+        if len(keys) > 1:
+            _deps.config_manager.update_api_keys(pid, keys)
+        else:
+            _deps.config_manager.update_api_key(pid, keys[0])
+
+    from src.providers.openai_compat import create_openai_provider
+    key_source = _deps.config_manager.get_api_key_source(pid)
+    try:
+        factory = lambda key, _pid=pid: create_openai_provider(_pid, key, base_url_override=base_url)
+        _deps.provider_factories[pid] = factory
+        prov_instance = factory(key_source)
+        _deps.dispatcher.register_provider(pid, prov_instance)
+        logger.info("动态注册自定义厂商 %s (base_url=%s)", pid, base_url)
+
+        models = []
+        try:
+            models = await prov_instance.list_models()
+        except Exception as e:
+            logger.warning("自动拉取 %s 模型列表失败: %s", pid, e)
+
+        if models and _deps.catalog:
+            for model_id in models[:50]:
+                _deps.catalog.add_model(pid, {
+                    "id": model_id, "name": model_id, "category": "通用",
+                })
+                _deps.catalog.activate_model(pid, model_id, priority=50)
+
+        return {
+            "status": "ok",
+            "message": f"自定义厂商 {body.name or pid} 已创建并加载",
+            "models_discovered": len(models),
+            "provider_id": pid,
+        }
+    except Exception as e:
+        logger.error("注册自定义厂商 %s 失败: %s", pid, e, exc_info=True)
+        return {
+            "status": "ok",
+            "message": f"厂商 {pid} 已创建（目录已保存），但加载失败: {str(e)[:100]}",
+            "provider_id": pid,
+        }
+
+
+@router.delete("/api/provider/custom/{provider_id}", summary="删除自定义厂商")
+async def remove_custom_provider(provider_id: str):
+    """删除自定义厂商及其所有模型"""
+    if not _deps.catalog:
+        raise HTTPException(status_code=500, detail="目录未初始化")
+
+    prov = _deps.catalog.get_provider(provider_id)
+    if not prov:
+        raise HTTPException(status_code=404, detail=f"厂商 {provider_id} 不存在")
+
+    if _deps.dispatcher.has_provider(provider_id):
+        await _deps.dispatcher.unregister_provider(provider_id)
+    _deps.provider_factories.pop(provider_id, None)
+    _deps.catalog.remove_provider(provider_id)
+    if _deps.config_manager:
+        _deps.config_manager.update_api_key(provider_id, "")
+    logger.info("已删除自定义厂商 %s", provider_id)
+    return {"status": "ok", "message": f"厂商 {provider_id} 已删除"}
+
+
 @router.post("/api/provider/toggle", summary="启用/禁用厂商")
 async def toggle_provider(provider: str, enabled: bool):
     """启用/禁用厂商，同时动态注册/注销 Provider"""
@@ -155,8 +274,9 @@ async def toggle_provider(provider: str, enabled: bool):
                 logger.error("动态注册 Ollama 失败: %s", e)
                 return {"status": "ok", "message": f"ollama 已启用，但连接失败: {e}"}
         elif provider in _deps.provider_factories:
-            api_key = _deps.config_manager.get_api_key(provider) if _deps.config_manager else ""
-            if api_key.strip() or provider in _NO_KEY_PROVIDERS:
+            api_key = _deps.config_manager.get_api_key_source(provider) if _deps.config_manager else ""
+            key_val = api_key() if callable(api_key) else api_key
+            if (key_val and key_val.strip()) or provider in _NO_KEY_PROVIDERS:
                 try:
                     _deps.dispatcher.register_provider(provider, _deps.provider_factories[provider](api_key))
                     logger.info("动态注册厂商 %s", provider)

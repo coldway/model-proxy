@@ -76,7 +76,11 @@ class ConfigManager:
         if self._catalog:
             all_provider_ids |= set(self._catalog.get_all_providers().keys())
         for name in sorted(all_provider_ids):
-            providers[name] = {"api_key": self._api_keys.get(name, "")}
+            rotator = self._key_rotators.get(name)
+            if rotator and rotator.key_count > 1:
+                providers[name] = {"api_keys": rotator._keys}
+            else:
+                providers[name] = {"api_key": self._api_keys.get(name, "")}
         data = {
             "providers": providers,
             "settings": self._settings.model_dump(),
@@ -105,11 +109,30 @@ class ConfigManager:
         raw = self._api_keys.get(provider, "")
         return self._resolve_key(raw)
 
+    def get_api_key_source(self, provider: str):
+        """返回 key 源：若有多 key 轮转器则返回 callable，否则返回静态字符串"""
+        rotator = self._key_rotators.get(provider)
+        if rotator:
+            return rotator.get_key
+        raw = self._api_keys.get(provider, "")
+        return self._resolve_key(raw)
+
     def get_key_rotator(self, provider: str) -> KeyRotator | None:
         return self._key_rotators.get(provider)
 
     def update_api_key(self, provider: str, api_key: str) -> None:
         self._api_keys[provider] = api_key
+        self._key_rotators.pop(provider, None)
+        self.save()
+
+    def update_api_keys(self, provider: str, keys: list[str]) -> None:
+        """更新为多 key 配置，启用 round-robin 轮转"""
+        keys = [k for k in keys if k.strip()]
+        self._api_keys[provider] = keys[0] if keys else ""
+        if len(keys) > 1:
+            self._key_rotators[provider] = KeyRotator(provider, keys)
+        else:
+            self._key_rotators.pop(provider, None)
         self.save()
 
     def has_api_key(self, provider: str) -> bool:

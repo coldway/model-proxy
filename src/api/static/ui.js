@@ -498,7 +498,7 @@ async function loadProviderModels(providerId) {
                 <div style="flex:1;min-width:0">
                     <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
                         <span style="font-weight:600;font-size:0.9rem">${m.name || m.id}</span>
-                        <select style="font-size:0.6rem;padding:1px 4px;border-radius:3px;border:1px solid var(--border);background:${(() => { const t = m.type || m.model_type || 'chat'; return {image:'#e8f5e9',video:'#e3f2fd',embedding:'#fff3e0',audio:'#fce4ec',chat:'var(--bg-secondary)'}[t]||'var(--bg-secondary)'; })()};color:${(() => { const t = m.type || m.model_type || 'chat'; return {image:'#2e7d32',video:'#1565c0',embedding:'#e65100',audio:'#c62828',chat:'var(--text-muted)'}[t]||'var(--text-muted)'; })()};cursor:pointer" onchange="event.stopPropagation();updateModelType('${providerId}','${m.id}',this.value)" title="模型类型（决定使用哪个 API 接口）">
+                        <select class="model-type-select" data-type="${m.type||m.model_type||'chat'}" onchange="event.stopPropagation();this.dataset.type=this.value;autoResizeSelect(this);updateModelType('${providerId}','${m.id}',this.value)" title="模型类型（决定使用哪个 API 接口）">
                             ${['chat','embedding','image','video','audio'].map(t => `<option value="${t}" ${(m.type||m.model_type||'chat')===t?'selected':''}>${t}</option>`).join('')}
                         </select>
                         ${noCap}
@@ -521,6 +521,7 @@ async function loadProviderModels(providerId) {
     }).join('');
 
     initModelDragAndDrop();
+    document.querySelectorAll('.model-type-select').forEach(autoResizeSelect);
 }
 
 async function testSingleModel(providerId, modelId) {
@@ -714,6 +715,15 @@ async function toggleModelAndReload(providerId, modelId, enabled) {
     loadProviderCards();
 }
 
+function autoResizeSelect(el) {
+    const tmp = document.createElement('span');
+    tmp.style.cssText = 'position:absolute;visibility:hidden;white-space:nowrap;font:inherit;font-size:0.68rem;font-weight:600;letter-spacing:0.03em;text-transform:uppercase;padding:0 2px';
+    tmp.textContent = el.options[el.selectedIndex]?.text || '';
+    document.body.appendChild(tmp);
+    el.style.width = (tmp.offsetWidth + 36) + 'px';
+    tmp.remove();
+}
+
 async function updateModelType(providerId, modelId, modelType) {
     try {
         await apiFetch(API + `/api/config/model/type?provider=${providerId}&model_name=${encodeURIComponent(modelId)}&model_type=${modelType}`, {method:'POST'});
@@ -750,9 +760,10 @@ async function loadConfig() {
                     </div>
                 </div>
                 <div class="input-group">
-                    <input type="password" id="key-${name}" placeholder="输入 ${name} API Key...">
+                    <textarea id="key-${name}" placeholder="输入 API Key（多个 Key 请换行分隔，自动 round-robin 轮转）" rows="1" style="resize:vertical;min-height:32px;font-family:inherit"></textarea>
                     <button class="btn btn-primary btn-sm" onclick="saveKey('${name}')">保存</button>
                 </div>
+                ${prov.key_count > 1 ? `<div style="font-size:0.65rem;color:var(--accent-green);margin-top:4px">🔄 ${prov.key_count} 个 Key 轮转中 (round-robin)</div>` : ''}
             </div>`;
         }).join('');
     } catch (e) {
@@ -830,6 +841,64 @@ async function addModel() {
 async function refreshModels() {
     toast('正在刷新...', 'info');
     loadProviderCards();
+}
+
+async function submitCustomProvider() {
+    const pid = document.getElementById('custom-prov-id').value.trim();
+    const name = document.getElementById('custom-prov-name').value.trim();
+    const baseUrl = document.getElementById('custom-prov-url').value.trim();
+    const apiKey = document.getElementById('custom-prov-key').value.trim();
+    const desc = document.getElementById('custom-prov-desc').value.trim();
+
+    if (!pid) { toast('请输入厂商 ID', 'error'); return; }
+    if (!/^[a-z][a-z0-9_-]{1,30}$/.test(pid)) { toast('厂商 ID 格式不正确：小写字母开头，2-31位', 'error'); return; }
+    if (!baseUrl) { toast('请输入 Base URL', 'error'); return; }
+    if (!baseUrl.startsWith('http')) { toast('Base URL 必须以 http:// 或 https:// 开头', 'error'); return; }
+
+    try {
+        const resp = await apiFetch(API + '/api/provider/custom', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                provider_id: pid,
+                name: name || pid,
+                base_url: baseUrl,
+                api_key: apiKey,
+                description: desc,
+            }),
+        });
+        const data = await resp.json();
+        if (resp.ok) {
+            toast(data.message + (data.models_discovered ? ` (发现 ${data.models_discovered} 个模型)` : ''), 'success');
+            hideModal('add-provider');
+            document.getElementById('custom-prov-id').value = '';
+            document.getElementById('custom-prov-name').value = '';
+            document.getElementById('custom-prov-url').value = '';
+            document.getElementById('custom-prov-key').value = '';
+            document.getElementById('custom-prov-desc').value = '';
+            loadProviderCards();
+        } else {
+            toast(data.detail || '创建失败', 'error');
+        }
+    } catch (e) {
+        toast('请求失败: ' + e.message, 'error');
+    }
+}
+
+async function deleteCustomProvider(providerId) {
+    if (!confirm(`确认删除厂商 ${providerId} 及其所有模型？此操作不可撤销。`)) return;
+    try {
+        const resp = await apiFetch(API + `/api/provider/custom/${providerId}`, {method: 'DELETE'});
+        const data = await resp.json();
+        if (resp.ok) {
+            toast(data.message, 'success');
+            loadProviderCards();
+        } else {
+            toast(data.detail || '删除失败', 'error');
+        }
+    } catch (e) {
+        toast('删除失败: ' + e.message, 'error');
+    }
 }
 
 // --- 从运行配置删除模型 ---

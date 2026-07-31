@@ -735,6 +735,14 @@ providers:
       enabled: true
       priority: 12
       tool_calling: false
+    - id: agnes-2.5-flash
+      name: agnes-2.5-flash
+      description: ''
+      default_rpd: 0
+      default_rpm: 0
+      category: 通用
+      enabled: true
+      priority: 13
   cursor:
     name: Cursor Agent CLI
     enabled: false
@@ -802,7 +810,7 @@ providers:
     name: 商汤日日新 (SenseNova)
     type: openai_compat
     base_url: https://token.sensenova.cn/v1
-    enabled: false
+    enabled: true
     priority: 3
     billing_type: free
     url: https://platform.sensenova.cn/

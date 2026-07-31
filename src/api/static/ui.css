@@ -300,6 +300,11 @@ input::placeholder { color: var(--text-muted); }
     color: var(--accent-yellow);
     border-color: rgba(245, 158, 11, 0.3);
 }
+.model-type-select[data-type="rerank"] {
+    background-color: rgba(168, 85, 247, 0.12);
+    color: #a855f7;
+    border-color: rgba(168, 85, 247, 0.3);
+}
 .model-type-select:hover {
     filter: brightness(1.15);
     border-color: currentColor;

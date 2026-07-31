@@ -23,6 +23,7 @@ from src.api.routes_pkg import (
     logs,
     models,
     rapid_mlx,
+    rerank,
     testing,
     videos,
 )
@@ -37,6 +38,7 @@ v1_router.include_router(images.router)
 v1_router.include_router(videos.router)
 v1_router.include_router(audio.router)
 v1_router.include_router(embeddings.router)
+v1_router.include_router(rerank.router)
 
 # 管理路由：统一在 /mp 前缀下，简化反向代理配置
 mp_router = APIRouter(prefix="/mp")

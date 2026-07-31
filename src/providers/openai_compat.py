@@ -180,6 +180,17 @@ class OpenAICompatibleProvider(BaseProvider):
         resp.raise_for_status()
         return resp.json()
 
+    async def rerank(self, model: str, query: str, documents: list[str], **kwargs) -> dict:
+        url = f"{self._base_url}/rerank"
+        payload: dict = {"model": model, "query": query, "documents": documents}
+        if kwargs.get("top_n"):
+            payload["top_n"] = kwargs["top_n"]
+        if kwargs.get("return_documents") is not None:
+            payload["return_documents"] = kwargs["return_documents"]
+        resp = await self._client.post(url, headers=self._build_headers(), json=payload, timeout=60.0)
+        resp.raise_for_status()
+        return resp.json()
+
     async def list_models(self) -> list[str]:
         """拉取厂商模型列表。网络或认证错误时抛出异常（不再静默返回空列表）。"""
         url = f"{self._base_url}/models"

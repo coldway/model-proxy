@@ -69,6 +69,10 @@ class BaseProvider(ABC):
         """向量化文本（子类按需覆盖）"""
         raise NotImplementedError(f"{self.__class__.__name__} 不支持 Embedding")
 
+    async def rerank(self, model: str, query: str, documents: list[str], **kwargs) -> dict:
+        """重排序（子类按需覆盖）"""
+        raise NotImplementedError(f"{self.__class__.__name__} 不支持 Rerank")
+
     @abstractmethod
     async def list_models(self) -> list[str]:
         """列出该厂商支持的模型"""

@@ -163,7 +163,7 @@ cmd_update() {
 
     # 重新构建并启动
     log_step "重新构建镜像..."
-    docker compose up -d --build --remove-orphans
+    docker compose up -d --build --force-recreate --remove-orphans
 
     # 等待就绪
     log_step "等待服务就绪..."

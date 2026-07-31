@@ -191,6 +191,33 @@ class OpenAICompatibleProvider(BaseProvider):
         resp.raise_for_status()
         return resp.json()
 
+    async def tts(self, model: str, input: str, **kwargs) -> bytes:
+        url = f"{self._base_url}/audio/speech"
+        payload: dict = {"model": model, "input": input}
+        if kwargs.get("voice"):
+            payload["voice"] = kwargs["voice"]
+        if kwargs.get("response_format"):
+            payload["response_format"] = kwargs["response_format"]
+        if kwargs.get("speed"):
+            payload["speed"] = kwargs["speed"]
+        resp = await self._client.post(url, headers=self._build_headers(), json=payload, timeout=120.0)
+        resp.raise_for_status()
+        return resp.content
+
+    async def stt(self, model: str, audio_data: bytes, **kwargs) -> dict:
+        url = f"{self._base_url}/audio/transcriptions"
+        filename = kwargs.get("filename", "audio.wav")
+        files = {"file": (filename, audio_data, "application/octet-stream")}
+        data = {"model": model}
+        if kwargs.get("language"):
+            data["language"] = kwargs["language"]
+        if kwargs.get("response_format"):
+            data["response_format"] = kwargs["response_format"]
+        headers = {"Authorization": f"Bearer {self._api_key}"}
+        resp = await self._client.post(url, headers=headers, files=files, data=data, timeout=120.0)
+        resp.raise_for_status()
+        return resp.json()
+
     async def list_models(self) -> list[str]:
         """拉取厂商模型列表。网络或认证错误时抛出异常（不再静默返回空列表）。"""
         url = f"{self._base_url}/models"

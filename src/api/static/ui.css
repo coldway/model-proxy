@@ -305,6 +305,16 @@ input::placeholder { color: var(--text-muted); }
     color: #a855f7;
     border-color: rgba(168, 85, 247, 0.3);
 }
+.model-type-select[data-type="tts"] {
+    background-color: rgba(236, 72, 153, 0.12);
+    color: #ec4899;
+    border-color: rgba(236, 72, 153, 0.3);
+}
+.model-type-select[data-type="stt"] {
+    background-color: rgba(244, 114, 182, 0.12);
+    color: #f472b6;
+    border-color: rgba(244, 114, 182, 0.3);
+}
 .model-type-select:hover {
     filter: brightness(1.15);
     border-color: currentColor;

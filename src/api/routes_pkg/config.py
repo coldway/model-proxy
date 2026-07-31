@@ -98,8 +98,8 @@ async def update_priority(provider: str, model_name: str, priority: int):
 
 @router.post("/api/config/model/type", summary="更新模型类型")
 async def update_model_type(provider: str, model_name: str, model_type: str):
-    """更新模型类型：chat / embedding / rerank / image / video / audio"""
-    valid_types = ("chat", "embedding", "rerank", "image", "video", "audio")
+    """更新模型类型：chat / embedding / rerank / image / video / audio / tts / stt"""
+    valid_types = ("chat", "embedding", "rerank", "image", "video", "audio", "tts", "stt")
     if model_type not in valid_types:
         raise HTTPException(status_code=400, detail=f"无效的 model_type: {model_type}，可选值: {', '.join(valid_types)}")
     _deps.config_manager.update_model_type(provider, model_name, model_type)

@@ -73,6 +73,14 @@ class BaseProvider(ABC):
         """重排序（子类按需覆盖）"""
         raise NotImplementedError(f"{self.__class__.__name__} 不支持 Rerank")
 
+    async def tts(self, model: str, input: str, **kwargs) -> bytes:
+        """文本转语音，返回音频二进制数据（子类按需覆盖）"""
+        raise NotImplementedError(f"{self.__class__.__name__} 不支持 TTS")
+
+    async def stt(self, model: str, audio_data: bytes, **kwargs) -> dict:
+        """语音转文本（子类按需覆盖）"""
+        raise NotImplementedError(f"{self.__class__.__name__} 不支持 STT")
+
     @abstractmethod
     async def list_models(self) -> list[str]:
         """列出该厂商支持的模型"""

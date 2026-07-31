@@ -778,8 +778,11 @@ GET /v1/videos/{task_id}?provider_id=agnes</pre>
                 添加任何 OpenAI 兼容的 API 服务。系统将根据模型类型自动拼接端点：<br>
                 Chat → <code>/chat/completions</code>　
                 Embedding → <code>/embeddings</code>　
+                Rerank → <code>/rerank</code><br>
                 Image → <code>/images/generations</code>　
-                Video → <code>/videos</code>
+                Video → <code>/videos</code>　
+                TTS → <code>/audio/speech</code>　
+                STT → <code>/audio/transcriptions</code>
             </p>
             <div class="form-group">
                 <label>厂商 ID <span style="color:var(--text-muted);font-weight:normal">（小写字母/数字/下划线，2-31位）</span></label>

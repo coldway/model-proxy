@@ -499,7 +499,7 @@ async function loadProviderModels(providerId) {
                     <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
                         <span style="font-weight:600;font-size:0.9rem">${m.name || m.id}</span>
                         <select class="model-type-select" data-type="${m.type||m.model_type||'chat'}" onchange="event.stopPropagation();this.dataset.type=this.value;autoResizeSelect(this);updateModelType('${providerId}','${m.id}',this.value)" title="模型类型（决定使用哪个 API 接口）">
-                            ${['chat','embedding','rerank','image','video','audio'].map(t => `<option value="${t}" ${(m.type||m.model_type||'chat')===t?'selected':''}>${t}</option>`).join('')}
+                            ${['chat','embedding','rerank','image','video','audio','tts','stt'].map(t => `<option value="${t}" ${(m.type||m.model_type||'chat')===t?'selected':''}>${t}</option>`).join('')}
                         </select>
                         ${noCap}
                     </div>

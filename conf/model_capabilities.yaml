@@ -5250,3 +5250,43 @@ rapid_mlx/mlx-community/Kokoro-82M-bf16:
   available: false
   error: unavailable (503)
   tested_at: '2026-07-27 11:29:21'
+sensenova/sensenova-6.7-flash-lite:
+  available: true
+  chinese: true
+  tested_at: '2026-07-30 17:45:13'
+openrouter/nvidia/llama-nemotron-embed-vl-1b-v2:free:
+  provider: openrouter
+  model: nvidia/llama-nemotron-embed-vl-1b-v2:free
+  available: true
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: null
+  tc_note: 'bad_request (400): Client error ''400 Bad Request'' for url ''https://openrouter.ai/api/v1/chat/comple'
+  tc_prompt_error: Client error '400 Bad Request' for url 'https://openrouter.ai/api/v1/chat/comple
+  vision_error: not_supported
+  stream_error: Client error '400 Bad Request' for url 'https://openrouter.a
+  tested_at: '2026-07-30 20:41:55'
+openrouter/nvidia/llama-nemotron-rerank-vl-1b-v2:free:
+  provider: openrouter
+  model: nvidia/llama-nemotron-rerank-vl-1b-v2:free
+  available: false
+  tool_calling: false
+  tc_method: null
+  multi_turn_tc: false
+  chinese: false
+  vision: false
+  json_mode: false
+  streaming: false
+  reasoning: false
+  latency_ms: 0
+  error: 'Client error ''404 Not Found'' for url ''https://openrouter.ai/api/v1/chat/completions''
+
+    For more information check: https:/'
+  tested_at: '2026-07-30 20:42:45'

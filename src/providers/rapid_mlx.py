@@ -307,6 +307,21 @@ class RapidMLXProvider(BaseProvider):
         return [m["id"] for m in models if "id" in m]
 
     # ------------------------------------------------------------------
+    # Embeddings
+    # ------------------------------------------------------------------
+
+    async def embeddings(self, model: str, input: str | list[str], **kwargs) -> dict:
+        base_url = self._resolve_base_url(model)
+        url = f"{base_url}/v1/embeddings"
+        payload: dict = {"model": model, "input": input}
+        if kwargs.get("encoding_format"):
+            payload["encoding_format"] = kwargs["encoding_format"]
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(url, json=payload)
+        resp.raise_for_status()
+        return resp.json()
+
+    # ------------------------------------------------------------------
     # 健康检查
     # ------------------------------------------------------------------
 

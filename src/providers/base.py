@@ -54,6 +54,10 @@ class BaseProvider(ABC):
         """查询视频任务状态（子类按需覆盖）"""
         raise NotImplementedError(f"{self.__class__.__name__} 不支持视频状态查询")
 
+    async def embeddings(self, model: str, input: str | list[str], **kwargs) -> dict:
+        """向量化文本（子类按需覆盖）"""
+        raise NotImplementedError(f"{self.__class__.__name__} 不支持 Embedding")
+
     @abstractmethod
     async def list_models(self) -> list[str]:
         """列出该厂商支持的模型"""

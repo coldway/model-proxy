@@ -57,6 +57,7 @@ async def list_models():
                 priority=m.priority,
                 rate_limit=m.rate_limit,
                 tool_calling=bool(merged.get("tool_calling", m.tool_calling)),
+                model_type=m.model_type,
                 capabilities=caps,
             ))
     return ModelListResponse(models=models)
@@ -110,6 +111,7 @@ async def list_provider_models(provider_id: str):
             enabled=m.enabled,
             priority=m.priority,
             tool_calling=bool(cap.get("tool_calling", m.tool_calling)),
+            model_type=m.model_type,
             rate_limit=m.rate_limit,
             capabilities=cap,
         ))

@@ -134,6 +134,7 @@ class ConfigManager:
             rate_limit=rl,
             tool_calling=model_data.get("tool_calling", False),
             timeout=model_data.get("timeout", 0) or default_timeout,
+            model_type=model_data.get("type", "chat"),
         )
 
     @property
@@ -205,6 +206,11 @@ class ConfigManager:
     def update_model_priority(self, provider: str, model_name: str, priority: int) -> None:
         if self._catalog:
             self._catalog.set_model_priority(provider, model_name, priority)
+
+    def update_model_type(self, provider: str, model_name: str, model_type: str) -> None:
+        if self._catalog:
+            self._catalog.set_model_type(provider, model_name, model_type)
+            self.invalidate_enabled_models_cache()
 
     def add_model(self, provider: str, model: ModelConfig) -> None:
         if self._catalog:

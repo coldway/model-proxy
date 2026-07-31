@@ -85,6 +85,16 @@ async def update_priority(provider: str, model_name: str, priority: int):
     return {"status": "ok"}
 
 
+@router.post("/api/config/model/type", summary="更新模型类型")
+async def update_model_type(provider: str, model_name: str, model_type: str):
+    """更新模型类型：chat / embedding / image / video / audio"""
+    valid_types = ("chat", "embedding", "image", "video", "audio")
+    if model_type not in valid_types:
+        raise HTTPException(status_code=400, detail=f"无效的 model_type: {model_type}，可选值: {', '.join(valid_types)}")
+    _deps.config_manager.update_model_type(provider, model_name, model_type)
+    return {"status": "ok", "message": f"{model_name} 类型已更新为 {model_type}"}
+
+
 @router.post("/api/config/reload", summary="热重载配置")
 async def reload_config():
     """热重载配置（重新读取 catalog 和 config.yaml，无需重启服务）"""

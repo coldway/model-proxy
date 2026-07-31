@@ -326,6 +326,19 @@ class OllamaProvider(BaseProvider):
         self._tags_cache_time = 0
 
     # ------------------------------------------------------------------
+    # Embeddings（OpenAI 兼容 API: /v1/embeddings）
+    # ------------------------------------------------------------------
+
+    async def embeddings(self, model: str, input: str | list[str], **kwargs) -> dict:
+        url = f"{self._base_url}/v1/embeddings"
+        payload: dict = {"model": model, "input": input}
+        if kwargs.get("encoding_format"):
+            payload["encoding_format"] = kwargs["encoding_format"]
+        resp = await self._client.post(url, json=payload, timeout=60.0)
+        resp.raise_for_status()
+        return resp.json()
+
+    # ------------------------------------------------------------------
     # 健康检查
     # ------------------------------------------------------------------
 

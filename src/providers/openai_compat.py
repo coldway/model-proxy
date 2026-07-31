@@ -169,6 +169,17 @@ class OpenAICompatibleProvider(BaseProvider):
         resp.raise_for_status()
         return resp.json()
 
+    async def embeddings(self, model: str, input: str | list[str], **kwargs) -> dict:
+        url = f"{self._base_url}/embeddings"
+        payload: dict = {"model": model, "input": input}
+        if kwargs.get("encoding_format"):
+            payload["encoding_format"] = kwargs["encoding_format"]
+        if kwargs.get("dimensions"):
+            payload["dimensions"] = kwargs["dimensions"]
+        resp = await self._client.post(url, headers=self._build_headers(), json=payload, timeout=60.0)
+        resp.raise_for_status()
+        return resp.json()
+
     async def list_models(self) -> list[str]:
         """拉取厂商模型列表。网络或认证错误时抛出异常（不再静默返回空列表）。"""
         url = f"{self._base_url}/models"

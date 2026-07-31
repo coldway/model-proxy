@@ -370,6 +370,7 @@ providers:
       default_rpd: 0
       default_rpm: 0
       category: 通用
+      type: embedding
       enabled: true
       priority: 5
       tool_calling: false
@@ -677,134 +678,7 @@ providers:
     url: https://maas.xfyun.cn/
     description: 讯飞星辰 MaaS 平台，提供星火 X2、DeepSeek、GLM、Qwen 等多系列模型（付费，OpenAI 兼容接口）
     api_key_guide: https://maas.xfyun.cn/ 注册后在 API Key 管理页面创建。推理服务 base_url 为 https://maas-api.cn-huabei-1.xf-yun.com/v2
-    models:
-    - id: xsparkx2
-      name: Spark X2
-      description: 星火自研旗舰模型，192K 上下文
-      category: 通用
-      tool_calling: false
-      chinese: true
-      streaming: true
-    - id: xsparkx2flash
-      name: Spark X2 Flash
-      description: 星火自研轻量模型，256K 上下文，性价比高
-      category: 通用
-      tool_calling: false
-      chinese: true
-      streaming: true
-    - id: xopdeepseekv4pro
-      name: DeepSeek V4 Pro
-      description: DeepSeek V4 Pro，1M 上下文
-      category: 通用
-      tool_calling: false
-      chinese: true
-      streaming: true
-    - id: xopdeepseekv4flash
-      name: DeepSeek V4 Flash
-      description: DeepSeek V4 Flash，1M 上下文，轻量高效
-      category: 通用
-      tool_calling: false
-      chinese: true
-      streaming: true
-    - id: xopdeepseekv32
-      name: DeepSeek V3.2
-      description: DeepSeek V3.2，128K 上下文，支持 Function Calling
-      category: 通用
-      tool_calling: true
-      chinese: true
-      streaming: true
-      json_mode: true
-    - id: xopglm51
-      name: GLM 5.1
-      description: GLM 5.1，200K 上下文
-      category: 通用
-      tool_calling: false
-      chinese: true
-      streaming: true
-      enabled: false
-      priority: 10
-    - id: xopglm5
-      name: GLM 5
-      description: GLM 5，200K 上下文
-      category: 通用
-      tool_calling: false
-      chinese: true
-      streaming: true
-      enabled: false
-      priority: 11
-    - id: xopglmv47flash
-      name: GLM 4.7 Flash
-      description: GLM 4.7 Flash，128K 上下文，轻量快速，支持 Function Calling
-      category: 通用
-      tool_calling: true
-      chinese: true
-      streaming: true
-      enabled: false
-      priority: 12
-    - id: xopkimik26
-      name: Kimi K2.6
-      description: Kimi K2.6，256K 上下文，多模态输入
-      category: 通用
-      tool_calling: false
-      chinese: true
-      streaming: true
-      vision: true
-      enabled: false
-      priority: 13
-    - id: xopkimik25
-      name: Kimi K2.5
-      description: Kimi K2.5，128K 上下文
-      category: 通用
-      tool_calling: false
-      chinese: true
-      streaming: true
-      enabled: false
-      priority: 14
-    - id: xminimaxm25
-      name: MiniMax M2.5
-      description: MiniMax M2.5，128K 上下文
-      category: 通用
-      tool_calling: false
-      chinese: true
-      streaming: true
-      enabled: false
-      priority: 15
-    - id: xopqwen35397b
-      name: Qwen 3.5 397B A17B
-      description: Qwen 3.5 MoE，256K 上下文
-      category: 通用
-      tool_calling: false
-      chinese: true
-      streaming: true
-      enabled: false
-      priority: 16
-    - id: xopqwen36v35b
-      name: Qwen 3.6 35B A3B
-      description: Qwen 3.6 轻量 MoE，128K 上下文
-      category: 通用
-      tool_calling: true
-      chinese: true
-      streaming: true
-      enabled: true
-      priority: 1
-    - id: xopqwen35v35b
-      name: Qwen 3.5 35B A3B
-      description: Qwen 3.5 轻量 MoE，128K 上下文，性价比极高
-      category: 通用
-      tool_calling: true
-      chinese: true
-      streaming: true
-      enabled: true
-      priority: 2
-    - id: xop3qwencodernext
-      name: Qwen3 Coder Next
-      description: Qwen3 代码专精模型，256K 上下文
-      category: 代码
-      tool_calling: false
-      chinese: true
-      streaming: true
-      enabled: false
-      priority: 19
+    models: []
   agnes:
     name: Agnes AI
     type: openai_compat
@@ -826,12 +700,26 @@ providers:
       streaming: true
       enabled: true
       priority: 1
+      type: chat
+    - id: agnes-2.5-flash
+      name: Agnes 2.5 Flash
+      description: 升级版旗舰文本模型，续写和指令遵循能力增强
+      default_rpd: 0
+      default_rpm: 60
+      category: 通用
+      tool_calling: false
+      chinese: true
+      streaming: true
+      enabled: true
+      priority: 2
+      type: chat
     - id: agnes-image-2.1-flash
       name: Agnes Image 2.1 Flash
       description: 图像生成模型，支持文生图/图生图/编辑（通过 /v1/images/generations 端点调用）
       default_rpd: 0
       default_rpm: 30
       category: 图像
+      type: image
       tool_calling: false
       chinese: true
       streaming: false
@@ -843,6 +731,7 @@ providers:
       default_rpd: 0
       default_rpm: 10
       category: 视频
+      type: video
       tool_calling: false
       chinese: true
       streaming: false
@@ -853,7 +742,8 @@ providers:
       description: ''
       default_rpd: 0
       default_rpm: 0
-      category: 通用
+      category: 图像
+      type: image
       enabled: true
       priority: 12
       tool_calling: false
@@ -924,7 +814,7 @@ providers:
     name: 商汤日日新 (SenseNova)
     type: openai_compat
     base_url: https://token.sensenova.cn/v1
-    enabled: true
+    enabled: false
     priority: 2
     billing_type: free
     url: https://platform.sensenova.cn/
@@ -991,11 +881,13 @@ providers:
       name: mlx-community/embeddinggemma-300m-8bit
       description: Rapid-MLX | rapid-mlx
       category: 本地
+      type: embedding
       tool_calling: false
     - id: mlx-community/Kokoro-82M-bf16
       name: mlx-community/Kokoro-82M-bf16
       description: Rapid-MLX | rapid-mlx
       category: 本地
+      type: audio
       tool_calling: false
       enabled: true
       priority: 10
@@ -1025,6 +917,7 @@ providers:
       name: nomic-embed-text:latest
       description: 137M | nomic-bert | F16 | 0.3GB
       category: 本地
+      type: embedding
       tool_calling: false
       enabled: true
       priority: 50

@@ -31,6 +31,10 @@ class ModelConfig(BaseModel):
     rate_limit: RateLimit | None = None
     tool_calling: bool = False
     timeout: int = Field(default=0, description="请求超时时间（秒），0 表示使用 settings.default_model_timeout")
+    model_type: str = Field(
+        default="chat",
+        description="模型类型：chat（对话）、embedding（向量化）、image（图像生成）、video（视频生成）、audio（语音合成/识别）",
+    )
 
 
 class ProviderConfig(BaseModel):
@@ -179,13 +183,6 @@ class ChatCompletionRequest(BaseModel):
         description="会话标识：首次请求成功后自动绑定模型,后续携带相同 session_id 的请求将路由到同一模型",
     )
 
-    model_type: str | None = Field(
-        default=None,
-        description="模型类型路由（可选显式覆盖）：image（图像生成）、video（视频生成），不传时根据 model 名称自动检测。"
-                    "若 model 名含 image/imagen/dall-e/flux 自动走图像生成；"
-                    "含 video/runway/kling/pika/sora 自动走视频生成；其余走文字模型。"
-                    "显式传入 model_type 优先于自动检测。",
-    )
     mode: str | None = Field(
         default=None,
         description="执行模式（仅 Cursor provider）：plan（规划模式，只读）、ask（问答模式，只读）、agent（默认，全权限）",
@@ -286,6 +283,7 @@ class ModelInfo(BaseModel):
     priority: int
     rate_limit: RateLimit | None = None
     tool_calling: bool = False
+    model_type: str = Field(default="chat", description="模型类型：chat/embedding/image/video/audio")
     capabilities: ModelCapabilities = Field(default_factory=ModelCapabilities)
 
 
@@ -342,6 +340,7 @@ class ModelDetail(BaseModel):
     enabled: bool
     priority: int
     tool_calling: bool = False
+    model_type: str = Field(default="chat", description="模型类型：chat/embedding/image/video/audio")
     rate_limit: RateLimit | None = None
     capabilities: dict[str, Any] = Field(default_factory=dict, description="已检测的能力信息")
 
@@ -400,4 +399,32 @@ class VideoStatusResponse(BaseModel):
     status: str = Field(description="任务状态")
     video_url: str | None = Field(default=None, description="完成后的视频下载 URL")
     error: str | None = Field(default=None, description="失败原因")
+    proxy_info: ProxyInfo | None = None
+
+
+# --- 向量化 ---
+
+class EmbeddingRequest(BaseModel):
+    model: str = Field(description="Embedding 模型 ID，如 nomic-embed-text:latest")
+    input: str | list[str] = Field(description="待向量化的文本或文本列表")
+    encoding_format: str = Field(default="float", description="输出格式: float 或 base64")
+    dimensions: int | None = Field(default=None, description="输出向量维度（部分模型支持）")
+
+
+class EmbeddingData(BaseModel):
+    object: str = "embedding"
+    embedding: list[float] | str = Field(description="向量数据（float 列表或 base64）")
+    index: int = Field(description="输入文本索引")
+
+
+class EmbeddingUsage(BaseModel):
+    prompt_tokens: int = 0
+    total_tokens: int = 0
+
+
+class EmbeddingResponse(BaseModel):
+    object: str = "list"
+    data: list[EmbeddingData] = Field(description="向量结果列表")
+    model: str = Field(description="实际使用的模型")
+    usage: EmbeddingUsage = Field(default_factory=EmbeddingUsage)
     proxy_info: ProxyInfo | None = None

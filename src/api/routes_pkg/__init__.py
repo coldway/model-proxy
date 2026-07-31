@@ -16,6 +16,7 @@ from src.api.routes_pkg import (
     chat_sessions,
     config,
     cursor,
+    embeddings,
     health,
     history,
     images,
@@ -35,6 +36,7 @@ v1_router.include_router(anthropic_messages.router)
 v1_router.include_router(images.router)
 v1_router.include_router(videos.router)
 v1_router.include_router(audio.router)
+v1_router.include_router(embeddings.router)
 
 # 管理路由：统一在 /mp 前缀下，简化反向代理配置
 mp_router = APIRouter(prefix="/mp")

@@ -204,6 +204,13 @@ class CatalogManager:
                 self.save()
                 return
 
+    def set_model_type(self, provider_id: str, model_id: str, model_type: str) -> None:
+        for model in self.get_models(provider_id):
+            if model["id"] == model_id:
+                model["type"] = model_type
+                self.save()
+                return
+
     def activate_model(self, provider_id: str, model_id: str, priority: int = 99) -> bool:
         """从目录中启用一个模型（设置 enabled=true 和 priority）"""
         for model in self.get_models(provider_id):

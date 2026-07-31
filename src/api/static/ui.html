@@ -311,10 +311,14 @@
                         <table class="intg-table">
                             <tr><td class="intg-label">Base URL</td><td><code class="intg-code" id="intg-base-url"></code> <button class="btn btn-ghost" style="padding:1px 6px;font-size:0.65rem" onclick="copyText(document.getElementById('intg-base-url').textContent)">复制</button></td></tr>
                             <tr><td class="intg-label">API Key</td><td><code class="intg-code">任意值（如 "unused"）</code></td></tr>
-                            <tr><td class="intg-label">核心接口</td><td><code class="intg-code">POST /v1/chat/completions</code></td></tr>
+                            <tr><td class="intg-label">Chat</td><td><code class="intg-code">POST /v1/chat/completions</code> — 文本对话（流式/非流式）</td></tr>
+                            <tr><td class="intg-label">Embedding</td><td><code class="intg-code">POST /v1/embeddings</code> — 文本向量化</td></tr>
+                            <tr><td class="intg-label">Image</td><td><code class="intg-code">POST /v1/images/generations</code> — 图像生成</td></tr>
+                            <tr><td class="intg-label">Video</td><td><code class="intg-code">POST /v1/videos</code> — 视频生成（异步）</td></tr>
+                            <tr><td class="intg-label">Audio</td><td><code class="intg-code">POST /v1/audio/speech</code> — 语音合成 (TTS)</td></tr>
                             <tr><td class="intg-label">模型列表</td><td><code class="intg-code">GET /v1/models</code></td></tr>
                             <tr><td class="intg-label">使用量</td><td><code class="intg-code">GET /v1/usage</code></td></tr>
-                            <tr><td class="intg-label">协议</td><td>完全兼容 OpenAI Chat Completions API，支持流式 (SSE) 和非流式</td></tr>
+                            <tr><td class="intg-label">协议</td><td>完全兼容 OpenAI API 标准，各模型类型走对应标准接口</td></tr>
                         </table>
                     </section>
 
@@ -408,6 +412,57 @@
                             <tr><td class="intg-label"><code class="intg-code">session_id</code></td><td>传入的会话 ID（未传入时不返回此字段）</td></tr>
                             <tr><td class="intg-label"><code class="intg-code">bound_model</code></td><td>当前 session_id 绑定的模型，格式 <code class="intg-code">provider:model</code>（未绑定时不返回）</td></tr>
                         </table>
+                    </section>
+
+                    <section class="intg-section">
+                        <h4 class="intg-title">多模态 API</h4>
+                        <p style="font-size:.82rem;color:var(--text-muted);margin-bottom:8px">
+                            各模型类型使用独立的标准接口，无需通过 chat 接口中转。
+                        </p>
+                        <div class="intg-code-block">
+                            <div class="intg-code-header"><span>POST /v1/embeddings — 文本向量化</span></div>
+                            <pre class="intg-pre">{
+  "model": "nomic-embed-text:latest",
+  "input": "hello world"
+}
+
+// 或批量：
+{
+  "model": "nomic-embed-text:latest",
+  "input": ["text 1", "text 2", "text 3"]
+}</pre>
+                        </div>
+                        <div class="intg-code-block" style="margin-top:12px">
+                            <div class="intg-code-header"><span>POST /v1/images/generations — 图像生成</span></div>
+                            <pre class="intg-pre">{
+  "model": "agnes-image-2.1-flash",
+  "prompt": "a cat sitting on a cloud",
+  "size": "1024x1024",
+  "n": 1
+}</pre>
+                        </div>
+                        <div class="intg-code-block" style="margin-top:12px">
+                            <div class="intg-code-header"><span>POST /v1/videos — 视频生成（异步）</span></div>
+                            <pre class="intg-pre">// 创建任务
+POST /v1/videos
+{
+  "model": "agnes-video-v2.0",
+  "prompt": "a cat running on the beach",
+  "num_frames": 121
+}
+// → 返回 {"id": "task_xxx", "status": "queued", "provider_id": "agnes"}
+
+// 轮询状态
+GET /v1/videos/{task_id}?provider_id=agnes</pre>
+                        </div>
+                        <div class="intg-code-block" style="margin-top:12px">
+                            <div class="intg-code-header"><span>POST /v1/audio/speech — 语音合成 (TTS)</span></div>
+                            <pre class="intg-pre">{
+  "model": "kokoro",
+  "input": "你好世界",
+  "voice": "af_heart"
+}</pre>
+                        </div>
                     </section>
 
                     <section class="intg-section">

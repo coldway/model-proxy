@@ -498,6 +498,9 @@ async function loadProviderModels(providerId) {
                 <div style="flex:1;min-width:0">
                     <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
                         <span style="font-weight:600;font-size:0.9rem">${m.name || m.id}</span>
+                        <select style="font-size:0.6rem;padding:1px 4px;border-radius:3px;border:1px solid var(--border);background:${(() => { const t = m.type || m.model_type || 'chat'; return {image:'#e8f5e9',video:'#e3f2fd',embedding:'#fff3e0',audio:'#fce4ec',chat:'var(--bg-secondary)'}[t]||'var(--bg-secondary)'; })()};color:${(() => { const t = m.type || m.model_type || 'chat'; return {image:'#2e7d32',video:'#1565c0',embedding:'#e65100',audio:'#c62828',chat:'var(--text-muted)'}[t]||'var(--text-muted)'; })()};cursor:pointer" onchange="event.stopPropagation();updateModelType('${providerId}','${m.id}',this.value)" title="模型类型（决定使用哪个 API 接口）">
+                            ${['chat','embedding','image','video','audio'].map(t => `<option value="${t}" ${(m.type||m.model_type||'chat')===t?'selected':''}>${t}</option>`).join('')}
+                        </select>
                         ${noCap}
                     </div>
                     ${capBadgesHtml}
@@ -709,6 +712,16 @@ async function toggleModelAndReload(providerId, modelId, enabled) {
     }
     loadProviderModels(providerId);
     loadProviderCards();
+}
+
+async function updateModelType(providerId, modelId, modelType) {
+    try {
+        await apiFetch(API + `/api/config/model/type?provider=${providerId}&model_name=${encodeURIComponent(modelId)}&model_type=${modelType}`, {method:'POST'});
+        toast(`${modelId} 类型已更新为 ${modelType}`, 'success');
+        loadProviderModels(providerId);
+    } catch (e) {
+        toast(`更新类型失败: ${e.message}`, 'error');
+    }
 }
 
 // 兼容旧调用
@@ -2132,7 +2145,22 @@ stream = client.chat.completions.create(
 )
 for chunk in stream:
     if chunk.choices[0].delta.content:
-print(chunk.choices[0].delta.content, end="")`;
+print(chunk.choices[0].delta.content, end="")
+
+# Embedding 向量化
+embeddings = client.embeddings.create(
+    model="nomic-embed-text:latest",
+    input="hello world",
+)
+print(f"向量维度: {len(embeddings.data[0].embedding)}")
+
+# 图像生成
+image = client.images.generate(
+    model="agnes-image-2.1-flash",
+    prompt="a cat on a cloud",
+    size="1024x1024",
+)
+print(image.data[0].url)`;
 
     document.getElementById('intg-curl-code').textContent =
 `# 非流式
@@ -2154,6 +2182,25 @@ curl ${baseUrl}/chat/completions \\
     "messages": [{"role": "user", "content": "你好"}],
     "stream": true,
     "session_id": "my-task-001"
+  }'
+
+# Embedding 向量化
+curl ${baseUrl}/embeddings \\
+  -H "Content-Type: application/json" \\
+  -H "Authorization: Bearer unused" \\
+  -d '{
+    "model": "nomic-embed-text:latest",
+    "input": "hello world"
+  }'
+
+# 图像生成
+curl ${baseUrl}/images/generations \\
+  -H "Content-Type: application/json" \\
+  -H "Authorization: Bearer unused" \\
+  -d '{
+    "model": "agnes-image-2.1-flash",
+    "prompt": "a cat on a cloud",
+    "size": "1024x1024"
   }'`;
 
     document.getElementById('intg-js-code').textContent =

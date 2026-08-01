@@ -93,8 +93,10 @@ class Dispatcher(
         session_bind_ttl: int = 3600,
         route_llm_timeout: int = 10,
         max_concurrent_requests: int = 50,
+        default_provider: str = "",
     ):
         self._rate_limiter = rate_limiter
+        self._default_provider = (default_provider or "").strip()
         self._providers: dict[str, "BaseProvider"] = {}
         self._capability_cache: CapabilityCache | None = capability_cache
         self._catalog: CatalogManager | None = catalog
@@ -228,7 +230,45 @@ class Dispatcher(
 
         if request.model and request.model != "auto":
             return await self._dispatch_specific(request, enabled_models, trace_id)
+        pinned = await self._try_default_provider_auto(request, enabled_models, trace_id)
+        if pinned is not None:
+            return pinned
         return await self._dispatch_auto(request, enabled_models, trace_id)
+
+    async def _try_default_provider_auto(
+        self,
+        request: ChatCompletionRequest,
+        enabled_models: list[tuple[str, ModelConfig]],
+        trace_id: str,
+    ) -> tuple[str, str, ChatCompletionResponse] | None:
+        """model=auto 且配置了 default_provider 时，优先使用该厂商的 auto 模型（如 cursor CLI）。"""
+        if request.model != "auto" or not self._default_provider:
+            return None
+        dp = self._default_provider
+        for provider_name, model_cfg in enabled_models:
+            if provider_name != dp or model_cfg.name != "auto":
+                continue
+            if self._breaker.is_open(provider_name, model_cfg.name):
+                logger.info("默认厂商 %s:auto 处于熔断，降级到全局 auto 路由", dp)
+                return None
+            rlim = self._unpack_rate_limit(model_cfg)
+            rpd, rpm, tpm, tpd = rlim
+            if not self._rate_limiter.can_request(provider_name, model_cfg.name, rpd, rpm, tpm, tpd):
+                logger.info("默认厂商 %s:auto 已达速率限制，降级到全局 auto 路由", dp)
+                return None
+            try:
+                result = await self._call_provider(
+                    provider_name, model_cfg.name, request,
+                    timeout=model_cfg.timeout, trace_id=trace_id, session_id=request.session_id or "",
+                    rate_limits=rlim,
+                )
+                _route_strategy_var.set(f"默认厂商 {dp}:auto")
+                logger.info("默认厂商路由: %s:auto", dp)
+                return provider_name, model_cfg.name, result
+            except Exception as e:
+                logger.warning("默认厂商 %s:auto 调用失败: %s，降级到全局 auto 路由", dp, e)
+                return None
+        return None
 
     async def _dispatch_specific(
         self,

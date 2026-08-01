@@ -127,6 +127,7 @@ def create_app() -> FastAPI:
         breaker_threshold=settings.breaker_threshold,
         breaker_cooldown=settings.breaker_cooldown,
         session_bind_ttl=settings.session_bind_ttl,
+        default_provider=settings.default_provider,
     )
 
     # 注册各厂商 Provider（根据 API Key 是否存在决定是否注册）

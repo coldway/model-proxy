@@ -73,6 +73,26 @@ class StreamingMixin:
                 self.bind_session(request.session_id, result[0], result[1])
             return result
 
+        if self._default_provider:
+            dp = self._default_provider
+            for prov_name, model_cfg in enabled_models:
+                if prov_name != dp or model_cfg.name != "auto":
+                    continue
+                if self._breaker.is_open(prov_name, model_cfg.name):
+                    break
+                rpd, rpm, tpm, tpd = self._unpack_rate_limit(model_cfg)
+                if not self._rate_limiter.can_request(prov_name, model_cfg.name, rpd, rpm, tpm, tpd):
+                    break
+                try:
+                    _get_route_strategy_var().set(f"默认厂商 {dp}:auto")
+                    result = await self._try_stream(prov_name, model_cfg, request, trace_id=trace_id)
+                    if request.session_id:
+                        self.bind_session(request.session_id, result[0], result[1])
+                    return result
+                except Exception as e:
+                    logger.warning("流式默认厂商 %s:auto 调用失败: %s，降级到全局 auto 路由", dp, e)
+                    break
+
         _payload_bytes = estimate_payload_bytes(request)
         available = self._filter_available(enabled_models, _payload_bytes)
         if not available:

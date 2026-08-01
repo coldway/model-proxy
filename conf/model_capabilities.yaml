@@ -5148,6 +5148,21 @@ agnes/agnes-2.0-flash:
   stream_ttfb_ms: 7584
   reasoning_response: 开一灯久后关，开二灯亮，摸三灯热。
   tested_at: '2026-07-14 12:55:13'
+agnes/agnes-2.5-flash:
+  provider: agnes
+  model: agnes-2.5-flash
+  available: true
+  tool_calling: true
+  tc_method: native
+  multi_turn_tc: true
+  chinese: true
+  vision: true
+  json_mode: true
+  streaming: true
+  reasoning: true
+  latency_ms: 5000
+  error: null
+  tested_at: '2026-08-01 11:00:00'
 agnes/agnes-image-2.1-flash:
   provider: agnes
   model: agnes-image-2.1-flash
@@ -5243,3 +5258,7 @@ openrouter/nvidia/llama-nemotron-rerank-vl-1b-v2:free:
 
     For more information check: https:/'
   tested_at: '2026-07-30 20:42:45'
+sensenova/deepseek-v4-flash:
+  available: true
+  chinese: true
+  tested_at: '2026-08-01 11:51:06'

@@ -2,7 +2,7 @@ providers:
   google:
     name: Google AI Studio
     enabled: false
-    priority: 9
+    priority: 10
     url: https://aistudio.google.com/
     description: Google 提供的免费 Gemini 系列模型
     api_key_guide: https://aistudio.google.com/apikey
@@ -108,7 +108,7 @@ providers:
   groq:
     name: Groq
     enabled: false
-    priority: 10
+    priority: 11
     url: https://console.groq.com/
     description: Groq 提供的高速推理服务
     api_key_guide: https://console.groq.com/keys
@@ -239,7 +239,7 @@ providers:
     type: openai_compat
     base_url: https://api.sambanova.ai/v1
     enabled: false
-    priority: 7
+    priority: 8
     url: https://cloud.sambanova.ai/
     description: SambaNova Cloud 免费推理，速度极快，支持 Llama/DeepSeek 等大模型
     api_key_guide: https://cloud.sambanova.ai/ 注册后在 API 页面获取 Key，兼容 OpenAI 格式
@@ -277,7 +277,7 @@ providers:
   github:
     name: GitHub Models
     enabled: false
-    priority: 11
+    priority: 12
     url: https://github.com/marketplace/models
     description: GitHub 模型市场，使用 GitHub Token 调用
     api_key_guide: Settings > Developer settings > Personal access tokens
@@ -575,7 +575,7 @@ providers:
     type: openai_compat
     base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
     enabled: false
-    priority: 8
+    priority: 9
     billing_type: paid
     url: https://bailian.console.aliyun.com/
     description: 阿里云百炼平台，提供通义千问系列模型（OpenAI 兼容接口）
@@ -673,7 +673,7 @@ providers:
     type: openai_compat
     base_url: https://maas-api.cn-huabei-1.xf-yun.com/v2
     enabled: false
-    priority: 5
+    priority: 6
     billing_type: paid
     url: https://maas.xfyun.cn/
     description: 讯飞星辰 MaaS 平台，提供星火 X2、DeepSeek、GLM、Qwen 等多系列模型（付费，OpenAI 兼容接口）
@@ -745,8 +745,8 @@ providers:
       priority: 13
   cursor:
     name: Cursor Agent CLI
-    enabled: false
-    priority: 12
+    enabled: true
+    priority: 4
     url: https://www.cursor.com/
     description: 通过 Cursor CLI 调用模型。全量测试（111 个）后仅 auto / composer-2.5 确认可用
     api_key_guide: '安装 Cursor CLI 并登录即可使用（无需 API Key）
@@ -802,10 +802,14 @@ providers:
       default_rpd: 0
       default_rpm: 0
       category: 代码
-      enabled: false
-      priority: 2
       tool_calling: true
       timeout: 300
+    - id: composer-2.5-fast
+      name: composer-2.5-fast
+      description: ''
+      default_rpd: 0
+      default_rpm: 0
+      category: 通用
   sensenova:
     name: 商汤日日新 (SenseNova)
     type: openai_compat
@@ -852,6 +856,7 @@ providers:
       streaming: true
       enabled: true
       priority: 3
+      type: image
     - id: glm-5.2
       name: glm-5.2
       description: ''
@@ -863,7 +868,7 @@ providers:
   rapid_mlx:
     name: Rapid-MLX 本地推理
     enabled: false
-    priority: 4
+    priority: 5
     url: https://rapidmlx.com/
     description: Apple Silicon 高性能本地推理（无需 API Key，模型自动发现）
     api_key_guide: 无需 API Key，启动 rapid-mlx serve 即可
@@ -890,7 +895,7 @@ providers:
   ollama:
     name: Ollama 本地模型
     enabled: false
-    priority: 6
+    priority: 7
     url: https://ollama.com/
     description: 本地运行的开源模型（无需 API Key，模型自动发现）
     api_key_guide: 无需 API Key

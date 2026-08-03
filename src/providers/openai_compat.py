@@ -62,6 +62,11 @@ class OpenAICompatibleProvider(BaseProvider):
             payload["tools"] = [t.model_dump() for t in request.tools]
         if request.tool_choice is not None:
             payload["tool_choice"] = request.tool_choice
+        if request.response_format:
+            rf: dict = {"type": request.response_format.type}
+            if request.response_format.type == "json_schema" and request.response_format.json_schema:
+                rf["json_schema"] = request.response_format.json_schema
+            payload["response_format"] = rf
         return payload
 
     async def chat_completion(
@@ -77,6 +82,16 @@ class OpenAICompatibleProvider(BaseProvider):
         choice = data["choices"][0]
         usage_raw = data.get("usage")
         msg = choice["message"]
+
+        content = msg.get("content")
+        if not content:
+            reasoning = msg.get("reasoning_content") or msg.get("reasoning") or ""
+            if reasoning:
+                logger.warning(
+                    "[%s] content 为空但存在 reasoning_content (%d chars)，使用 reasoning 作为 content",
+                    self._provider_name, len(reasoning),
+                )
+                content = reasoning
 
         usage_info = None
         if usage_raw and (usage_raw.get("prompt_tokens") or usage_raw.get("completion_tokens") or usage_raw.get("total_tokens")):
@@ -95,7 +110,7 @@ class OpenAICompatibleProvider(BaseProvider):
                     index=0,
                     message=ChatMessage(
                         role=msg["role"],
-                        content=msg.get("content"),
+                        content=content,
                         tool_calls=parse_tool_calls(msg.get("tool_calls")),
                     ),
                     finish_reason=choice.get("finish_reason", "stop"),

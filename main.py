@@ -45,6 +45,7 @@ from src.api.ui import get_ui_html
 from src.config.capability_tester import CapabilityCache, CapabilityTester
 from src.config.catalog import CatalogManager
 from src.config.manager import ConfigManager
+from src.config.platform_client import PlatformClient
 from src.providers.cloudflare import CloudflareProvider
 from src.providers.cursor import CursorProvider
 from src.providers.github import GitHubProvider
@@ -97,8 +98,16 @@ except OSError:
 
 
 def create_app() -> FastAPI:
-    catalog = CatalogManager()
-    config_manager = ConfigManager(catalog=catalog)
+    platform_client = PlatformClient.from_env()
+    if platform_client:
+        logger.info(
+            "Config Platform 双读已启用: %s service=%s env=%s",
+            platform_client.base_url,
+            platform_client.service,
+            platform_client.env,
+        )
+    catalog = CatalogManager(platform_client=platform_client)
+    config_manager = ConfigManager(catalog=catalog, platform_client=platform_client)
     settings = config_manager.settings
 
     log_level = getattr(logging, settings.log_level.upper(), logging.INFO)

@@ -15,6 +15,7 @@ from src.models.schemas import AppConfig, AppSettings, ModelConfig, ProviderConf
 
 if TYPE_CHECKING:
     from src.config.catalog import CatalogManager
+    from src.config.platform_client import PlatformClient
 
 logger = logging.getLogger(__name__)
 
@@ -30,9 +31,15 @@ class ConfigManager:
     厂商/模型的启用状态、优先级等由 CatalogManager 管理
     """
 
-    def __init__(self, config_path: Path | None = None, catalog: "CatalogManager | None" = None):
+    def __init__(
+        self,
+        config_path: Path | None = None,
+        catalog: "CatalogManager | None" = None,
+        platform_client: "PlatformClient | None" = None,
+    ):
         self._path = config_path or CONFIG_FILE
         self._catalog = catalog
+        self._platform = platform_client
         self._api_keys: dict[str, str] = {}
         self._key_rotators: dict[str, KeyRotator] = {}
         self._settings = AppSettings()
@@ -49,25 +56,50 @@ class ConfigManager:
         return self._catalog
 
     def _load(self) -> None:
-        if self._path.exists():
+        loaded_from_platform = False
+        if self._platform:
+            remote = self._platform.get_merged("settings")
+            if remote:
+                loaded_from_platform = True
+                self._apply_settings_yaml(remote)
+        if self._path.exists() and not loaded_from_platform:
+            try:
+                with open(self._path, "r", encoding="utf-8") as f:
+                    raw = yaml.safe_load(f) or {}
+                self._apply_settings_yaml(raw)
+            except Exception as e:
+                logger.error("加载配置文件失败: %s，使用默认设置", e)
+        elif self._path.exists() and loaded_from_platform:
+            # Platform 提供 settings，本地 config.yaml 仅补充 Platform 未覆盖的 key
             try:
                 with open(self._path, "r", encoding="utf-8") as f:
                     raw = yaml.safe_load(f) or {}
                 for name, prov_data in raw.get("providers", {}).items():
-                    if isinstance(prov_data, dict):
+                    if name not in self._api_keys and isinstance(prov_data, dict):
                         key_val = prov_data.get("api_key", "") or prov_data.get("api_keys", "")
-                        if isinstance(key_val, list):
-                            keys = [k for k in key_val if k and k.strip()]
-                            self._api_keys[name] = keys[0] if keys else ""
-                            if len(keys) > 1:
-                                self._key_rotators[name] = KeyRotator(name, keys)
-                        else:
-                            self._api_keys[name] = key_val
-                settings_data = raw.get("settings", {})
-                if settings_data:
-                    self._settings = AppSettings(**settings_data)
+                        if key_val:
+                            self._apply_provider_keys(name, key_val)
             except Exception as e:
-                logger.error("加载配置文件失败: %s，使用默认设置", e)
+                logger.warning("本地 config.yaml 补充加载失败: %s", e)
+
+    def _apply_settings_yaml(self, raw: dict[str, Any]) -> None:
+        for name, prov_data in raw.get("providers", {}).items():
+            if isinstance(prov_data, dict):
+                key_val = prov_data.get("api_key", "") or prov_data.get("api_keys", "")
+                if key_val:
+                    self._apply_provider_keys(name, key_val)
+        settings_data = raw.get("settings", {})
+        if settings_data:
+            self._settings = AppSettings(**settings_data)
+
+    def _apply_provider_keys(self, name: str, key_val: Any) -> None:
+        if isinstance(key_val, list):
+            keys = [k for k in key_val if k and str(k).strip()]
+            self._api_keys[name] = keys[0] if keys else ""
+            if len(keys) > 1:
+                self._key_rotators[name] = KeyRotator(name, keys)
+        else:
+            self._api_keys[name] = str(key_val)
 
     def save(self) -> None:
         """仅保存 API Key 和 settings 到 config.yaml"""

@@ -21,14 +21,23 @@ class CatalogManager:
     同时管理目录信息（模型列表、默认限速）和运行时状态（启用、优先级）
     """
 
-    def __init__(self, catalog_path: Path | None = None):
+    def __init__(self, catalog_path: Path | None = None, platform_client: "PlatformClient | None" = None):
         self._path = catalog_path or CATALOG_FILE
+        self._platform = platform_client
         self._data: dict[str, Any] = self._load()
         self._save_timer: threading.Timer | None = None
         self._dirty = False
         self._lock = threading.Lock()
 
     def _load(self) -> dict[str, Any]:
+        if self._platform:
+            remote = self._platform.get_merged("catalog")
+            if remote:
+                try:
+                    self._validate(remote)
+                    return remote
+                except Exception as e:
+                    logger.error("Platform catalog 校验失败，降级本地: %s", e)
         if self._path.exists():
             try:
                 with open(self._path, "r", encoding="utf-8") as f:
@@ -90,6 +99,11 @@ class CatalogManager:
                     raise
                 self._dirty = False
                 logger.info("模型目录已保存至 %s", self._path)
+                if self._platform:
+                    from src.config.platform_client import extract_catalog_runtime
+                    runtime_patch = extract_catalog_runtime(self._data)
+                    if self._platform.patch_runtime("catalog", runtime_patch):
+                        logger.info("catalog runtime 已同步至 Config Platform")
             except Exception as e:
                 logger.warning("保存模型目录失败（将在下次重试）: %s", e)
 

@@ -745,7 +745,7 @@ providers:
       priority: 13
   cursor:
     name: Cursor Agent CLI
-    enabled: true
+    enabled: false
     priority: 4
     url: https://www.cursor.com/
     description: 通过 Cursor CLI 调用模型。全量测试（111 个）后仅 auto / composer-2.5 确认可用
